@@ -216,6 +216,15 @@ pub struct SVMTransactionExecutionCost {
     /// separately so the surcharge stays auditable and reusable by any future
     /// G2-input syscall.
     pub alt_bn128_g2_subgroup_check_cost: u64,
+    /// Base compute units for an alt_bn128 scalar-field inner product.
+    pub alt_bn128_fr_lincomb_base_cost: u64,
+    /// Per-term compute units for an alt_bn128 scalar-field inner product.
+    pub alt_bn128_fr_lincomb_per_term_cost: u64,
+    /// Base compute units for an alt_bn128 scalar-field batch inverse, covering
+    /// the single field inversion the whole batch shares.
+    pub alt_bn128_fr_batch_invert_base_cost: u64,
+    /// Per-term compute units for an alt_bn128 scalar-field batch inverse.
+    pub alt_bn128_fr_batch_invert_per_term_cost: u64,
 }
 
 impl Default for SVMTransactionExecutionCost {
@@ -284,6 +293,16 @@ impl Default for SVMTransactionExecutionCost {
             alt_bn128_pairing_check_base_cost: 11_156,
             alt_bn128_pairing_check_per_pair_cost: 3_195,
             alt_bn128_g2_subgroup_check_cost: 2_398,
+            // Scalar-field syscalls, same bench harness and 33 ns per CU. Both
+            // are linear; per_term is the ceil of the measured per-element CU
+            // slope, base a defensive floor that also covers the one field
+            // inversion batch invert shares. base + per_term * n upper-bounds
+            // measured CU at every grid point n in {1,16,64,256,1024,2048}
+            // (lincomb slope ~1.7 CU, batch invert ~2.1 CU per term).
+            alt_bn128_fr_lincomb_base_cost: 100,
+            alt_bn128_fr_lincomb_per_term_cost: 2,
+            alt_bn128_fr_batch_invert_base_cost: 100,
+            alt_bn128_fr_batch_invert_per_term_cost: 3,
         }
     }
 }

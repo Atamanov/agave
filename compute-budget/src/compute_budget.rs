@@ -150,6 +150,10 @@ pub struct ComputeBudget {
     pub alt_bn128_pairing_check_base_cost: u64,
     pub alt_bn128_pairing_check_per_pair_cost: u64,
     pub alt_bn128_g2_subgroup_check_cost: u64,
+    pub alt_bn128_fr_lincomb_base_cost: u64,
+    pub alt_bn128_fr_lincomb_per_term_cost: u64,
+    pub alt_bn128_fr_batch_invert_base_cost: u64,
+    pub alt_bn128_fr_batch_invert_per_term_cost: u64,
 }
 
 #[cfg(feature = "dev-context-only-utils")]
@@ -239,6 +243,10 @@ impl ComputeBudget {
             alt_bn128_pairing_check_base_cost: cost.alt_bn128_pairing_check_base_cost,
             alt_bn128_pairing_check_per_pair_cost: cost.alt_bn128_pairing_check_per_pair_cost,
             alt_bn128_g2_subgroup_check_cost: cost.alt_bn128_g2_subgroup_check_cost,
+            alt_bn128_fr_lincomb_base_cost: cost.alt_bn128_fr_lincomb_base_cost,
+            alt_bn128_fr_lincomb_per_term_cost: cost.alt_bn128_fr_lincomb_per_term_cost,
+            alt_bn128_fr_batch_invert_base_cost: cost.alt_bn128_fr_batch_invert_base_cost,
+            alt_bn128_fr_batch_invert_per_term_cost: cost.alt_bn128_fr_batch_invert_per_term_cost,
         }
     }
 
@@ -313,6 +321,10 @@ impl ComputeBudget {
             alt_bn128_pairing_check_base_cost: self.alt_bn128_pairing_check_base_cost,
             alt_bn128_pairing_check_per_pair_cost: self.alt_bn128_pairing_check_per_pair_cost,
             alt_bn128_g2_subgroup_check_cost: self.alt_bn128_g2_subgroup_check_cost,
+            alt_bn128_fr_lincomb_base_cost: self.alt_bn128_fr_lincomb_base_cost,
+            alt_bn128_fr_lincomb_per_term_cost: self.alt_bn128_fr_lincomb_per_term_cost,
+            alt_bn128_fr_batch_invert_base_cost: self.alt_bn128_fr_batch_invert_base_cost,
+            alt_bn128_fr_batch_invert_per_term_cost: self.alt_bn128_fr_batch_invert_per_term_cost,
         }
     }
 

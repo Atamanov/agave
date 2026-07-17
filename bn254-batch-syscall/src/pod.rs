@@ -4,6 +4,7 @@ use {
         validation::{AltBn128BatchError, validate_g1, validate_g2},
     },
     ark_bn254::{Fr, G1Affine, G2Affine},
+    ark_ff::PrimeField,
     bytemuck_derive::{Pod, Zeroable},
 };
 
@@ -66,6 +67,20 @@ impl PodG2Point {
 impl PodScalar {
     pub fn to_fr(&self) -> Result<Fr, AltBn128BatchError> {
         parse_fr(&self.0)
+    }
+}
+
+impl From<&Fr> for PodScalar {
+    fn from(scalar: &Fr) -> Self {
+        // serialize the four limbs big-endian in place; no allocation, unlike
+        // into_bigint().to_bytes_be(), so batch_invert stays alloc-free per element
+        let limbs = scalar.into_bigint().0;
+        let mut out = [0u8; SCALAR_BYTES];
+        for (i, limb) in limbs.iter().enumerate() {
+            let start = SCALAR_BYTES - 8 * (i + 1);
+            out[start..start + 8].copy_from_slice(&limb.to_be_bytes());
+        }
+        Self(out)
     }
 }
 

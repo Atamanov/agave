@@ -19,6 +19,7 @@ members = [
     "rust/account_mem_deprecated",
     "rust/alloc",
     "rust/alt_bn128",
+    "rust/alt_bn128_batch",
     "rust/alt_bn128_compression",
     "rust/big_mod_exp",
     "rust/call_args",

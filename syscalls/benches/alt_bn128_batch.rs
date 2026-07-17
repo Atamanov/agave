@@ -12,7 +12,10 @@ use {
     ark_serialize::{CanonicalSerialize, Compress},
     ark_std::rand::{SeedableRng, rngs::StdRng},
     criterion::{BenchmarkId, Criterion, criterion_group, criterion_main},
-    solana_bn254_batch_syscall::{Version, alt_bn128_g1_msm, alt_bn128_pairing_check},
+    solana_bn254_batch_syscall::{
+        Version, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
+        alt_bn128_pairing_check,
+    },
 };
 
 const SEED: u64 = 0xa17b428;
@@ -114,6 +117,81 @@ fn random_g2_affine(pool_size: usize) -> Vec<G2Affine> {
         .collect()
 }
 
+// `pool_size` arrays of `n` BE scalars each. All draws share one rng stream, so
+// a and b arrays for lincomb are distinct.
+fn random_fr_be(rng: &mut StdRng, pool_size: usize, n: usize) -> Vec<Vec<u8>> {
+    (0..pool_size)
+        .map(|_| {
+            let mut v = Vec::with_capacity(n * 32);
+            for _ in 0..n {
+                v.extend_from_slice(&reverse_chunks(&fr_le(Fr::rand(rng)), 32));
+            }
+            v
+        })
+        .collect()
+}
+
+fn bench_fr_lincomb(c: &mut Criterion) {
+    const NS: &[usize] = &[1, 16, 64, 256, 1024, 2048];
+    const POOL: usize = 32;
+
+    let mut group = c.benchmark_group("BN254 Fr lincomb");
+    group.sample_size(20);
+    for &n in NS {
+        let mut r = rng();
+        let a = random_fr_be(&mut r, POOL, n);
+        let b = random_fr_be(&mut r, POOL, n);
+        for (x, y) in a.iter().zip(&b) {
+            alt_bn128_fr_lincomb(
+                Version::V0,
+                bytemuck::cast_slice(x),
+                bytemuck::cast_slice(y),
+            )
+            .expect("valid lincomb fixture");
+        }
+        let mut i = 0usize;
+        group.bench_with_input(BenchmarkId::new("BE", n), &n, |bencher, _| {
+            bencher.iter(|| {
+                let r = alt_bn128_fr_lincomb(
+                    Version::V0,
+                    bytemuck::cast_slice(&a[i]),
+                    bytemuck::cast_slice(&b[i]),
+                )
+                .unwrap();
+                i = (i + 1) % POOL;
+                r
+            })
+        });
+    }
+    group.finish();
+}
+
+fn bench_fr_batch_invert(c: &mut Criterion) {
+    const NS: &[usize] = &[1, 16, 64, 256, 1024, 2048];
+    const POOL: usize = 32;
+
+    let mut group = c.benchmark_group("BN254 Fr batch invert");
+    group.sample_size(20);
+    for &n in NS {
+        let mut r = rng();
+        let a = random_fr_be(&mut r, POOL, n);
+        for x in &a {
+            alt_bn128_fr_batch_invert(Version::V0, bytemuck::cast_slice(x))
+                .expect("valid batch-invert fixture");
+        }
+        let mut i = 0usize;
+        group.bench_with_input(BenchmarkId::new("BE", n), &n, |bencher, _| {
+            bencher.iter(|| {
+                let r =
+                    alt_bn128_fr_batch_invert(Version::V0, bytemuck::cast_slice(&a[i])).unwrap();
+                i = (i + 1) % POOL;
+                r
+            })
+        });
+    }
+    group.finish();
+}
+
 fn bench_g1_msm(c: &mut Criterion) {
     // 12 sizes, one per log2 bucket over the 1..=2048 cap
     const NS: &[usize] = &[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
@@ -198,5 +276,7 @@ criterion_group!(
     bench_g1_msm,
     bench_pairing_check,
     bench_g2_subgroup_check,
+    bench_fr_lincomb,
+    bench_fr_batch_invert,
 );
 criterion_main!(benches);
