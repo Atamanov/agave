@@ -1,0 +1,242 @@
+use {
+    crate::{verify::Proof, vk::ValidatedVerifyingKey},
+    ark_bn254::Fr,
+    ark_ff::One,
+    solana_keccak_hasher::{Hasher, hashv},
+};
+
+/// How the per-equation randomizers derive from the seed. `Independent` gives
+/// a per-equation batch soundness error of 2^-128 with no dependence on the
+/// batch size; `Powers` derives all N from one draw at (N-1) * 2^-128.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RandomizerMode {
+    Independent,
+    Powers,
+}
+
+impl RandomizerMode {
+    // versioned ASCII constant carrying the protocol name, the transcript
+    // version, and the randomizer mode; distinct per scheme and deployment
+    pub(crate) fn domain_tag(self) -> &'static [u8] {
+        match self {
+            RandomizerMode::Independent => b"solana-bn254-groth16-batch:v1:independent",
+            RandomizerMode::Powers => b"solana-bn254-groth16-batch:v1:powers",
+        }
+    }
+}
+
+/// The Fiat-Shamir seed over the frozen batch: everything the verdict depends
+/// on is hashed, in canonical bytes, with fixed-width framing. The per-record
+/// key index does double duty: it binds each proof to its
+/// circuit and it fixes the record layout, since whether `com`/`pok` are
+/// present is a function of the named key.
+pub(crate) fn derive_seed(
+    mode: RandomizerMode,
+    vks: &[ValidatedVerifyingKey],
+    proofs: &[Proof],
+) -> [u8; 32] {
+    // callers must bound the key list first (validate_batch_shape), or the u16
+    // count prefix truncates and stops framing the digest list
+    debug_assert!(vks.len() <= usize::from(u16::MAX));
+    let mut hasher = Hasher::default();
+    hasher.hash(mode.domain_tag());
+    hasher.hash(&(vks.len() as u16).to_be_bytes());
+    for vk in vks {
+        hasher.hash(vk.digest());
+    }
+    hasher.hash(&(proofs.len() as u64).to_be_bytes());
+    for proof in proofs {
+        hasher.hash(&proof.vk_index.to_be_bytes());
+        hasher.hash(&proof.a.0);
+        hasher.hash(&proof.b.0);
+        hasher.hash(&proof.c.0);
+        if let Some(commitment) = &proof.commitment {
+            hasher.hash(&commitment.com.0);
+            hasher.hash(&commitment.pok.0);
+        }
+        for input in &proof.public_inputs {
+            hasher.hash(&input.0);
+        }
+    }
+    hasher.result().to_bytes()
+}
+
+/// r_k = 1 + lo128(keccak256(seed || be64(k))): uniform on [1, 2^128], exactly
+/// 2^128 values, no zero and no bias. k is 1-based and runs over verification
+/// equations in proof order, the Groth16 equation before the PoK within a
+/// committed proof. In `Powers` mode the k-th randomizer is r^k of the single
+/// k = 1 draw.
+pub(crate) fn derive_randomizers(
+    seed: &[u8; 32],
+    num_equations: u64,
+    mode: RandomizerMode,
+) -> Vec<Fr> {
+    let draw = |k: u64| -> Fr {
+        let digest = hashv(&[seed, &k.to_be_bytes()]).to_bytes();
+        let mut lo = [0u8; 16];
+        lo.copy_from_slice(&digest[16..]);
+        Fr::from(u128::from_be_bytes(lo)) + Fr::one()
+    };
+    match mode {
+        RandomizerMode::Independent => (1..=num_equations).map(draw).collect(),
+        RandomizerMode::Powers => {
+            let r = draw(1);
+            let mut power = Fr::one();
+            (0..num_equations)
+                .map(|_| {
+                    power *= r;
+                    power
+                })
+                .collect()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::test_utils::{make_proof, make_vk, rng},
+        ark_ff::{BigInteger, PrimeField, UniformRand, Zero},
+    };
+
+    fn setup() -> (Vec<ValidatedVerifyingKey>, Vec<Proof>) {
+        let mut rng = rng();
+        let (key, vk) = make_vk(&mut rng, 1, false);
+        let (committed_key, committed_vk) = make_vk(&mut rng, 1, true);
+        let x0 = Fr::rand(&mut rng);
+        let x1 = Fr::rand(&mut rng);
+        let proofs = vec![
+            make_proof(&mut rng, &key, 0, &[x0]),
+            make_proof(&mut rng, &committed_key, 1, &[x1]),
+        ];
+        (vec![vk, committed_vk], proofs)
+    }
+
+    #[test]
+    fn test_seed_binds_every_byte_the_verdict_depends_on() {
+        // the weak-Fiat-Shamir class: any omitted input
+        // would let an adversary grind it after learning the challenge, so
+        // flipping any byte anywhere must change the seed
+        let (vks, proofs) = setup();
+        let baseline = derive_seed(RandomizerMode::Independent, &vks, &proofs);
+
+        let mut mutated = proofs.clone();
+        mutated[0].a.0[10] ^= 1;
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &mutated)
+        );
+
+        let mut mutated = proofs.clone();
+        mutated[1].b.0[100] ^= 1;
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &mutated)
+        );
+
+        let mut mutated = proofs.clone();
+        mutated[0].c.0[0] ^= 1;
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &mutated)
+        );
+
+        let mut mutated = proofs.clone();
+        mutated[1].commitment.as_mut().unwrap().com.0[5] ^= 1;
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &mutated)
+        );
+
+        let mut mutated = proofs.clone();
+        mutated[1].commitment.as_mut().unwrap().pok.0[5] ^= 1;
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &mutated)
+        );
+
+        // the statement: grinding the public input is the other half of that class
+        let mut mutated = proofs.clone();
+        mutated[0].public_inputs[0].0[31] ^= 1;
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &mutated)
+        );
+
+        // the key index: without it a mixed batch has no record framing
+        let mut mutated = proofs.clone();
+        mutated[0].vk_index = 1;
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &mutated)
+        );
+
+        // order and count
+        let mut mutated = proofs.clone();
+        mutated.swap(0, 1);
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &mutated)
+        );
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &vks, &proofs[..1])
+        );
+
+        // the verifying keys, via their digests (skip the seeded rng's first
+        // key, which is bit-identical to vks[0])
+        let mut rng = rng();
+        let _ = make_vk(&mut rng, 1, false);
+        let (_, other_vk) = make_vk(&mut rng, 1, false);
+        let mutated_vks = vec![other_vk, vks[1].clone()];
+        assert_ne!(
+            baseline,
+            derive_seed(RandomizerMode::Independent, &mutated_vks, &proofs)
+        );
+
+        // the domain tag: cross-mode replay is cross-context replay
+        assert_ne!(baseline, derive_seed(RandomizerMode::Powers, &vks, &proofs));
+    }
+
+    #[test]
+    fn test_randomizers_are_the_128_bit_draw_plus_one() {
+        // pins the derivation byte-for-byte: r_k - 1 must equal the low 16
+        // bytes of keccak256(seed || be64(k)), so r_k is uniform on
+        // [1, 2^128] with no zero
+        let (vks, proofs) = setup();
+        let seed = derive_seed(RandomizerMode::Independent, &vks, &proofs);
+        let randomizers = derive_randomizers(&seed, 3, RandomizerMode::Independent);
+        assert_eq!(randomizers.len(), 3);
+        for (i, r) in randomizers.iter().enumerate() {
+            assert!(!r.is_zero());
+            let k = (i + 1) as u64;
+            let digest = hashv(&[&seed, &k.to_be_bytes()]).to_bytes();
+            let minus_one = (*r - Fr::one()).into_bigint().to_bytes_be();
+            assert_eq!(&minus_one[16..], &digest[16..], "k = {k}");
+            assert_eq!(&minus_one[..16], &[0u8; 16], "high bytes must be zero");
+        }
+    }
+
+    #[test]
+    fn test_powers_mode_is_powers_of_the_first_draw() {
+        let (vks, proofs) = setup();
+        let seed = derive_seed(RandomizerMode::Powers, &vks, &proofs);
+        let randomizers = derive_randomizers(&seed, 4, RandomizerMode::Powers);
+        let r = randomizers[0];
+        assert_eq!(randomizers[1], r * r);
+        assert_eq!(randomizers[2], r * r * r);
+        assert_eq!(randomizers[3], r * r * r * r);
+    }
+
+    #[test]
+    fn test_domain_tags_are_versioned_and_distinct() {
+        let independent = RandomizerMode::Independent.domain_tag();
+        let powers = RandomizerMode::Powers.domain_tag();
+        assert_ne!(independent, powers);
+        for tag in [independent, powers] {
+            let tag = core::str::from_utf8(tag).unwrap();
+            assert!(tag.contains(":v1:"), "tag must carry a version: {tag}");
+        }
+    }
+}
