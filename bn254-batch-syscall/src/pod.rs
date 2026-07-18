@@ -163,6 +163,30 @@ mod tests {
     }
 
     #[test]
+    fn test_arkworks_conversions_round_trip() {
+        // the arkworks conversion methods are the source contract the verifier
+        // crates build on; generator and a scalar round-trip through the wire
+        use {
+            crate::test_utils::{g2_bytes, random_g2},
+            ark_bn254::Fr,
+            ark_ec::AffineRepr,
+        };
+        let g1 = ark_bn254::G1Affine::generator();
+        let g2 = ark_bn254::G2Affine::generator();
+        let scalar = Fr::from(0xdead_beefu64);
+        assert_eq!(PodG1Point::from(&g1).to_affine(), Ok(g1));
+        assert_eq!(PodG2Point(g2_bytes(&g2)).to_affine(), Ok(g2));
+        let mut rng = rng();
+        let point = random_g2(&mut rng);
+        assert_eq!(PodG2Point(g2_bytes(&point)).to_affine(), Ok(point));
+        assert_eq!(PodScalar::from(&scalar).to_fr(), Ok(scalar));
+        assert_eq!(
+            PodScalar([0xff; 32]).to_fr(),
+            Err(AltBn128BatchError::NonCanonical)
+        );
+    }
+
+    #[test]
     fn test_pairing_result_word() {
         assert_eq!(PodPairingResult::from_verdict(false).0, [0u8; 32]);
         let mut one = [0u8; 32];
@@ -170,5 +194,11 @@ mod tests {
         assert_eq!(PodPairingResult::from_verdict(true).0, one);
         assert!(PodPairingResult::from_verdict(true).verdict());
         assert!(!PodPairingResult::from_verdict(false).verdict());
+        // only byte 31 decides the verdict, whatever the other bytes hold
+        let mut malformed = PodPairingResult([0xff; 32]);
+        malformed.0[31] = 0;
+        assert!(!malformed.verdict());
+        malformed.0[31] = 1;
+        assert!(malformed.verdict());
     }
 }

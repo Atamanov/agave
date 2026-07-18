@@ -2,12 +2,14 @@
 #![allow(clippy::arithmetic_side_effects)]
 
 //! Seeded differential battery: every public op against an arkworks generic
-//! oracle, across every internal dispatch boundary (Strauss band ends, walk
-//! K-bands, Miller chunk width, inversion chain splits) and the scalar
-//! representation edges 0, 1, r-1, 2^64, 2^128. The fingerprint test pins
-//! wire behavior against the committed golden constant; this battery pins
-//! the same behavior against independently computed values, so a porting
-//! bug shows up as a named op and size instead of a hash mismatch.
+//! oracle, across every internal dispatch boundary of the helios backend
+//! (joint-wNAF msm arms capped at 2/4/8/16/32/48/64/80, the Pippenger entry
+//! above 80, the shared-G2 pairing fold versus the heterogeneous multi
+//! Miller path) and the scalar representation edges 0, 1, r-1, 2^64, 2^128.
+//! The fingerprint test pins wire behavior against the committed golden
+//! constant; this battery pins the same behavior against independently
+//! computed values, so a porting bug shows up as a named op and size
+//! instead of a hash mismatch.
 
 use {
     ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G1Projective, G2Affine, G2Projective},
@@ -20,15 +22,16 @@ use {
     },
 };
 
-/// Every size class the msm dispatch distinguishes: band ends 1/2, the
-/// internal K-band boundaries 16/17, the band top 64, the Pippenger entry
-/// 65, and deep Pippenger sizes up to the cap.
-const MSM_SIZES: [usize; 17] = [
-    1, 2, 3, 7, 8, 15, 16, 17, 31, 32, 63, 64, 65, 96, 256, 1024, 2048,
+/// Every size class the helios msm dispatch distinguishes: one size inside
+/// each joint-wNAF arm (caps 2/4/8/16/32/48/64/80) including the exact caps
+/// and both sides of every boundary, the Pippenger entry at 81, and deep
+/// Pippenger sizes up to the cap.
+const MSM_SIZES: [usize; 23] = [
+    1, 2, 3, 4, 7, 8, 15, 16, 17, 31, 32, 33, 48, 49, 63, 64, 65, 80, 81, 96, 256, 1024, 2048,
 ];
 
 /// Scalar representation edges: identity, unit, r-1, and both limb
-/// boundaries the GLV split and wNAF walk fold.
+/// boundaries the backend's wNAF recoding folds.
 fn edge_scalars() -> [Fr; 5] {
     [
         Fr::zero(),
@@ -147,9 +150,10 @@ fn telescoping_pairs(rng: &mut StdRng, n: usize) -> Vec<PodG1G2Pair> {
 #[test]
 fn test_pairing_verdict_matches_multi_pairing() {
     let mut rng = rng(0xd1ff_0003);
-    // telescoping accepts across the Miller chunk boundary; a sign flip
-    // must flip the verdict, matching the multi_pairing oracle either way
-    for n in [2usize, 3, 31, 32, 33] {
+    // shared-G2 telescoping accepts ride the bilinearity fold, including at
+    // the full cap; a sign flip must flip the verdict, matching the
+    // multi_pairing oracle either way
+    for n in [2usize, 3, 31, 32, 33, 256] {
         let pairs = telescoping_pairs(&mut rng, n);
         assert_eq!(
             alt_bn128_pairing_check(Version::V0, &pairs),
@@ -170,6 +174,43 @@ fn test_pairing_verdict_matches_multi_pairing() {
             alt_bn128_pairing_check(Version::V0, &flipped),
             Ok(expected),
             "flipped n = {n}"
+        );
+    }
+}
+
+#[test]
+fn test_pairing_fold_boundary_shapes() {
+    // shapes that steer the backend between its shared-G2 bilinearity fold
+    // and the heterogeneous multi Miller path: duplicate pairs (the fold's
+    // doubling branch), duplicate G2s interleaved with a distinct Q (the
+    // dedup cache hits non-adjacently), and a Q mismatch arriving late in
+    // an otherwise shared-Q run (the fold scan aborts mid-list); the
+    // multi_pairing oracle decides every verdict
+    let mut rng = rng(0xd1ff_0007);
+    let q_shared = (G2Projective::generator() * Fr::rand(&mut rng)).into_affine();
+    let q_other = (G2Projective::generator() * Fr::rand(&mut rng)).into_affine();
+    let p = (G1Projective::generator() * Fr::rand(&mut rng)).into_affine();
+    let dup = pod_pair(&p, &q_shared);
+    let shapes: [Vec<PodG1G2Pair>; 3] = [
+        vec![dup, dup, dup],
+        vec![
+            dup,
+            pod_pair(&p, &q_other),
+            dup,
+            pod_pair(&(-p).into_group().into_affine(), &q_other),
+        ],
+        vec![dup, dup, dup, pod_pair(&p, &q_other)],
+    ];
+    for (i, pairs) in shapes.iter().enumerate() {
+        let (g1s, g2s): (Vec<_>, Vec<_>) = pairs
+            .iter()
+            .map(|p| (p.g1.to_affine().unwrap(), p.g2.to_affine().unwrap()))
+            .unzip();
+        let expected = Bn254::multi_pairing(g1s, g2s).0.is_one();
+        assert_eq!(
+            alt_bn128_pairing_check(Version::V0, pairs),
+            Ok(expected),
+            "shape {i}"
         );
     }
 }

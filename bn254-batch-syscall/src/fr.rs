@@ -4,7 +4,7 @@
 //! the const-asserts in `pod`), so forwarding adds no copy or conversion.
 
 use {
-    crate::{Version, pod::PodScalar, validation::AltBn128BatchError},
+    crate::{Version, backend_version, pod::PodScalar, validation::AltBn128BatchError},
     helios_bn254 as backend,
 };
 
@@ -16,13 +16,13 @@ use {
 /// type, so a malformed byte length faults at the syscall boundary, not here.
 /// `a` and `b` may alias.
 pub fn alt_bn128_fr_lincomb(
-    _version: Version,
+    version: Version,
     a: &[PodScalar],
     b: &[PodScalar],
 ) -> Result<PodScalar, AltBn128BatchError> {
     let a = bytemuck::cast_slice::<_, backend::PodScalar>(a);
     let b = bytemuck::cast_slice::<_, backend::PodScalar>(b);
-    backend::alt_bn128_fr_lincomb(backend::Version::V0, a, b)
+    backend::alt_bn128_fr_lincomb(backend_version(version), a, b)
         .map_err(AltBn128BatchError::from)
         .map(|scalar| PodScalar(scalar.0))
 }
@@ -34,11 +34,11 @@ pub fn alt_bn128_fr_lincomb(
 /// parsed and checked before any inversion, so the output is written only when
 /// the whole input is valid.
 pub fn alt_bn128_fr_batch_invert(
-    _version: Version,
+    version: Version,
     a: &[PodScalar],
 ) -> Result<Vec<PodScalar>, AltBn128BatchError> {
     let a = bytemuck::cast_slice::<_, backend::PodScalar>(a);
-    backend::alt_bn128_fr_batch_invert(backend::Version::V0, a)
+    backend::alt_bn128_fr_batch_invert(backend_version(version), a)
         .map_err(AltBn128BatchError::from)
         .map(bytemuck::allocation::cast_vec)
 }
@@ -203,6 +203,20 @@ mod tests {
             let mut a = [good, good].concat();
             a[slot * SCALAR_BYTES..(slot + 1) * SCALAR_BYTES].copy_from_slice(&[0xffu8; 32]);
             assert_eq!(batch_invert(&a), Err(AltBn128BatchError::NonCanonical));
+        }
+    }
+
+    #[test]
+    fn test_batch_invert_then_lincomb_is_one() {
+        // cross-op identity: <a_i, a_i^-1> for a single element is exactly 1
+        let mut rng = rng();
+        let a: Vec<Fr> = (0..3).map(|_| Fr::rand(&mut rng)).collect();
+        let inverses = batch_invert(&concat(&a)).unwrap();
+        for (value, inverse) in a.iter().zip(inverses) {
+            assert_eq!(
+                lincomb(&fr_bytes(value), &inverse).unwrap(),
+                fr_bytes(&Fr::one())
+            );
         }
     }
 

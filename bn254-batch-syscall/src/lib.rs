@@ -25,6 +25,13 @@ pub enum Version {
     V0,
 }
 
+// exhaustive so a new wire version forces an explicit backend decision
+pub(crate) fn backend_version(version: Version) -> helios_bn254::Version {
+    match version {
+        Version::V0 => helios_bn254::Version::V0,
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test_utils {
     use {

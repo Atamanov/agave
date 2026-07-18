@@ -78,6 +78,57 @@ mod tests {
     };
 
     #[test]
+    fn test_error_surface_is_stable() {
+        // crate users match on variants and log the messages; both are frozen
+        fn assert_error<T: std::error::Error>() {}
+        assert_error::<AltBn128BatchError>();
+        let expected = [
+            (
+                AltBn128BatchError::InvalidLength,
+                "input length is not a whole number of elements",
+            ),
+            (
+                AltBn128BatchError::NonCanonical,
+                "field element encoding is not canonical (>= modulus)",
+            ),
+            (AltBn128BatchError::NotOnCurve, "point is not on the curve"),
+            (
+                AltBn128BatchError::NotInSubgroup,
+                "G2 point is not in the r-order subgroup",
+            ),
+            (AltBn128BatchError::ZeroInput, "input is empty"),
+            (
+                AltBn128BatchError::CapExceeded,
+                "input exceeds the per-call cap",
+            ),
+            (
+                AltBn128BatchError::LengthMismatch,
+                "points and scalars disagree in count",
+            ),
+        ];
+        for (error, message) in expected {
+            assert_eq!(error.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn test_backend_error_mapping_is_identity_by_name() {
+        use helios_bn254::AltBn128BatchError as Backend;
+        let mapped = [
+            (Backend::InvalidLength, AltBn128BatchError::InvalidLength),
+            (Backend::NonCanonical, AltBn128BatchError::NonCanonical),
+            (Backend::NotOnCurve, AltBn128BatchError::NotOnCurve),
+            (Backend::NotInSubgroup, AltBn128BatchError::NotInSubgroup),
+            (Backend::ZeroInput, AltBn128BatchError::ZeroInput),
+            (Backend::CapExceeded, AltBn128BatchError::CapExceeded),
+            (Backend::LengthMismatch, AltBn128BatchError::LengthMismatch),
+        ];
+        for (backend, ours) in mapped {
+            assert_eq!(AltBn128BatchError::from(backend), ours);
+        }
+    }
+
+    #[test]
     fn test_validate_g1() {
         let mut rng = rng();
         assert_eq!(validate_g1(&G1Affine::zero()), Ok(()));

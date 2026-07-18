@@ -5,7 +5,7 @@
 
 use {
     crate::{
-        Version,
+        Version, backend_version,
         pod::{PodG1Point, PodScalar},
         validation::AltBn128BatchError,
     },
@@ -20,13 +20,13 @@ use {
 /// all-zeros. Element widths are fixed by the pod types, so a malformed length
 /// cannot reach here; it faults at the syscall boundary instead.
 pub fn alt_bn128_g1_msm(
-    _version: Version,
+    version: Version,
     points: &[PodG1Point],
     scalars: &[PodScalar],
 ) -> Result<PodG1Point, AltBn128BatchError> {
     let points = bytemuck::cast_slice::<_, backend::PodG1Point>(points);
     let scalars = bytemuck::cast_slice::<_, backend::PodScalar>(scalars);
-    backend::alt_bn128_g1_msm(backend::Version::V0, points, scalars)
+    backend::alt_bn128_g1_msm(backend_version(version), points, scalars)
         .map_err(AltBn128BatchError::from)
         .map(|point| PodG1Point(point.0))
 }

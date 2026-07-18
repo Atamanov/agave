@@ -4,7 +4,7 @@
 //! the const-asserts in `pod`), so forwarding adds no copy or conversion.
 
 use {
-    crate::{Version, pod::PodG1G2Pair, validation::AltBn128BatchError},
+    crate::{Version, backend_version, pod::PodG1G2Pair, validation::AltBn128BatchError},
     helios_bn254 as backend,
 };
 
@@ -21,11 +21,12 @@ use {
 /// direction. Pair width is fixed by the type, so a malformed length faults at
 /// the syscall boundary, never here.
 pub fn alt_bn128_pairing_check(
-    _version: Version,
+    version: Version,
     pairs: &[PodG1G2Pair],
 ) -> Result<bool, AltBn128BatchError> {
     let pairs = bytemuck::cast_slice::<_, backend::PodG1G2Pair>(pairs);
-    backend::alt_bn128_pairing_check(backend::Version::V0, pairs).map_err(AltBn128BatchError::from)
+    backend::alt_bn128_pairing_check(backend_version(version), pairs)
+        .map_err(AltBn128BatchError::from)
 }
 
 #[cfg(test)]
