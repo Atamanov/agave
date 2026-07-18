@@ -29,8 +29,12 @@ pub(crate) struct InnerChallenges {
 
 /// Running-state Fiat-Shamir transcript: absorbing sets
 /// state = keccak256(state || bytes); squeezing maps
-/// keccak256(state || phase_tag) to Fr via from_be_bytes_mod_order, whose
-/// mod-r bias is below 2^-125 and irrelevant here. Phase tags are distinct
+/// keccak256(state || phase_tag) to Fr via from_be_bytes_mod_order. The mod-r
+/// reduction of a 256-bit digest is not uniform (floor(2^256 / r) = 5, so
+/// some residues are hit six times), but every challenge value has
+/// probability at most 6 / 2^256 < 2^-253, which degrades Fiat-Shamir
+/// soundness by at most that constant factor; snarkjs and gnark rely on the
+/// same argument. Phase tags are distinct
 /// ASCII bytes so two challenges squeezed from one state (beta, gamma)
 /// differ. Every absorbed element is canonical bytes: proof validation runs
 /// before any hashing, so one semantic value has one byte string.

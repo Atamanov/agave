@@ -219,7 +219,7 @@ mod tests {
     use {
         super::*,
         crate::{
-            test_support::{Trapdoor, g1_bytes, make_proof, make_vk, rng},
+            test_support::{Trapdoor, g1_bytes, make_proof, make_vk, make_vk_without_inputs, rng},
             transcript::RandomizerMode::Independent,
         },
         ark_bn254::{Bn254, Fq, G1Projective},
@@ -238,6 +238,23 @@ mod tests {
             .map(|_| make_proof(&trapdoor, Fr::rand(rng), Fr::rand(rng)))
             .collect();
         (trapdoor, vk, proofs)
+    }
+
+    #[test]
+    fn test_zero_input_statement_verifies() {
+        // the input-free edge: PI is identically zero, the
+        // lagrange machinery still runs for L1, and a batch mixing sizes
+        // exercises the pi = 0 branch end to end
+        let mut rng = rng();
+        let (trapdoor, vk) = make_vk_without_inputs(&mut rng);
+        assert_eq!(vk.key().num_public_inputs, 0);
+        for n in [1usize, 3] {
+            let proofs: Vec<Proof> = (0..n)
+                .map(|_| make_proof(&trapdoor, Fr::rand(&mut rng), Fr::rand(&mut rng)))
+                .collect();
+            assert!(proofs.iter().all(|p| p.public_inputs.is_empty()));
+            assert_eq!(verify(&vk, &proofs), Ok(true), "n = {n}");
+        }
     }
 
     fn parse_g1(point: &PodG1Point) -> G1Affine {

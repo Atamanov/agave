@@ -2,12 +2,15 @@
 //! basis shared by the whole batch (never points), so the batch flattens into
 //! exactly two G1 MSMs in verify.rs.
 //!
-//! Convention (current eprint 2019/953 verifier, rounds 5-12): the gate
-//! identity on H is q_m a b + q_l a + q_r b + q_o c + q_c + PI(X) = 0 with
-//! PI(X) = sum_i w_i L_i(X), so PI(zeta) enters r0 with a plus sign and a
-//! public-input row carries q_l = -1. Ground truth for the signs is twofold:
-//! the honest fixture prover must verify, and the n = 1 batch must match an
-//! independent arkworks computation of e(P, [tau]_2) e(-Q, [1]_2) = 1.
+//! Convention (PLONK verifier rounds 5-12, the convention snarkjs and gnark
+//! follow): the gate identity on H is
+//! q_m a b + q_l a + q_r b + q_o c + q_c + PI(X) = 0 with
+//! PI(X) = -sum_i w_i L_i(X), so a public-input row carries q_l = 1 and
+//! PI(zeta) enters r0. L_1 is anchored at omega^0 = 1, a deliberate deviation
+//! from the standard omega anchoring that matches snarkjs; the fixture prover,
+//! its grand product, and the PI rows all share that anchor. The signs are
+//! fixed two ways: the fixture prover must verify, and the n = 1 batch must
+//! match an independent arkworks computation of e(P, [tau]_2) e(-Q, [1]_2) = 1.
 
 use {
     crate::{
@@ -117,13 +120,14 @@ pub(crate) fn reduce(
     }
     let l1 = lagrange[0];
 
-    // round 7: PI(zeta) = <w, L(zeta)>, the natural fr_lincomb fit; an
-    // input-free statement has PI = 0 (the lincomb syscall rejects empty)
+    // round 7: PI(zeta) = -<w, L(zeta)> per this convention, with the
+    // inner product the natural fr_lincomb fit; an input-free statement has
+    // PI = 0 (the lincomb syscall rejects empty)
     let pi = if proof.public_inputs.is_empty() {
         Fr::zero()
     } else {
         let lagrange_pods: Vec<PodScalar> = lagrange.iter().map(PodScalar::from).collect();
-        alt_bn128_fr_lincomb(
+        -alt_bn128_fr_lincomb(
             solana_bn254_batch_syscall::Version::V0,
             &proof.public_inputs,
             &lagrange_pods,

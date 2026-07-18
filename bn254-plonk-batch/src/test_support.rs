@@ -176,14 +176,17 @@ fn interpolate(evals: &[Fr], omega: Fr) -> Vec<Fr> {
 
 /// Trapdoor SRS plus the toy circuit in polynomial form. The circuit proves
 /// knowledge of x, y with public input p = x*y + x over domain n = 8, under
-/// the gate identity q_m a b + q_l a + q_r b + q_o c + q_c + PI(X) = 0 on H:
-///   row 0: -a + PI = 0 (public input exposure, q_l = -1, a0 = p)
+/// the gate identity q_m a b + q_l a + q_r b + q_o c + q_c + PI(X) = 0 on H
+/// with PI(X) = -sum_i w_i L_i(X) (the standard sign, matching snarkjs):
+///   row 0: a + PI = 0 (public input exposure, q_l = 1; PI(1) = -p so a0 = p)
 ///   row 1: a b - c = 0 (q_m = 1, q_o = -1; a = x, b = y, c = x y)
 ///   row 2: a + b - c = 0 (q_l = q_r = 1, q_o = -1; a = x y, b = x, c = p)
 ///   row 3: c - 1 = 0 (q_o = 1, q_c = -1; keeps [q_c] off infinity)
 ///   rows 4..7: no-op
 /// Copy constraints a0 = c2, a1 = b2, c1 = a2 wire the product and the sum
 /// together; sigma permutes the coset labels X, k1 X, k2 X accordingly.
+/// The zero-input variant blanks row 0's selector: a0 is then constrained
+/// only by its copy to c2 and the statement moves entirely into the witness.
 pub struct Trapdoor {
     pub tau: Fr,
     pub omega: Fr,
@@ -201,6 +204,15 @@ pub struct Trapdoor {
 }
 
 pub fn make_vk(rng: &mut StdRng) -> (Trapdoor, ValidatedVerifyingKey) {
+    make_vk_impl(rng, true)
+}
+
+/// The zero-input circuit variant: no public-input row, PI identically zero.
+pub fn make_vk_without_inputs(rng: &mut StdRng) -> (Trapdoor, ValidatedVerifyingKey) {
+    make_vk_impl(rng, false)
+}
+
+fn make_vk_impl(rng: &mut StdRng, with_input: bool) -> (Trapdoor, ValidatedVerifyingKey) {
     let tau = Fr::rand(rng);
     let omega = Fr::get_root_of_unity(DOMAIN_SIZE).unwrap();
     // 2 and 3 shift H into disjoint cosets: 2^8, 3^8, and (3/2)^8 are all
@@ -212,7 +224,9 @@ pub fn make_vk(rng: &mut StdRng) -> (Trapdoor, ValidatedVerifyingKey) {
     let mut q_m_evals = zero;
     q_m_evals[1] = Fr::one();
     let mut q_l_evals = zero;
-    q_l_evals[0] = -Fr::one();
+    if with_input {
+        q_l_evals[0] = Fr::one();
+    }
     q_l_evals[2] = Fr::one();
     let mut q_r_evals = zero;
     q_r_evals[2] = Fr::one();
@@ -257,7 +271,7 @@ pub fn make_vk(rng: &mut StdRng) -> (Trapdoor, ValidatedVerifyingKey) {
     let commit = |poly: &[Fr]| g1_bytes(&g1(poly_eval(poly, tau)));
     let vk = VerifyingKey {
         domain_size: DOMAIN_SIZE,
-        num_public_inputs: 1,
+        num_public_inputs: u32::from(with_input),
         q_m: commit(&q_m),
         q_l: commit(&q_l),
         q_r: commit(&q_r),
@@ -306,7 +320,12 @@ pub fn make_proof(trapdoor: &Trapdoor, x: Fr, y: Fr) -> Proof {
     wires[2][1] = x * y;
     wires[2][2] = p;
     wires[2][3] = Fr::one();
-    let public_inputs = vec![fr_bytes(&p)];
+    let with_input = trapdoor.vk.key().num_public_inputs == 1;
+    let public_inputs = if with_input {
+        vec![fr_bytes(&p)]
+    } else {
+        Vec::new()
+    };
 
     let commit = |poly: &[Fr]| g1_bytes(&g1(poly_eval(poly, trapdoor.tau)));
 
@@ -342,9 +361,12 @@ pub fn make_proof(trapdoor: &Trapdoor, x: Fr, y: Fr) -> Proof {
     let alpha = transcript.grand_product(&grand_product);
 
     // round 3: quotient t = (gate + alpha perm + alpha^2 L1 (z - 1)) / Z_H,
-    // exact division iff the circuit is satisfied
+    // exact division iff the circuit is satisfied. PI carries the
+    // minus sign; the zero-input variant has PI identically zero.
     let mut pi_evals = [Fr::zero(); N];
-    pi_evals[0] = p;
+    if with_input {
+        pi_evals[0] = -p;
+    }
     let pi_poly = interpolate(&pi_evals, omega);
     let mut l1_evals = [Fr::zero(); N];
     l1_evals[0] = Fr::one();

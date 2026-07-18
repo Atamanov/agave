@@ -14,7 +14,10 @@ const MIN_DOMAIN_SIZE: u64 = 4;
 
 /// A KZG PLONK verifying key in the typed wire encoding of the batch
 /// syscalls: the selector and permutation commitments, the coset shifts, and
-/// the two SRS points the final pairing check needs.
+/// the two SRS points the final pairing check needs. The verifier assumes the
+/// SRS G1 basis starts at the standard generator (the E term rides on it); a
+/// nonstandard-basis SRS fails completeness, never soundness, since valid
+/// and forged proofs meet the same wrong point.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifyingKey {
     /// |H|, a power of two; omega is derived from it during validation

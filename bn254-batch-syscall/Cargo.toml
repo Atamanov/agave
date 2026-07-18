@@ -26,6 +26,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 ark-std = { version = "0.5", default-features = false }
 solana-bn254 = { workspace = true }
+solana-keccak-hasher = { workspace = true, features = ["sha3"] }
 
 [lints]
 workspace = true
