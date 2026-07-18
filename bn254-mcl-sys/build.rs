@@ -12,7 +12,11 @@
 //! - MCL_DONT_USE_XBYAK: upstream auto-enables the xbyak JIT on x86-64;
 //!   portable build keeps only the cpuid class.
 //! - MCL_MSM=0 explicit (auto-0 for 256-bit, pinned for clarity); MCL_USE_LLVM
-//!   left undefined (upstream sets it only when compiling base64.ll).
+//!   left undefined: upstream's default build defines it globally and links
+//!   the generated .ll objects, which this cc build does not compile, so
+//!   defining it here would fail to link; arithmetic results are identical
+//!   either way and the on-box fingerprint run arbitrates parity with the
+//!   prebuilt archive.
 //! - MCL_DONT_USE_OPENSSL and MCL_USE_VINT are config.hpp defaults already.
 
 use std::path::PathBuf;

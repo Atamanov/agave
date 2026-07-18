@@ -16,6 +16,11 @@ targets = ["x86_64-unknown-linux-gnu"]
 agave-unstable-api = []
 
 [dependencies]
+# arithmetic runs on solana-bn254-mcl-sys; the ark-* crates remain because the
+# public pod surface (to_affine/to_fr and the From impls) is ark-typed and
+# wire-frozen: downstream production code (bn254-plonk-batch reduce.rs) and the
+# cross-branch conformance tests consume it, so it cannot move to dev-deps.
+# Inside this crate they perform representation conversion only.
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
 ark-ec = { version = "0.5", default-features = false }
 ark-ff = { version = "0.5", default-features = false }

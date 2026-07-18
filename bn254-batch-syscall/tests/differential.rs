@@ -147,9 +147,10 @@ fn telescoping_pairs(rng: &mut StdRng, n: usize) -> Vec<PodG1G2Pair> {
 #[test]
 fn test_pairing_verdict_matches_multi_pairing() {
     let mut rng = rng(0xd1ff_0003);
-    // telescoping accepts across the Miller chunk boundary; a sign flip
-    // must flip the verdict, matching the multi_pairing oracle either way
-    for n in [2usize, 3, 31, 32, 33] {
+    // telescoping accepts across chunk boundaries and at the full cap; a
+    // sign flip must flip the verdict, matching the multi_pairing oracle
+    // either way
+    for n in [2usize, 3, 31, 32, 33, 256] {
         let pairs = telescoping_pairs(&mut rng, n);
         assert_eq!(
             alt_bn128_pairing_check(Version::V0, &pairs),

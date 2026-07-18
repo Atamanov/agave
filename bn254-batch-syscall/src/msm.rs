@@ -2,7 +2,7 @@
 //! small n, Pippenger buckets for large n, dispatched internally).
 //!
 //! The n == 1 case needs no dedicated arm: `mulVec` at one point measured
-//! byte-for-byte the time of `mclBnG1_mul` (bn254-mcl-sys perf probe).
+//! the same time as `mclBnG1_mul` (bn254-mcl-sys perf probe).
 
 use {
     crate::{
