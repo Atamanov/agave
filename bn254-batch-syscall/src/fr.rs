@@ -1,8 +1,55 @@
+//! Fr batch ops over raw Montgomery residues.
+//!
+//! Both ops skip the to-Montgomery conversion of a full parse: the canonical
+//! wire bigint is taken directly as an element's stored limbs, making its
+//! field value a*R^-1. That residue map is linear and multiplicative in the
+//! right places, so one constant correction per call (R^2 for the lincomb
+//! sum, R^-1 folded into the inversion coefficient) restores the true
+//! result, and the parse phase drops from ~75% of lincomb to near zero
+//! (measured -81% lincomb, -40% batch invert).
+
 use {
     crate::{Version, encoding::FR_MAX_ELEMS, pod::PodScalar, validation::AltBn128BatchError},
-    ark_bn254::Fr,
-    ark_ff::{Zero, batch_inversion},
+    ark_bn254::{Fr, FrConfig},
+    ark_ff::{BigInt, BigInteger, Field, MontConfig, PrimeField, Zero, batch_inversion_and_mul},
 };
+
+/// Stack-chunk width for `sum_of_products`: measurement chose 16 over 8 at
+/// n = 2048, re-confirmed at the plonk lincomb@16 cell.
+const SOP_CHUNK: usize = 16;
+
+/// Smallest n routed to the two-chain inversion core at large sizes:
+/// the two-chain path measured faster than the library path from 64 up.
+const CHAIN_SPLIT_MIN: usize = 64;
+
+/// Small band also routed to the two-chain core: measured at the invert@8
+/// cell; the unmeasured 17..=63 keeps the library path.
+const CHAIN_SPLIT_SMALL_MIN: usize = 2;
+const CHAIN_SPLIT_SMALL_MAX: usize = 16;
+
+/// Big-endian wire word as a little-endian limb bigint (no reduction).
+fn bigint_from_be(bytes: &[u8; 32]) -> BigInt<4> {
+    let mut limbs = [0u64; 4];
+    for (i, limb) in limbs.iter_mut().enumerate() {
+        let start = 32 - 8 * (i + 1);
+        let mut chunk = [0u8; 8];
+        chunk.copy_from_slice(&bytes[start..start + 8]);
+        *limb = u64::from_be_bytes(chunk);
+    }
+    BigInt::new(limbs)
+}
+
+/// Canonical wire scalar reinterpreted as Montgomery limbs, giving the field
+/// value a*R^-1. Sound because the canonical (< r) rejection runs first,
+/// exactly the check `parse_fr` performs; `new_unchecked` then only skips
+/// that re-validation, never a reduction.
+fn parse_raw_residue(s: &PodScalar) -> Result<Fr, AltBn128BatchError> {
+    let raw = bigint_from_be(&s.0);
+    if raw >= Fr::MODULUS {
+        return Err(AltBn128BatchError::NonCanonical);
+    }
+    Ok(Fr::new_unchecked(raw))
+}
 
 /// Inner product over the BN254 scalar field: `sum_i a[i] * b[i] mod q`.
 ///
@@ -27,11 +74,41 @@ pub fn alt_bn128_fr_lincomb(
         return Err(AltBn128BatchError::CapExceeded);
     }
 
+    // residues multiply to S*R^-2 term by term; the map is linear, so one
+    // final mul by the field value R^2 restores S
+    let acc = lincomb_acc::<SOP_CHUNK>(a, b)?;
+    let r_squared =
+        Fr::from_bigint(<FrConfig as MontConfig<4>>::R2).expect("R^2 mod q is canonical");
+    Ok(PodScalar::from(&(acc * r_squared)))
+}
+
+/// Raw-residue accumulation via `sum_of_products` in C-wide stack chunks.
+/// Elements are consumed and validated strictly in input order for every C
+/// (the inner while breaks on exhaustion, not on chunk boundaries), so the
+/// first non-canonical element raises `NonCanonical` at the same position
+/// regardless of C, and chunking only re-associates the exact modular sum.
+fn lincomb_acc<const C: usize>(a: &[PodScalar], b: &[PodScalar]) -> Result<Fr, AltBn128BatchError> {
     let mut acc = Fr::zero();
-    for (x, y) in a.iter().zip(b) {
-        acc += x.to_fr()? * y.to_fr()?;
+    let mut ai = a.iter();
+    let mut bi = b.iter();
+    loop {
+        let mut xs = [Fr::zero(); C];
+        let mut ys = [Fr::zero(); C];
+        let mut k = 0;
+        while k < C {
+            let (Some(x), Some(y)) = (ai.next(), bi.next()) else {
+                break;
+            };
+            xs[k] = parse_raw_residue(x)?;
+            ys[k] = parse_raw_residue(y)?;
+            k += 1;
+        }
+        if k == 0 {
+            break;
+        }
+        acc += Fr::sum_of_products(&xs, &ys);
     }
-    Ok(PodScalar::from(&acc))
+    Ok(acc)
 }
 
 /// Batch inverse over the BN254 scalar field via Montgomery's trick:
@@ -54,16 +131,86 @@ pub fn alt_bn128_fr_batch_invert(
 
     let mut scalars = Vec::with_capacity(a.len());
     for s in a {
-        let fr = s.to_fr()?;
-        if fr.is_zero() {
-            // zero never reaches batch_inversion, which would otherwise leave it
-            // as zero and silently return a wrong "inverse"
+        let raw = bigint_from_be(&s.0);
+        if raw >= Fr::MODULUS {
+            return Err(AltBn128BatchError::NonCanonical);
+        }
+        if raw.is_zero() {
+            // zero never reaches an inversion core, which would otherwise
+            // leave it as zero and silently return a wrong "inverse"
             return Err(AltBn128BatchError::ZeroInput);
         }
-        scalars.push(fr);
+        scalars.push(Fr::new_unchecked(raw));
     }
-    batch_inversion(&mut scalars);
+    // raw limbs 1 have field value R^-1: an element's value a*R^-1 inverts
+    // to a^-1*R, and this coefficient cancels the extra R in the same pass
+    let coeff = Fr::new_unchecked(BigInt::one());
+    let n = scalars.len();
+    if n >= CHAIN_SPLIT_MIN || (CHAIN_SPLIT_SMALL_MIN..=CHAIN_SPLIT_SMALL_MAX).contains(&n) {
+        batch_invert_two_chains(&mut scalars, &coeff);
+    } else {
+        batch_inversion_and_mul(&mut scalars, &coeff);
+    }
     Ok(scalars.iter().map(PodScalar::from).collect())
+}
+
+/// Batch inversion over TWO interleaved Montgomery mul chains with exactly
+/// ONE field inversion (two chains fill the mul
+/// pipeline's ILP headroom where the library's single prefix chain is
+/// latency-bound, and four chains only added register pressure).
+///
+/// The slice splits into contiguous halves A = v[..half], B = v[half..]
+/// with half = n - n/2 (A takes the odd extra element). The forward loop
+/// advances two prefix-product accumulators; then T = C_A * C_B is inverted
+/// once, C_A^-1 = T^-1 * C_B and C_B^-1 = T^-1 * C_A; the backward loop
+/// unwinds both chains, seeded with C^-1 * coeff so every element receives
+/// coeff exactly once (the library semantics). Field arithmetic is exact,
+/// so re-associating the products cannot change a byte (unit-checked).
+/// Requires nonzero elements and len >= 2 (dispatch guarantees both).
+fn batch_invert_two_chains(v: &mut [Fr], coeff: &Fr) {
+    let n = v.len();
+    let half = n - n / 2;
+    let len_b = n / 2;
+    let mut prefix = vec![Fr::zero(); n];
+    let mut run_a = v[0];
+    let mut run_b = v[half];
+    prefix[0] = run_a;
+    prefix[half] = run_b;
+    for i in 1..len_b {
+        run_a *= v[i];
+        prefix[i] = run_a;
+        run_b *= v[half + i];
+        prefix[half + i] = run_b;
+    }
+    if half > len_b {
+        run_a *= v[half - 1];
+        prefix[half - 1] = run_a;
+    }
+    let tinv = (run_a * run_b).inverse().expect("zeros rejected at parse");
+    let mut inv_a = tinv * run_b * coeff;
+    let mut inv_b = tinv * run_a * coeff;
+    for j in 0..len_b {
+        let ia = half - 1 - j;
+        if ia == 0 {
+            v[ia] = inv_a;
+        } else {
+            let next_a = inv_a * v[ia];
+            v[ia] = inv_a * prefix[ia - 1];
+            inv_a = next_a;
+        }
+        let ib = n - 1 - j;
+        if ib == half {
+            v[ib] = inv_b;
+        } else {
+            let next_b = inv_b * v[ib];
+            v[ib] = inv_b * prefix[ib - 1];
+            inv_b = next_b;
+        }
+    }
+    if half > len_b {
+        // odd n: chain A holds one more element than B, its head unwinds here
+        v[0] = inv_a;
+    }
 }
 
 #[cfg(test)]
@@ -74,7 +221,7 @@ mod tests {
             encoding::SCALAR_BYTES,
             test_utils::{be_add_one, fr_bytes, fr_modulus_be, rng},
         },
-        ark_ff::{Field, One, UniformRand},
+        ark_ff::{One, UniformRand},
         ark_std::rand::Rng,
     };
 
@@ -174,6 +321,24 @@ mod tests {
     }
 
     #[test]
+    fn test_lincomb_chunk_width_only_reassociates() {
+        // C only re-associates the exact modular sum, so every width agrees;
+        // sizes straddle both the C = 4 and C = 16 chunk boundaries
+        let mut rng = rng();
+        for n in [1usize, 3, 4, 5, 15, 16, 17, 33] {
+            let a: Vec<PodScalar> = (0..n)
+                .map(|_| PodScalar::from(&Fr::rand(&mut rng)))
+                .collect();
+            let b: Vec<PodScalar> = (0..n)
+                .map(|_| PodScalar::from(&Fr::rand(&mut rng)))
+                .collect();
+            let wide = lincomb_acc::<16>(&a, &b).unwrap();
+            assert_eq!(lincomb_acc::<4>(&a, &b).unwrap(), wide, "n = {n}");
+            assert_eq!(lincomb_acc::<1>(&a, &b).unwrap(), wide, "n = {n}");
+        }
+    }
+
+    #[test]
     fn test_batch_invert_matches_per_element() {
         let mut rng = rng();
         for n in [1usize, 2, 3, 17, 64] {
@@ -225,6 +390,31 @@ mod tests {
             let mut a = [good, good].concat();
             a[slot * SCALAR_BYTES..(slot + 1) * SCALAR_BYTES].copy_from_slice(&[0xffu8; 32]);
             assert_eq!(batch_invert(&a), Err(AltBn128BatchError::NonCanonical));
+        }
+    }
+
+    #[test]
+    fn test_two_chain_invert_matches_library_bytes() {
+        // the two-chain core only re-associates exact field products, so its
+        // bytes must equal the library path's; sizes cover both dispatch
+        // boundaries, both n mod 2 parities, and the large-band entry
+        let mut rng = rng();
+        for n in [2usize, 3, 15, 16, 17, 63, 64, 65, 127, 256] {
+            let input: Vec<Fr> = (0..n)
+                .map(|_| Fr::new_unchecked(Fr::rand(&mut rng).into_bigint()))
+                .collect();
+            let coeff = Fr::new_unchecked(BigInt::one());
+            let mut library = input.clone();
+            batch_inversion_and_mul(&mut library, &coeff);
+            let mut two = input;
+            batch_invert_two_chains(&mut two, &coeff);
+            for (i, (want, got)) in library.iter().zip(&two).enumerate() {
+                assert_eq!(
+                    want.into_bigint(),
+                    got.into_bigint(),
+                    "byte mismatch at n = {n}, index = {i}"
+                );
+            }
         }
     }
 

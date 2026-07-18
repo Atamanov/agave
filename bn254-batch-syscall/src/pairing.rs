@@ -1,6 +1,10 @@
 use {
     crate::{
-        Version, encoding::PAIRING_MAX_PAIRS, pod::PodG1G2Pair, validation::AltBn128BatchError,
+        Version,
+        encoding::{PAIRING_MAX_PAIRS, parse_g2},
+        endo,
+        pod::PodG1G2Pair,
+        validation::AltBn128BatchError,
     },
     ark_bn254::{Bn254, Fq12, G1Affine, G2Affine},
     ark_ec::{
@@ -16,6 +20,13 @@ type PreparedG2 = G2Prepared<ark_bn254::Config>;
 
 // number of line coefficients arkworks precomputes for a non-infinity BN254 G2
 pub(crate) const ELL_COEFFS_PER_PREPARED_G2: usize = 87;
+
+/// Pairs per Miller-loop chunk: measurement settled 32 at
+/// the zolana pairing@53 cell; small chunks re-pay the shared Fq12
+/// squarings, larger ones only trade line-coefficient locality. Chunking
+/// also bounds the prepared-coefficient working set (~17KB per point) to
+/// the chunk instead of the full batch's ~4.3MB at the cap.
+const PAIR_CHUNK: usize = 32;
 
 fn prepare_g2(g2: &G2Affine) -> PreparedG2 {
     debug_assert!(
@@ -49,24 +60,47 @@ pub fn alt_bn128_pairing_check(
         return Err(AltBn128BatchError::CapExceeded);
     }
 
-    // 256 prepared points hold ~4.3 MB of line coefficients on the host heap;
-    // the miller product is multiplicative across pairs, so chunking the
-    // preparation is a possible follow-up if that ever matters
-    let mut prepared: Vec<(G1Affine, PreparedG2)> = Vec::with_capacity(pairs.len());
+    // one pass per pair with the G2 subgroup checks DEFERRED into one
+    // batched-table psi-ladder phase: pairs parse on-curve in
+    // input order up to the first parse error, every non-infinity G2
+    // admitted before that point joins the shared table build, and the psi
+    // identities run in input order. Observable behavior equals the
+    // per-pair check's: there, pair i's subgroup check ran before pair
+    // j > i was parsed, so a subgroup failure at i outranks any parse error
+    // at j, and a parse error at j is reported only when every earlier G2
+    // passed -- precisely the order below.
+    let mut live: Vec<(G1Affine, G2Affine)> = Vec::with_capacity(pairs.len());
+    let mut candidates: Vec<G2Affine> = Vec::with_capacity(pairs.len());
+    let mut deferred_err = None;
     for pair in pairs {
-        let g1 = pair.g1.to_affine()?;
-        let g2 = pair.g2.to_affine()?;
-        // both members are validated above even when the pair is skipped
-        if g1.is_zero() || g2.is_zero() {
-            continue;
+        match parse_pair_on_curve(pair) {
+            Ok((g1, g2)) => {
+                if !g2.is_zero() {
+                    candidates.push(g2);
+                }
+                // a pair with an infinity member contributes the identity
+                // factor, but both members were validated regardless
+                if !g1.is_zero() && !g2.is_zero() {
+                    live.push((g1, g2));
+                }
+            }
+            Err(e) => {
+                deferred_err = Some(e);
+                break;
+            }
         }
-        prepared.push((g1, prepare_g2(&g2)));
     }
-    if prepared.is_empty() {
+    if endo::is_in_subgroup_x_psi_batch(&candidates).contains(&false) {
+        return Err(AltBn128BatchError::NotInSubgroup);
+    }
+    if let Some(e) = deferred_err {
+        return Err(e);
+    }
+    if live.is_empty() {
         return Ok(true);
     }
 
-    let f = multi_miller_loop_prepared(&prepared);
+    let f = multi_miller_chunked(&live);
     match Bn254::final_exponentiation(MillerLoopOutput(f)) {
         Some(gt) => Ok(gt.0 == Fq12::one()),
         None => {
@@ -81,8 +115,35 @@ pub fn alt_bn128_pairing_check(
     }
 }
 
+/// Canonical + on-curve for both members, G1 fully first (the pod order);
+/// only the G2 subgroup step is deferred, so the first failing check per
+/// pair is unchanged.
+fn parse_pair_on_curve(pair: &PodG1G2Pair) -> Result<(G1Affine, G2Affine), AltBn128BatchError> {
+    let g1 = pair.g1.to_affine()?;
+    let g2 = parse_g2(&pair.g2.0)?;
+    if !g2.is_zero() && !g2.is_on_curve() {
+        return Err(AltBn128BatchError::NotOnCurve);
+    }
+    Ok((g1, g2))
+}
+
+/// One prepared-coefficient Miller loop per PAIR_CHUNK consecutive pairs,
+/// preparation dropped after each chunk. Miller outputs multiply and Fq12
+/// multiplication is exact, so the accumulator equals the full-batch Miller
+/// value and ONE final exponentiation serves the whole batch (unit-checked
+/// against `Bn254::multi_pairing`).
+fn multi_miller_chunked(pairs: &[(G1Affine, G2Affine)]) -> Fq12 {
+    let mut f = Fq12::one();
+    for chunk in pairs.chunks(PAIR_CHUNK) {
+        let prepared: Vec<(G1Affine, PreparedG2)> =
+            chunk.iter().map(|(g1, g2)| (*g1, prepare_g2(g2))).collect();
+        f *= multi_miller_loop_prepared(&prepared);
+    }
+    f
+}
+
 // one shared miller loop over precomputed line coefficients, one squaring per
-// iteration for the whole batch; no allocation in the loop
+// iteration for the whole chunk; no allocation in the loop
 fn multi_miller_loop_prepared(pairs: &[(G1Affine, PreparedG2)]) -> Fq12 {
     let mut f = Fq12::one();
     let loop_count = <ark_bn254::Config as BnConfig>::ATE_LOOP_COUNT;
@@ -291,6 +352,44 @@ mod tests {
         let t = non_subgroup_g2();
         let pairs = [pair_bytes(&p, &t), pair_bytes(&p, &-t)].concat();
         assert_eq!(check(&pairs), Err(AltBn128BatchError::NotInSubgroup));
+    }
+
+    #[test]
+    fn test_chunked_miller_matches_multi_pairing() {
+        // sizes below, at, and across the PAIR_CHUNK boundary
+        let mut rng = rng();
+        for n in [1usize, 7, 31, 32, 33] {
+            let pairs: Vec<(G1Affine, G2Affine)> = (0..n)
+                .map(|_| (random_g1(&mut rng), random_g2(&mut rng)))
+                .collect();
+            let (g1s, g2s): (Vec<_>, Vec<_>) = pairs.iter().copied().unzip();
+            let expected = Bn254::multi_pairing(g1s, g2s).0;
+            let f = multi_miller_chunked(&pairs);
+            assert_eq!(
+                Bn254::final_exponentiation(MillerLoopOutput(f)).unwrap().0,
+                expected,
+                "n = {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_subgroup_failure_order_across_pairs() {
+        // earlier-pair subgroup failure outranks a later parse error, and an
+        // earlier parse error hides a later subgroup failure: pins the
+        // deferred batched-ladder phase to the per-pair check order
+        let mut rng = rng();
+        let bad_subgroup = pair_bytes(&random_g1(&mut rng), &non_subgroup_g2());
+        let mut bad_parse = pair_bytes(&random_g1(&mut rng), &random_g2(&mut rng)).to_vec();
+        bad_parse[..32].copy_from_slice(&fq_modulus_be());
+        assert_eq!(
+            check(&[bad_subgroup.as_slice(), bad_parse.as_slice()].concat()),
+            Err(AltBn128BatchError::NotInSubgroup)
+        );
+        assert_eq!(
+            check(&[bad_parse.as_slice(), bad_subgroup.as_slice()].concat()),
+            Err(AltBn128BatchError::NonCanonical)
+        );
     }
 
     #[test]

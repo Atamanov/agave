@@ -1,13 +1,36 @@
+//! G1 multi-scalar multiplication with GLV halving and a Strauss-Shamir band.
+//!
+//! Every scalar is GLV-split k = k1 + lambda*k2 (arith::glv), turning each
+//! term into two half-width chains over P and psi(P). For n <= 64 one
+//! Strauss-Shamir walk shares a single ~128-step doubling run across all
+//! chains, which beats Pippenger's bucket overhead at these sizes (measured
+//! -37% at the zolana msm@50 cell); larger n keeps the library's serial
+//! Pippenger over the 2n half-width pairs. psi tables are the elementwise psi
+//! image of the P tables, so the endo half never pays curve ops.
+
 use {
     crate::{
         Version,
+        arith::glv::{HALF_WNAF_MAX, half_to_u128, scalar_decomposition, wnaf_u128},
         encoding::MSM_MAX_POINTS,
         pod::{PodG1Point, PodScalar},
         validation::AltBn128BatchError,
     },
-    ark_bn254::{Fr, G1Projective},
-    ark_ec::{CurveGroup, VariableBaseMSM},
+    ark_bn254::{Fr, G1Affine, G1Projective, g1::Config as G1Config},
+    ark_ec::{AffineRepr, CurveGroup, VariableBaseMSM, scalar_mul::glv::GLVConfig},
+    ark_ff::{AdditiveGroup, Zero},
 };
+
+/// Largest n served by the shared-doubling Strauss band: measurement raised
+/// it to 64 so the zolana msm@50 cell rides the shared doubling run; above
+/// it Pippenger's buckets amortize better.
+const STRAUSS_BAND_MAX: usize = 64;
+
+/// Walk-accumulator chain counts per band (3..=16 and 17..=64): the variant
+/// 034 paired sweep settled K = 1 in both bands; the serial double chain
+/// already hides the add latency, so extra chains only re-pay doubles.
+const K_BAND_LOW: usize = 1;
+const K_BAND_HIGH: usize = 1;
 
 /// Multi-scalar multiplication in G1: sum of scalars[i] * points[i].
 ///
@@ -40,9 +63,144 @@ pub fn alt_bn128_g1_msm(
         exponents.push(scalar.to_fr()?);
     }
 
-    // lengths are already equal, so the checked `msm` adds nothing here
-    let sum = G1Projective::msm_unchecked(&bases, &exponents);
-    Ok(PodG1Point::from(&sum.into_affine()))
+    // every arm computes the same group element as the naive sum, so the
+    // dispatch cannot change a byte; n == 1 and n == 2 are the degenerate
+    // band shapes (2 and 4 chains) the harness measured as dedicated arms
+    let sum = if bases.len() <= STRAUSS_BAND_MAX {
+        msm_band_strauss(&bases, &exponents)
+    } else {
+        msm_pippenger_glv(&bases, &exponents)
+    };
+    Ok(PodG1Point::from(&sum))
+}
+
+/// A band-walk digit stream: the owning point's index (the chain-partition
+/// key), the wNAF digits, and the signed effective table.
+type BandChain = (usize, [i8; HALF_WNAF_MAX], [G1Affine; 4]);
+
+/// GLV-split chain build for the band walk: each non-zero base builds ONE
+/// odd-multiples table {1, 3, 5, 7}P, ALL P tables share ONE
+/// `normalize_batch` inversion, the psi tables are the elementwise psi image
+/// of the normalized entries (psi(jP) = j*psi(P) for any group
+/// endomorphism), and signs come free by affine negation after the map.
+/// Each chain with a nonzero half-scalar carries its w = 4 wNAF digits
+/// (w = 5 measured slower than w = 4 for this band). Returns the
+/// chains and the MSB walk height; empty chains iff every term drops.
+/// n <= STRAUSS_BAND_MAX bounds the tables to at most 128 chains and 192
+/// normalized odd multiples (~49KB, comfortably L2-resident).
+fn build_band_chains(bases: &[G1Affine], exps: &[Fr]) -> (Vec<BandChain>, usize) {
+    let mut split = Vec::with_capacity(bases.len());
+    for (base, exp) in bases.iter().zip(exps) {
+        if base.is_zero() {
+            continue;
+        }
+        let ((sgn1, k1), (sgn2, k2)) = scalar_decomposition(exp);
+        let (k1, k2) = (half_to_u128(&k1), half_to_u128(&k2));
+        if k1 == 0 && k2 == 0 {
+            continue;
+        }
+        split.push((*base, (sgn1, k1), (sgn2, k2)));
+    }
+    if split.is_empty() {
+        return (Vec::new(), 0);
+    }
+    // {3, 5, 7}P per base via one double + adds; no intermediate can be
+    // infinity (G1 order is prime, bases are non-zero), so one shared
+    // inversion covers every table
+    let mut odd = Vec::with_capacity(3 * split.len());
+    for (b, _, _) in &split {
+        let two_b = b.into_group().double();
+        let p3 = two_b + *b;
+        let p5 = p3 + two_b;
+        let p7 = p5 + two_b;
+        odd.extend_from_slice(&[p3, p5, p7]);
+    }
+    let odd = G1Projective::normalize_batch(&odd);
+    let mut walk_top = 0;
+    let mut chains = Vec::with_capacity(2 * split.len());
+    for (i, (b, half1, half2)) in split.iter().enumerate() {
+        let table_p = [*b, odd[3 * i], odd[3 * i + 1], odd[3 * i + 2]];
+        for (is_psi, &(sgn, k)) in [(false, half1), (true, half2)] {
+            if k == 0 {
+                continue;
+            }
+            let mut table = if is_psi {
+                table_p.map(|p| G1Config::endomorphism_affine(&p))
+            } else {
+                table_p
+            };
+            if !sgn {
+                table = table.map(|p| -p);
+            }
+            let (digits, top) = wnaf_u128(k);
+            walk_top = walk_top.max(top);
+            chains.push((i, digits, table));
+        }
+    }
+    (chains, walk_top)
+}
+
+/// MSB-aligned walk over K independent accumulator chains, digit streams
+/// partitioned by point index mod K: every step doubles all K accumulators,
+/// each nonzero digit mixed-adds its table entry into its stream's
+/// accumulator, and the K accumulators are summed after the walk. The same
+/// table entries are added for every K, so by group associativity the total
+/// is the same group element; K = 1 is the plain single-accumulator walk.
+fn strauss_walk<const K: usize>(chains: &[BandChain], walk_top: usize) -> G1Projective {
+    let mut accs = [G1Projective::zero(); K];
+    for i in (0..=walk_top).rev() {
+        for acc in accs.iter_mut() {
+            acc.double_in_place();
+        }
+        for (point, digits, table) in chains {
+            let d = digits[i];
+            if d > 0 {
+                accs[point % K] += table[(d / 2) as usize];
+            } else if d < 0 {
+                accs[point % K] -= table[(-d / 2) as usize];
+            }
+        }
+    }
+    let mut total = accs[0];
+    for acc in &accs[1..] {
+        total += acc;
+    }
+    total
+}
+
+/// The n <= STRAUSS_BAND_MAX arm: shared-doubling Strauss-Shamir over the
+/// GLV half-scalar chains.
+fn msm_band_strauss(bases: &[G1Affine], exps: &[Fr]) -> G1Affine {
+    let (chains, walk_top) = build_band_chains(bases, exps);
+    if chains.is_empty() {
+        return G1Affine::zero();
+    }
+    let total = match bases.len() {
+        // n <= 2 always keeps the single chain (the measured dedicated arms)
+        0..=2 => strauss_walk::<1>(&chains, walk_top),
+        3..=16 => strauss_walk::<K_BAND_LOW>(&chains, walk_top),
+        _ => strauss_walk::<K_BAND_HIGH>(&chains, walk_top),
+    };
+    total.into_affine()
+}
+
+/// The large-n arm: GLV split k = k1 + lambda*k2 (sign true = positive,
+/// matching the library's `glv_mul_projective`), psi(P) = lambda*P, so each
+/// term becomes two half-width pairs and the library's serial Pippenger
+/// runs one window count fewer over 2n points. Any valid
+/// split sums to the same group element.
+fn msm_pippenger_glv(bases: &[G1Affine], exps: &[Fr]) -> G1Affine {
+    let mut glv_bases = Vec::with_capacity(2 * bases.len());
+    let mut glv_scalars = Vec::with_capacity(2 * bases.len());
+    for (base, exp) in bases.iter().zip(exps) {
+        let ((sgn1, k1), (sgn2, k2)) = scalar_decomposition(exp);
+        let psi = G1Config::endomorphism_affine(base);
+        glv_bases.push(if sgn1 { *base } else { -*base });
+        glv_scalars.push(k1);
+        glv_bases.push(if sgn2 { psi } else { -psi });
+        glv_scalars.push(k2);
+    }
+    G1Projective::msm_unchecked(&glv_bases, &glv_scalars).into_affine()
 }
 
 #[cfg(test)]
@@ -98,6 +256,76 @@ mod tests {
             assert_eq!(
                 msm(&points, &scalars).unwrap(),
                 g1_bytes(&expected.into_affine()),
+                "n = {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_band_matches_library_over_edge_lattice() {
+        // pool of edge and random points/scalars strided through every
+        // position across rounds; sizes cover the band ends, both internal
+        // K-band boundaries, and the walk's degenerate shapes
+        let mut rng = rng();
+        let g = G1Affine::generator();
+        let mut points = vec![G1Affine::zero(), g, -g];
+        let mut scalars = vec![Fr::zero(), Fr::from(1u64), -Fr::from(1u64)];
+        for _ in 0..24 {
+            points.push(random_g1(&mut rng));
+            scalars.push(Fr::rand(&mut rng));
+        }
+        for n in [1usize, 2, 3, 4, 5, 8, 15, 16, 17, 31, 32, 33, 63, 64] {
+            for round in 0..6 {
+                let bases: Vec<G1Affine> = (0..n)
+                    .map(|k| points[(round * 7 + k * 3 + n) % points.len()])
+                    .collect();
+                let exps: Vec<Fr> = (0..n)
+                    .map(|k| scalars[(round * 5 + k * 11 + n) % scalars.len()])
+                    .collect();
+                let expected: G1Projective = bases.iter().zip(&exps).map(|(b, e)| *b * *e).sum();
+                assert_eq!(
+                    msm_band_strauss(&bases, &exps),
+                    expected.into_affine(),
+                    "n = {n}, round = {round}"
+                );
+            }
+            // degenerate lattices: all infinity, all zero scalars
+            assert_eq!(
+                msm_band_strauss(&vec![G1Affine::zero(); n], &vec![Fr::one(); n]),
+                G1Affine::zero()
+            );
+            assert_eq!(
+                msm_band_strauss(&vec![g; n], &vec![Fr::zero(); n]),
+                G1Affine::zero()
+            );
+        }
+    }
+
+    #[test]
+    fn test_walk_chain_count_only_reassociates() {
+        let mut rng = rng();
+        for n in [3usize, 7, 16, 33] {
+            let bases: Vec<G1Affine> = (0..n).map(|_| random_g1(&mut rng)).collect();
+            let exps: Vec<Fr> = (0..n).map(|_| Fr::rand(&mut rng)).collect();
+            let (chains, walk_top) = build_band_chains(&bases, &exps);
+            let one = strauss_walk::<1>(&chains, walk_top);
+            assert_eq!(strauss_walk::<2>(&chains, walk_top), one, "n = {n}");
+            assert_eq!(strauss_walk::<4>(&chains, walk_top), one, "n = {n}");
+        }
+    }
+
+    #[test]
+    fn test_pippenger_glv_matches_library() {
+        let mut rng = rng();
+        for n in [65usize, 96] {
+            let mut bases: Vec<G1Affine> = (0..n).map(|_| random_g1(&mut rng)).collect();
+            let mut exps: Vec<Fr> = (0..n).map(|_| Fr::rand(&mut rng)).collect();
+            bases[7] = G1Affine::zero();
+            exps[11] = Fr::zero();
+            exps[12] = -Fr::one();
+            assert_eq!(
+                msm_pippenger_glv(&bases, &exps),
+                G1Projective::msm_unchecked(&bases, &exps).into_affine(),
                 "n = {n}"
             );
         }
