@@ -26,11 +26,11 @@ use {
 /// it Pippenger's buckets amortize better.
 const STRAUSS_BAND_MAX: usize = 64;
 
-/// Walk-accumulator chain counts per band (3..=16 and 17..=64): the variant
-/// 034 paired sweep settled K = 1 in both bands; the serial double chain
-/// already hides the add latency, so extra chains only re-pay doubles.
-const K_BAND_LOW: usize = 1;
-const K_BAND_HIGH: usize = 1;
+/// Walk-accumulator chain count: measurement settled K = 1
+/// across the whole band (the serial double chain already hides the add
+/// latency, so extra chains only re-pay doubles). The walk stays generic over
+/// K because the reassociation proof tests instantiate K = 2 and 4.
+const K_BAND: usize = 1;
 
 /// Multi-scalar multiplication in G1: sum of scalars[i] * points[i].
 ///
@@ -63,9 +63,9 @@ pub fn alt_bn128_g1_msm(
         exponents.push(scalar.to_fr()?);
     }
 
-    // every arm computes the same group element as the naive sum, so the
-    // dispatch cannot change a byte; n == 1 and n == 2 are the degenerate
-    // band shapes (2 and 4 chains) the harness measured as dedicated arms
+    // both arms compute the same group element as the naive sum, so the
+    // dispatch cannot change a byte; small n rides the band walk as its
+    // degenerate 2- and 4-chain shapes
     let sum = if bases.len() <= STRAUSS_BAND_MAX {
         msm_band_strauss(&bases, &exponents)
     } else {
@@ -175,13 +175,7 @@ fn msm_band_strauss(bases: &[G1Affine], exps: &[Fr]) -> G1Affine {
     if chains.is_empty() {
         return G1Affine::zero();
     }
-    let total = match bases.len() {
-        // n <= 2 always keeps the single chain (the measured dedicated arms)
-        0..=2 => strauss_walk::<1>(&chains, walk_top),
-        3..=16 => strauss_walk::<K_BAND_LOW>(&chains, walk_top),
-        _ => strauss_walk::<K_BAND_HIGH>(&chains, walk_top),
-    };
-    total.into_affine()
+    strauss_walk::<K_BAND>(&chains, walk_top).into_affine()
 }
 
 /// The large-n arm: GLV split k = k1 + lambda*k2 (sign true = positive,

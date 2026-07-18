@@ -9,7 +9,12 @@
 //! (measured -81% lincomb, -40% batch invert).
 
 use {
-    crate::{Version, encoding::FR_MAX_ELEMS, pod::PodScalar, validation::AltBn128BatchError},
+    crate::{
+        Version,
+        encoding::{FR_MAX_ELEMS, bigint_from_be},
+        pod::PodScalar,
+        validation::AltBn128BatchError,
+    },
     ark_bn254::{Fr, FrConfig},
     ark_ff::{BigInt, BigInteger, Field, MontConfig, PrimeField, Zero, batch_inversion_and_mul},
 };
@@ -26,18 +31,6 @@ const CHAIN_SPLIT_MIN: usize = 64;
 /// cell; the unmeasured 17..=63 keeps the library path.
 const CHAIN_SPLIT_SMALL_MIN: usize = 2;
 const CHAIN_SPLIT_SMALL_MAX: usize = 16;
-
-/// Big-endian wire word as a little-endian limb bigint (no reduction).
-fn bigint_from_be(bytes: &[u8; 32]) -> BigInt<4> {
-    let mut limbs = [0u64; 4];
-    for (i, limb) in limbs.iter_mut().enumerate() {
-        let start = 32 - 8 * (i + 1);
-        let mut chunk = [0u8; 8];
-        chunk.copy_from_slice(&bytes[start..start + 8]);
-        *limb = u64::from_be_bytes(chunk);
-    }
-    BigInt::new(limbs)
-}
 
 /// Canonical wire scalar reinterpreted as Montgomery limbs, giving the field
 /// value a*R^-1. Sound because the canonical (< r) rejection runs first,

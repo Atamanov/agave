@@ -19,7 +19,7 @@ pub const FR_MAX_ELEMS: usize = 2048;
 
 const FQ_BYTES: usize = 32;
 
-fn bigint_from_be(bytes: &[u8]) -> BigInt<4> {
+pub(crate) fn bigint_from_be(bytes: &[u8]) -> BigInt<4> {
     debug_assert_eq!(bytes.len(), FQ_BYTES);
     let mut limbs = [0u64; 4];
     for (i, limb) in limbs.iter_mut().enumerate() {
