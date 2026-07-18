@@ -84,6 +84,29 @@ impl From<&Fr> for PodScalar {
     }
 }
 
+// the batch entry points cast these pod slices to the backend's identical wire
+// types with no copy; the casts are sound only under exact layout agreement
+const _: () = {
+    use core::mem::{align_of, offset_of, size_of};
+    assert!(size_of::<PodG1Point>() == G1_BYTES);
+    assert!(size_of::<PodG2Point>() == G2_BYTES);
+    assert!(size_of::<PodScalar>() == SCALAR_BYTES);
+    assert!(size_of::<PodG1G2Pair>() == crate::encoding::PAIR_BYTES);
+    assert!(size_of::<PodPairingResult>() == SCALAR_BYTES);
+    assert!(align_of::<PodG1G2Pair>() == 1);
+    assert!(offset_of!(PodG1G2Pair, g1) == 0);
+    assert!(offset_of!(PodG1G2Pair, g2) == G1_BYTES);
+
+    assert!(size_of::<PodG1Point>() == size_of::<helios_bn254::PodG1Point>());
+    assert!(align_of::<PodG1Point>() == align_of::<helios_bn254::PodG1Point>());
+    assert!(size_of::<PodG2Point>() == size_of::<helios_bn254::PodG2Point>());
+    assert!(align_of::<PodG2Point>() == align_of::<helios_bn254::PodG2Point>());
+    assert!(size_of::<PodScalar>() == size_of::<helios_bn254::PodScalar>());
+    assert!(align_of::<PodScalar>() == align_of::<helios_bn254::PodScalar>());
+    assert!(size_of::<PodG1G2Pair>() == size_of::<helios_bn254::PodG1G2Pair>());
+    assert!(align_of::<PodG1G2Pair>() == align_of::<helios_bn254::PodG1G2Pair>());
+};
+
 impl PodPairingResult {
     pub fn from_verdict(verdict: bool) -> Self {
         let mut word = [0u8; 32];

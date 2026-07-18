@@ -1,29 +1,12 @@
+//! Boolean multi-pairing check, forwarded to the helios-bn254 backend.
+//!
+//! The pod slice casts to the backend's identical wire type (layout pinned by
+//! the const-asserts in `pod`), so forwarding adds no copy or conversion.
+
 use {
-    crate::{
-        Version, encoding::PAIRING_MAX_PAIRS, pod::PodG1G2Pair, validation::AltBn128BatchError,
-    },
-    ark_bn254::{Bn254, Fq12, G1Affine, G2Affine},
-    ark_ec::{
-        AffineRepr,
-        bn::{BnConfig, G2Prepared, TwistType},
-        pairing::{MillerLoopOutput, Pairing},
-    },
-    ark_ff::{CyclotomicMultSubgroup, Field, One},
+    crate::{Version, pod::PodG1G2Pair, validation::AltBn128BatchError},
+    helios_bn254 as backend,
 };
-
-type EllCoeff = ark_ec::bn::g2::EllCoeff<ark_bn254::Config>;
-type PreparedG2 = G2Prepared<ark_bn254::Config>;
-
-// number of line coefficients arkworks precomputes for a non-infinity BN254 G2
-pub(crate) const ELL_COEFFS_PER_PREPARED_G2: usize = 87;
-
-fn prepare_g2(g2: &G2Affine) -> PreparedG2 {
-    debug_assert!(
-        !g2.is_zero(),
-        "infinity pairs are skipped before preparation"
-    );
-    (*g2).into()
-}
 
 /// Boolean multi-pairing check: true iff the product of e(G1_i, G2_i) is the
 /// identity in GT.
@@ -33,113 +16,16 @@ fn prepare_g2(g2: &G2Affine) -> PreparedG2 {
 /// pairing. Every point is validated (canonical coordinates, on-curve, and for
 /// G2 subgroup membership) before any arithmetic; a pair with an infinity member
 /// contributes the identity factor and is skipped. G2 preparation, the Miller
-/// loop, the final exponentiation, and the identity compare all happen
-/// internally: no prepared point and no GT/Fq12 value crosses this API in
-/// either direction. Pair width is fixed by the type, so a malformed length
-/// faults at the syscall boundary, never here.
+/// loop, the final exponentiation, and the identity compare all happen in the
+/// backend: no prepared point and no GT value crosses this API in either
+/// direction. Pair width is fixed by the type, so a malformed length faults at
+/// the syscall boundary, never here.
 pub fn alt_bn128_pairing_check(
     _version: Version,
     pairs: &[PodG1G2Pair],
 ) -> Result<bool, AltBn128BatchError> {
-    if pairs.is_empty() {
-        // an empty product is vacuously 1; reject rather than accept
-        return Err(AltBn128BatchError::ZeroInput);
-    }
-    if pairs.len() > PAIRING_MAX_PAIRS {
-        return Err(AltBn128BatchError::CapExceeded);
-    }
-
-    // 256 prepared points hold ~4.3 MB of line coefficients on the host heap;
-    // the miller product is multiplicative across pairs, so chunking the
-    // preparation is a possible follow-up if that ever matters
-    let mut prepared: Vec<(G1Affine, PreparedG2)> = Vec::with_capacity(pairs.len());
-    for pair in pairs {
-        let g1 = pair.g1.to_affine()?;
-        let g2 = pair.g2.to_affine()?;
-        // both members are validated above even when the pair is skipped
-        if g1.is_zero() || g2.is_zero() {
-            continue;
-        }
-        prepared.push((g1, prepare_g2(&g2)));
-    }
-    if prepared.is_empty() {
-        return Ok(true);
-    }
-
-    let f = multi_miller_loop_prepared(&prepared);
-    match Bn254::final_exponentiation(MillerLoopOutput(f)) {
-        Some(gt) => Ok(gt.0 == Fq12::one()),
-        None => {
-            // unreachable: a miller output over validated non-infinity pairs
-            // is nonzero, and final exponentiation only fails on zero
-            debug_assert!(
-                false,
-                "final exponentiation of a nonzero miller output cannot fail"
-            );
-            Ok(false)
-        }
-    }
-}
-
-// one shared miller loop over precomputed line coefficients, one squaring per
-// iteration for the whole batch; no allocation in the loop
-fn multi_miller_loop_prepared(pairs: &[(G1Affine, PreparedG2)]) -> Fq12 {
-    let mut f = Fq12::one();
-    let loop_count = <ark_bn254::Config as BnConfig>::ATE_LOOP_COUNT;
-    let mut idx = 0usize;
-
-    for i in (1..loop_count.len()).rev() {
-        if i != loop_count.len() - 1 {
-            f.square_in_place();
-        }
-        for (g1, prep) in pairs {
-            ell(&mut f, &prep.ell_coeffs[idx], g1);
-        }
-        idx += 1;
-        let bit = loop_count[i - 1];
-        if bit == 1 || bit == -1 {
-            for (g1, prep) in pairs {
-                ell(&mut f, &prep.ell_coeffs[idx], g1);
-            }
-            idx += 1;
-        }
-    }
-
-    if <ark_bn254::Config as BnConfig>::X_IS_NEGATIVE {
-        f.cyclotomic_inverse_in_place();
-    }
-
-    for (g1, prep) in pairs {
-        ell(&mut f, &prep.ell_coeffs[idx], g1);
-    }
-    idx += 1;
-    for (g1, prep) in pairs {
-        ell(&mut f, &prep.ell_coeffs[idx], g1);
-    }
-    debug_assert_eq!(idx + 1, ELL_COEFFS_PER_PREPARED_G2);
-    f
-}
-
-#[inline]
-fn ell(f: &mut Fq12, coeffs: &EllCoeff, p: &G1Affine) {
-    let Some((x, y)) = p.xy() else {
-        return;
-    };
-    let mut c0 = coeffs.0;
-    let mut c1 = coeffs.1;
-    match <ark_bn254::Config as BnConfig>::TWIST_TYPE {
-        TwistType::M => {
-            let mut c2 = coeffs.2;
-            c2.mul_assign_by_fp(&y);
-            c1.mul_assign_by_fp(&x);
-            f.mul_by_014(&c0, &c1, &c2);
-        }
-        TwistType::D => {
-            c0.mul_assign_by_fp(&y);
-            c1.mul_assign_by_fp(&x);
-            f.mul_by_034(&c0, &c1, &coeffs.2);
-        }
-    }
+    let pairs = bytemuck::cast_slice::<_, backend::PodG1G2Pair>(pairs);
+    backend::alt_bn128_pairing_check(backend::Version::V0, pairs).map_err(AltBn128BatchError::from)
 }
 
 #[cfg(test)]
@@ -147,14 +33,14 @@ mod tests {
     use {
         super::*,
         crate::{
-            encoding::{G1_BYTES, PAIR_BYTES, parse_g1},
+            encoding::{G1_BYTES, PAIR_BYTES, PAIRING_MAX_PAIRS, parse_g1},
             test_utils::{
                 be_add_one, decode_hex, fq_modulus_be, g1_bytes, non_subgroup_g2, pair_bytes,
                 random_g1, random_g2, rng, telescoping_pairs,
             },
         },
-        ark_bn254::{Fq, Fr, G1Projective, G2Projective},
-        ark_ec::{CurveGroup, PrimeGroup},
+        ark_bn254::{Fq, Fr, G1Affine, G1Projective, G2Affine, G2Projective},
+        ark_ec::{AffineRepr, CurveGroup, PrimeGroup},
         ark_ff::UniformRand,
         ark_std::rand::Rng,
     };
@@ -218,7 +104,7 @@ mod tests {
     #[test]
     fn test_pairing_check_telescoping_true_and_sign_flip_false() {
         let mut rng = rng();
-        for n in [2usize, 4, 16] {
+        for n in [2usize, 4, 16, 33] {
             let pairs = telescoping_pairs(&mut rng, n);
             assert_eq!(check(&pairs), Ok(true), "n = {n}");
             let g1 = parse_g1(&pairs[..G1_BYTES]).unwrap();
@@ -242,8 +128,7 @@ mod tests {
         let telescoping = telescoping_pairs(&mut rng, 2);
         let infinity_g1 = pair_bytes(&G1Affine::zero(), &random_g2(&mut rng));
         let infinity_g2 = pair_bytes(&random_g1(&mut rng), &G2Affine::zero());
-        // an infinity member contributes the identity factor; also guards the
-        // prepare_g2 infinity assert from ever seeing a skipped pair
+        // an infinity member contributes the identity factor
         assert_eq!(
             check(&[telescoping.clone(), infinity_g1.to_vec()].concat()),
             Ok(true)
@@ -284,13 +169,32 @@ mod tests {
     #[test]
     fn test_pairing_check_rejects_cancelling_non_subgroup_pairs() {
         // (P, T) and (P, -T) with T outside the subgroup: a check that batched
-        // or deferred the membership test would see the product cancel to 1
-        // and answer true; the per-point check must reject instead
+        // or deferred the membership test unsoundly would see the product
+        // cancel to 1 and answer true; the per-point check must reject instead
         let mut rng = rng();
         let p = random_g1(&mut rng);
         let t = non_subgroup_g2();
         let pairs = [pair_bytes(&p, &t), pair_bytes(&p, &-t)].concat();
         assert_eq!(check(&pairs), Err(AltBn128BatchError::NotInSubgroup));
+    }
+
+    #[test]
+    fn test_subgroup_failure_order_across_pairs() {
+        // earlier-pair subgroup failure outranks a later parse error, and an
+        // earlier parse error hides a later subgroup failure: pins the backend
+        // to the per-pair check order
+        let mut rng = rng();
+        let bad_subgroup = pair_bytes(&random_g1(&mut rng), &non_subgroup_g2());
+        let mut bad_parse = pair_bytes(&random_g1(&mut rng), &random_g2(&mut rng)).to_vec();
+        bad_parse[..32].copy_from_slice(&fq_modulus_be());
+        assert_eq!(
+            check(&[bad_subgroup.as_slice(), bad_parse.as_slice()].concat()),
+            Err(AltBn128BatchError::NotInSubgroup)
+        );
+        assert_eq!(
+            check(&[bad_parse.as_slice(), bad_subgroup.as_slice()].concat()),
+            Err(AltBn128BatchError::NonCanonical)
+        );
     }
 
     #[test]

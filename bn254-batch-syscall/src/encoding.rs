@@ -8,14 +8,21 @@ use {
 // wire format is big-endian, byte-for-byte the encoding of the existing
 // `sol_alt_bn128_group_op` pairing; all-zeros is the point at infinity in both
 // groups
-pub const G1_BYTES: usize = 64;
-pub const G2_BYTES: usize = 128;
-pub const PAIR_BYTES: usize = G1_BYTES + G2_BYTES;
-pub const SCALAR_BYTES: usize = 32;
+pub use helios_bn254::{
+    FR_MAX_ELEMS, G1_BYTES, G2_BYTES, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAX_PAIRS, SCALAR_BYTES,
+};
 
-pub const MSM_MAX_POINTS: usize = 2048;
-pub const PAIRING_MAX_PAIRS: usize = 256;
-pub const FR_MAX_ELEMS: usize = 2048;
+// the widths and caps are consensus-frozen; a backend that changed one must
+// fail here, not resize the wire contract through the re-export
+const _: () = {
+    assert!(G1_BYTES == 64);
+    assert!(G2_BYTES == 128);
+    assert!(PAIR_BYTES == 192);
+    assert!(SCALAR_BYTES == 32);
+    assert!(MSM_MAX_POINTS == 2048);
+    assert!(PAIRING_MAX_PAIRS == 256);
+    assert!(FR_MAX_ELEMS == 2048);
+};
 
 const FQ_BYTES: usize = 32;
 

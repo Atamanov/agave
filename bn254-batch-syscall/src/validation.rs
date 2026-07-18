@@ -24,6 +24,22 @@ pub enum AltBn128BatchError {
     LengthMismatch,
 }
 
+// exhaustive on both sides: a variant added to either taxonomy fails this
+// impl instead of silently renumbering the syscall's error surface
+impl From<helios_bn254::AltBn128BatchError> for AltBn128BatchError {
+    fn from(error: helios_bn254::AltBn128BatchError) -> Self {
+        match error {
+            helios_bn254::AltBn128BatchError::InvalidLength => Self::InvalidLength,
+            helios_bn254::AltBn128BatchError::NonCanonical => Self::NonCanonical,
+            helios_bn254::AltBn128BatchError::NotOnCurve => Self::NotOnCurve,
+            helios_bn254::AltBn128BatchError::NotInSubgroup => Self::NotInSubgroup,
+            helios_bn254::AltBn128BatchError::ZeroInput => Self::ZeroInput,
+            helios_bn254::AltBn128BatchError::CapExceeded => Self::CapExceeded,
+            helios_bn254::AltBn128BatchError::LengthMismatch => Self::LengthMismatch,
+        }
+    }
+}
+
 // infinity is a valid group element at this layer; rejecting infinity in proof
 // positions is the on-chain verifier's job, not the syscall's
 pub(crate) fn validate_g1(point: &G1Affine) -> Result<(), AltBn128BatchError> {

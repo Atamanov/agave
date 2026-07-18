@@ -1,69 +1,46 @@
+//! Fr batch ops, forwarded to the helios-bn254 backend.
+//!
+//! The pod slices cast to the backend's identical wire types (layout pinned by
+//! the const-asserts in `pod`), so forwarding adds no copy or conversion.
+
 use {
-    crate::{Version, encoding::FR_MAX_ELEMS, pod::PodScalar, validation::AltBn128BatchError},
-    ark_bn254::Fr,
-    ark_ff::{Zero, batch_inversion},
+    crate::{Version, pod::PodScalar, validation::AltBn128BatchError},
+    helios_bn254 as backend,
 };
 
 /// Inner product over the BN254 scalar field: `sum_i a[i] * b[i] mod q`.
 ///
-/// Reduces once at the end. Delayed reduction is a valid faster host path; only
-/// the canonical result is consensus-pinned, so an implementation may sum the
-/// double-width products and reduce in one pass. Arrays must be equal length,
-/// at most `FR_MAX_ELEMS` each; empty is an error. Element width is fixed by the
-/// pod type, so a malformed byte length faults at the syscall boundary, not here.
+/// The canonical result is consensus-pinned; the backend may use any
+/// reduction schedule that produces it. Arrays must be equal length, at most
+/// `FR_MAX_ELEMS` each; empty is an error. Element width is fixed by the pod
+/// type, so a malformed byte length faults at the syscall boundary, not here.
 /// `a` and `b` may alias.
 pub fn alt_bn128_fr_lincomb(
     _version: Version,
     a: &[PodScalar],
     b: &[PodScalar],
 ) -> Result<PodScalar, AltBn128BatchError> {
-    if a.len() != b.len() {
-        return Err(AltBn128BatchError::LengthMismatch);
-    }
-    if a.is_empty() {
-        return Err(AltBn128BatchError::ZeroInput);
-    }
-    if a.len() > FR_MAX_ELEMS {
-        return Err(AltBn128BatchError::CapExceeded);
-    }
-
-    let mut acc = Fr::zero();
-    for (x, y) in a.iter().zip(b) {
-        acc += x.to_fr()? * y.to_fr()?;
-    }
-    Ok(PodScalar::from(&acc))
+    let a = bytemuck::cast_slice::<_, backend::PodScalar>(a);
+    let b = bytemuck::cast_slice::<_, backend::PodScalar>(b);
+    backend::alt_bn128_fr_lincomb(backend::Version::V0, a, b)
+        .map_err(AltBn128BatchError::from)
+        .map(|scalar| PodScalar(scalar.0))
 }
 
-/// Batch inverse over the BN254 scalar field via Montgomery's trick:
-/// `out[i] = a[i]^-1 mod q`, one field inversion and 3(n-1) muls for n inputs.
+/// Batch inverse over the BN254 scalar field: `out[i] = a[i]^-1 mod q`.
 ///
 /// Every element must be nonzero (the inverse of zero is undefined) and
-/// canonical; at most `FR_MAX_ELEMS`; empty is an error. Every element is parsed
-/// and checked before any inversion, so the output is written only when the
-/// whole input is valid.
+/// canonical; at most `FR_MAX_ELEMS`; empty is an error. Every element is
+/// parsed and checked before any inversion, so the output is written only when
+/// the whole input is valid.
 pub fn alt_bn128_fr_batch_invert(
     _version: Version,
     a: &[PodScalar],
 ) -> Result<Vec<PodScalar>, AltBn128BatchError> {
-    if a.is_empty() {
-        return Err(AltBn128BatchError::ZeroInput);
-    }
-    if a.len() > FR_MAX_ELEMS {
-        return Err(AltBn128BatchError::CapExceeded);
-    }
-
-    let mut scalars = Vec::with_capacity(a.len());
-    for s in a {
-        let fr = s.to_fr()?;
-        if fr.is_zero() {
-            // zero never reaches batch_inversion, which would otherwise leave it
-            // as zero and silently return a wrong "inverse"
-            return Err(AltBn128BatchError::ZeroInput);
-        }
-        scalars.push(fr);
-    }
-    batch_inversion(&mut scalars);
-    Ok(scalars.iter().map(PodScalar::from).collect())
+    let a = bytemuck::cast_slice::<_, backend::PodScalar>(a);
+    backend::alt_bn128_fr_batch_invert(backend::Version::V0, a)
+        .map_err(AltBn128BatchError::from)
+        .map(bytemuck::allocation::cast_vec)
 }
 
 #[cfg(test)]
@@ -71,10 +48,11 @@ mod tests {
     use {
         super::*,
         crate::{
-            encoding::SCALAR_BYTES,
+            encoding::{FR_MAX_ELEMS, SCALAR_BYTES},
             test_utils::{be_add_one, fr_bytes, fr_modulus_be, rng},
         },
-        ark_ff::{Field, One, UniformRand},
+        ark_bn254::Fr,
+        ark_ff::{Field, One, UniformRand, Zero},
         ark_std::rand::Rng,
     };
 

@@ -1,12 +1,15 @@
+//! G1 multi-scalar multiplication, forwarded to the helios-bn254 backend.
+//!
+//! The pod slices cast to the backend's identical wire types (layout pinned by
+//! the const-asserts in `pod`), so forwarding adds no copy or conversion.
+
 use {
     crate::{
         Version,
-        encoding::MSM_MAX_POINTS,
         pod::{PodG1Point, PodScalar},
         validation::AltBn128BatchError,
     },
-    ark_bn254::{Fr, G1Projective},
-    ark_ec::{CurveGroup, VariableBaseMSM},
+    helios_bn254 as backend,
 };
 
 /// Multi-scalar multiplication in G1: sum of scalars[i] * points[i].
@@ -21,28 +24,11 @@ pub fn alt_bn128_g1_msm(
     points: &[PodG1Point],
     scalars: &[PodScalar],
 ) -> Result<PodG1Point, AltBn128BatchError> {
-    if points.len() != scalars.len() {
-        return Err(AltBn128BatchError::LengthMismatch);
-    }
-    if points.is_empty() {
-        return Err(AltBn128BatchError::ZeroInput);
-    }
-    if points.len() > MSM_MAX_POINTS {
-        return Err(AltBn128BatchError::CapExceeded);
-    }
-
-    let mut bases = Vec::with_capacity(points.len());
-    for point in points {
-        bases.push(point.to_affine()?);
-    }
-    let mut exponents: Vec<Fr> = Vec::with_capacity(scalars.len());
-    for scalar in scalars {
-        exponents.push(scalar.to_fr()?);
-    }
-
-    // lengths are already equal, so the checked `msm` adds nothing here
-    let sum = G1Projective::msm_unchecked(&bases, &exponents);
-    Ok(PodG1Point::from(&sum.into_affine()))
+    let points = bytemuck::cast_slice::<_, backend::PodG1Point>(points);
+    let scalars = bytemuck::cast_slice::<_, backend::PodScalar>(scalars);
+    backend::alt_bn128_g1_msm(backend::Version::V0, points, scalars)
+        .map_err(AltBn128BatchError::from)
+        .map(|point| PodG1Point(point.0))
 }
 
 #[cfg(test)]
@@ -50,12 +36,13 @@ mod tests {
     use {
         super::*,
         crate::{
-            encoding::{G1_BYTES, SCALAR_BYTES, parse_g1},
+            encoding::{G1_BYTES, MSM_MAX_POINTS, SCALAR_BYTES, parse_g1},
             test_utils::{
                 be_add_one, fq_modulus_be, fr_bytes, fr_modulus_be, g1_bytes, random_g1, rng,
             },
         },
         ark_bn254::{Fq, Fr, G1Affine, G1Projective},
+        ark_ec::CurveGroup,
         ark_ff::{One, UniformRand, Zero},
         ark_std::rand::Rng,
     };
@@ -84,7 +71,7 @@ mod tests {
     #[test]
     fn test_msm_matches_naive_sum() {
         let mut rng = rng();
-        for n in [1usize, 2, 3, 17, 64] {
+        for n in [1usize, 2, 3, 17, 64, 65, 96] {
             let (points, scalars) = random_input(&mut rng, n);
             // independent reference: plain per-term multiply-and-add, no MSM
             let mut expected = G1Projective::zero();
