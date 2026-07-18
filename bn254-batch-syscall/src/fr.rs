@@ -1,8 +1,25 @@
+//! Fr batch ops over mcl field arithmetic.
+//!
+//! Canonicality (< r) is checked in Rust on the big-endian wire bytes BEFORE
+//! any mcl setter runs: mcl's byte setters silently mask out-of-range input,
+//! which would turn the NonCanonical rejection into a wrong answer. Both ops
+//! preserve B2's validation order (elements strictly in input order, the
+//! whole input validated before any output is produced) and its
+//! one-inversion batch-invert structure.
+
 use {
     crate::{Version, encoding::FR_MAX_ELEMS, pod::PodScalar, validation::AltBn128BatchError},
-    ark_bn254::Fr,
-    ark_ff::{Zero, batch_inversion},
+    solana_bn254_mcl_sys::{MclFr, api},
 };
+
+/// Canonical wire scalar as an mcl Fr; the range check runs first, on the
+/// raw bytes.
+fn parse_fr(s: &PodScalar) -> Result<MclFr, AltBn128BatchError> {
+    if s.0 >= api::FR_MODULUS_BE {
+        return Err(AltBn128BatchError::NonCanonical);
+    }
+    Ok(api::fr_from_be(&s.0))
+}
 
 /// Inner product over the BN254 scalar field: `sum_i a[i] * b[i] mod q`.
 ///
@@ -27,11 +44,17 @@ pub fn alt_bn128_fr_lincomb(
         return Err(AltBn128BatchError::CapExceeded);
     }
 
-    let mut acc = Fr::zero();
+    // pairs are parsed and accumulated strictly in input order (a[i] then
+    // b[i]), so the first non-canonical element raises at the same position
+    // as a full-parse-then-sum implementation; field addition is exact, so
+    // accumulation order cannot change a byte
+    let mut acc = MclFr::default();
     for (x, y) in a.iter().zip(b) {
-        acc += x.to_fr()? * y.to_fr()?;
+        let xf = parse_fr(x)?;
+        let yf = parse_fr(y)?;
+        acc = api::fr_add(&acc, &api::fr_mul(&xf, &yf));
     }
-    Ok(PodScalar::from(&acc))
+    Ok(PodScalar(api::fr_to_be(&acc)))
 }
 
 /// Batch inverse over the BN254 scalar field via Montgomery's trick:
@@ -54,16 +77,41 @@ pub fn alt_bn128_fr_batch_invert(
 
     let mut scalars = Vec::with_capacity(a.len());
     for s in a {
-        let fr = s.to_fr()?;
-        if fr.is_zero() {
-            // zero never reaches batch_inversion, which would otherwise leave it
-            // as zero and silently return a wrong "inverse"
+        // per element: canonical first, then the zero rejection, matching the
+        // wire-pinned precedence
+        let f = parse_fr(s)?;
+        if api::fr_is_zero(&f) {
             return Err(AltBn128BatchError::ZeroInput);
         }
-        scalars.push(fr);
+        scalars.push(f);
     }
-    batch_inversion(&mut scalars);
-    Ok(scalars.iter().map(PodScalar::from).collect())
+    batch_invert(&mut scalars);
+    Ok(scalars
+        .iter()
+        .map(|f| PodScalar(api::fr_to_be(f)))
+        .collect())
+}
+
+/// Montgomery's trick with ONE field inversion: forward prefix products,
+/// invert the total, unwind backward. Field arithmetic is exact, so this
+/// computes exactly `v[i]^-1` for every i. Requires nonzero elements
+/// (dispatch guarantees it).
+fn batch_invert(v: &mut [MclFr]) {
+    let n = v.len();
+    let mut prefix = Vec::with_capacity(n);
+    let mut run = v[0];
+    prefix.push(run);
+    for x in &v[1..] {
+        run = api::fr_mul(&run, x);
+        prefix.push(run);
+    }
+    let mut inv = api::fr_inv(&prefix[n - 1]);
+    for i in (1..n).rev() {
+        let out_i = api::fr_mul(&inv, &prefix[i - 1]);
+        inv = api::fr_mul(&inv, &v[i]);
+        v[i] = out_i;
+    }
+    v[0] = inv;
 }
 
 #[cfg(test)]
@@ -74,7 +122,8 @@ mod tests {
             encoding::SCALAR_BYTES,
             test_utils::{be_add_one, fr_bytes, fr_modulus_be, rng},
         },
-        ark_ff::{Field, One, UniformRand},
+        ark_bn254::Fr,
+        ark_ff::{Field, One, UniformRand, Zero},
         ark_std::rand::Rng,
     };
 

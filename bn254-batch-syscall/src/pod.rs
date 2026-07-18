@@ -1,15 +1,19 @@
 use {
     crate::{
-        encoding::{G1_BYTES, G2_BYTES, SCALAR_BYTES, parse_fr, parse_g1, parse_g2, serialize_g1},
+        encoding::{
+            G1_BYTES, G2_BYTES, SCALAR_BYTES, ark_fr, ark_g1_unchecked, ark_g2_unchecked, parse_g1,
+            parse_g2, serialize_g1, serialize_g1_ark,
+        },
         validation::{AltBn128BatchError, validate_g1, validate_g2},
     },
     ark_bn254::{Fr, G1Affine, G2Affine},
     ark_ff::PrimeField,
     bytemuck_derive::{Pod, Zeroable},
+    solana_bn254_mcl_sys::MclG1,
 };
 
 /// G1 affine point: 64 big-endian bytes (x | y), all-zeros = infinity. The wire
-/// encoding, never Montgomery limbs; the arkworks type stays inside `to_affine`.
+/// encoding, never Montgomery limbs; the backend types stay inside the accessors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct PodG1Point(pub [u8; G1_BYTES]);
@@ -41,8 +45,17 @@ pub struct PodPairingResult(pub [u8; 32]);
 
 impl PodG1Point {
     /// Canonical coordinates, on-curve; G1 cofactor is 1 so on-curve implies
-    /// subgroup membership. Infinity is a valid group element here.
+    /// subgroup membership. Infinity is a valid group element here. The
+    /// arkworks return type is the wire-frozen compat surface; validation
+    /// runs on the mcl side and the conversion is unchecked representation
+    /// change on the already-validated bytes.
     pub fn to_affine(&self) -> Result<G1Affine, AltBn128BatchError> {
+        self.to_mcl()?;
+        Ok(ark_g1_unchecked(&self.0))
+    }
+
+    /// The compute-path parse: same checks, mcl point out.
+    pub(crate) fn to_mcl(self) -> Result<MclG1, AltBn128BatchError> {
         let point = parse_g1(&self.0)?;
         validate_g1(&point)?;
         Ok(point)
@@ -51,6 +64,12 @@ impl PodG1Point {
 
 impl From<&G1Affine> for PodG1Point {
     fn from(point: &G1Affine) -> Self {
+        Self(serialize_g1_ark(point))
+    }
+}
+
+impl From<&MclG1> for PodG1Point {
+    fn from(point: &MclG1) -> Self {
         Self(serialize_g1(point))
     }
 }
@@ -60,13 +79,13 @@ impl PodG2Point {
     pub fn to_affine(&self) -> Result<G2Affine, AltBn128BatchError> {
         let point = parse_g2(&self.0)?;
         validate_g2(&point)?;
-        Ok(point)
+        Ok(ark_g2_unchecked(&self.0))
     }
 }
 
 impl PodScalar {
     pub fn to_fr(&self) -> Result<Fr, AltBn128BatchError> {
-        parse_fr(&self.0)
+        ark_fr(&self.0)
     }
 }
 
@@ -137,6 +156,9 @@ mod tests {
         let mut rng = rng();
         let point = random_g1(&mut rng);
         assert_eq!(PodG1Point::from(&point).to_affine().unwrap(), point);
+        // and through the mcl path: parse, serialize, byte identity
+        let pod = PodG1Point::from(&point);
+        assert_eq!(PodG1Point::from(&pod.to_mcl().unwrap()), pod);
     }
 
     #[test]

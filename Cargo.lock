@@ -7258,6 +7258,7 @@ dependencies = [
  "bytemuck",
  "bytemuck_derive",
  "solana-bn254",
+ "solana-bn254-mcl-sys",
  "solana-keccak-hasher",
  "thiserror 2.0.18",
 ]
@@ -7273,6 +7274,17 @@ dependencies = [
  "solana-bn254-batch-syscall",
  "solana-keccak-hasher",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "solana-bn254-mcl-sys"
+version = "4.3.0-alpha.1"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "ark-std 0.5.0",
+ "cc",
 ]
 
 [[package]]

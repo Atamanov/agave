@@ -1,0 +1,23 @@
+[package]
+name = "solana-bn254-mcl-sys"
+description = "Vendored herumi/mcl BN_SNARK1 (alt_bn128) build and raw FFI bindings"
+publish = false
+version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+edition = { workspace = true }
+links = "mcl"
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
+ark-ec = { version = "0.5", default-features = false }
+ark-ff = { version = "0.5", default-features = false }
+ark-std = { version = "0.5", default-features = false }
+
+[lints]
+workspace = true

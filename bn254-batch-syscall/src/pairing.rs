@@ -1,29 +1,19 @@
+//! Boolean multi-pairing check via mcl's millerLoopVec and finalExp.
+//!
+//! G2 subgroup membership uses mcl's isValidOrder ([r]P == 0). On this dev
+//! host it measured 1.8x the arkworks endomorphism ladder per point under the
+//! portable no-asm mcl build; the x86-64 reference box with its optimized
+//! archive decides finally whether a native fast check is worth re-adding.
+
 use {
     crate::{
-        Version, encoding::PAIRING_MAX_PAIRS, pod::PodG1G2Pair, validation::AltBn128BatchError,
+        Version,
+        encoding::{PAIRING_MAX_PAIRS, parse_g2},
+        pod::PodG1G2Pair,
+        validation::AltBn128BatchError,
     },
-    ark_bn254::{Bn254, Fq12, G1Affine, G2Affine},
-    ark_ec::{
-        AffineRepr,
-        bn::{BnConfig, G2Prepared, TwistType},
-        pairing::{MillerLoopOutput, Pairing},
-    },
-    ark_ff::{CyclotomicMultSubgroup, Field, One},
+    solana_bn254_mcl_sys::{MclG1, MclG2, api},
 };
-
-type EllCoeff = ark_ec::bn::g2::EllCoeff<ark_bn254::Config>;
-type PreparedG2 = G2Prepared<ark_bn254::Config>;
-
-// number of line coefficients arkworks precomputes for a non-infinity BN254 G2
-pub(crate) const ELL_COEFFS_PER_PREPARED_G2: usize = 87;
-
-fn prepare_g2(g2: &G2Affine) -> PreparedG2 {
-    debug_assert!(
-        !g2.is_zero(),
-        "infinity pairs are skipped before preparation"
-    );
-    (*g2).into()
-}
 
 /// Boolean multi-pairing check: true iff the product of e(G1_i, G2_i) is the
 /// identity in GT.
@@ -32,11 +22,10 @@ fn prepare_g2(g2: &G2Affine) -> PreparedG2 {
 /// and byte-for-byte the input encoding of the existing `sol_alt_bn128_group_op`
 /// pairing. Every point is validated (canonical coordinates, on-curve, and for
 /// G2 subgroup membership) before any arithmetic; a pair with an infinity member
-/// contributes the identity factor and is skipped. G2 preparation, the Miller
-/// loop, the final exponentiation, and the identity compare all happen
-/// internally: no prepared point and no GT/Fq12 value crosses this API in
-/// either direction. Pair width is fixed by the type, so a malformed length
-/// faults at the syscall boundary, never here.
+/// contributes the identity factor and is skipped. The Miller loop, the final
+/// exponentiation, and the identity compare all happen internally: no GT value
+/// crosses this API in either direction. Pair width is fixed by the type, so a
+/// malformed length faults at the syscall boundary, never here.
 pub fn alt_bn128_pairing_check(
     _version: Version,
     pairs: &[PodG1G2Pair],
@@ -49,97 +38,64 @@ pub fn alt_bn128_pairing_check(
         return Err(AltBn128BatchError::CapExceeded);
     }
 
-    // 256 prepared points hold ~4.3 MB of line coefficients on the host heap;
-    // the miller product is multiplicative across pairs, so chunking the
-    // preparation is a possible follow-up if that ever matters
-    let mut prepared: Vec<(G1Affine, PreparedG2)> = Vec::with_capacity(pairs.len());
+    // one pass per pair with the G2 subgroup checks DEFERRED into one phase
+    // after parsing: pairs parse on-curve in input order up to the first
+    // parse error, every non-infinity G2 admitted before that point joins
+    // the candidate list, and the subgroup checks run in input order.
+    // Observable behavior equals the per-pair check's: there, pair i's
+    // subgroup check ran before pair j > i was parsed, so a subgroup failure
+    // at i outranks any parse error at j, and a parse error at j is reported
+    // only when every earlier G2 passed -- precisely the order below.
+    let mut live_g1: Vec<MclG1> = Vec::with_capacity(pairs.len());
+    let mut live_g2: Vec<MclG2> = Vec::with_capacity(pairs.len());
+    let mut candidates: Vec<MclG2> = Vec::with_capacity(pairs.len());
+    let mut deferred_err = None;
     for pair in pairs {
-        let g1 = pair.g1.to_affine()?;
-        let g2 = pair.g2.to_affine()?;
-        // both members are validated above even when the pair is skipped
-        if g1.is_zero() || g2.is_zero() {
-            continue;
+        match parse_pair_on_curve(pair) {
+            Ok((g1, g2)) => {
+                let g2_infinity = api::g2_is_zero(&g2);
+                if !g2_infinity {
+                    candidates.push(g2);
+                }
+                // a pair with an infinity member contributes the identity
+                // factor, but both members were validated regardless; the
+                // infinity-pair skip happens HERE in Rust, never relying on
+                // mcl's convention for zero inputs to the Miller loop
+                if !api::g1_is_zero(&g1) && !g2_infinity {
+                    live_g1.push(g1);
+                    live_g2.push(g2);
+                }
+            }
+            Err(e) => {
+                deferred_err = Some(e);
+                break;
+            }
         }
-        prepared.push((g1, prepare_g2(&g2)));
     }
-    if prepared.is_empty() {
+    if candidates.iter().any(|g2| !api::g2_is_in_subgroup(g2)) {
+        return Err(AltBn128BatchError::NotInSubgroup);
+    }
+    if let Some(e) = deferred_err {
+        return Err(e);
+    }
+    if live_g1.is_empty() {
         return Ok(true);
     }
 
-    let f = multi_miller_loop_prepared(&prepared);
-    match Bn254::final_exponentiation(MillerLoopOutput(f)) {
-        Some(gt) => Ok(gt.0 == Fq12::one()),
-        None => {
-            // unreachable: a miller output over validated non-infinity pairs
-            // is nonzero, and final exponentiation only fails on zero
-            debug_assert!(
-                false,
-                "final exponentiation of a nonzero miller output cannot fail"
-            );
-            Ok(false)
-        }
-    }
+    let f = api::miller_loop_vec(&live_g1, &live_g2);
+    Ok(api::gt_is_one(&api::final_exp(&f)))
 }
 
-// one shared miller loop over precomputed line coefficients, one squaring per
-// iteration for the whole batch; no allocation in the loop
-fn multi_miller_loop_prepared(pairs: &[(G1Affine, PreparedG2)]) -> Fq12 {
-    let mut f = Fq12::one();
-    let loop_count = <ark_bn254::Config as BnConfig>::ATE_LOOP_COUNT;
-    let mut idx = 0usize;
-
-    for i in (1..loop_count.len()).rev() {
-        if i != loop_count.len() - 1 {
-            f.square_in_place();
-        }
-        for (g1, prep) in pairs {
-            ell(&mut f, &prep.ell_coeffs[idx], g1);
-        }
-        idx += 1;
-        let bit = loop_count[i - 1];
-        if bit == 1 || bit == -1 {
-            for (g1, prep) in pairs {
-                ell(&mut f, &prep.ell_coeffs[idx], g1);
-            }
-            idx += 1;
-        }
+/// Canonical + on-curve for both members, G1 fully first (the pod order);
+/// only the G2 subgroup step is deferred, so the first failing check per
+/// pair is unchanged.
+fn parse_pair_on_curve(pair: &PodG1G2Pair) -> Result<(MclG1, MclG2), AltBn128BatchError> {
+    let g1 = pair.g1.to_mcl()?;
+    let g2 = parse_g2(&pair.g2.0)?;
+    if !api::g2_is_zero(&g2) && !api::g2_is_on_curve(&g2) {
+        return Err(AltBn128BatchError::NotOnCurve);
     }
-
-    if <ark_bn254::Config as BnConfig>::X_IS_NEGATIVE {
-        f.cyclotomic_inverse_in_place();
-    }
-
-    for (g1, prep) in pairs {
-        ell(&mut f, &prep.ell_coeffs[idx], g1);
-    }
-    idx += 1;
-    for (g1, prep) in pairs {
-        ell(&mut f, &prep.ell_coeffs[idx], g1);
-    }
-    debug_assert_eq!(idx + 1, ELL_COEFFS_PER_PREPARED_G2);
-    f
-}
-
-#[inline]
-fn ell(f: &mut Fq12, coeffs: &EllCoeff, p: &G1Affine) {
-    let Some((x, y)) = p.xy() else {
-        return;
-    };
-    let mut c0 = coeffs.0;
-    let mut c1 = coeffs.1;
-    match <ark_bn254::Config as BnConfig>::TWIST_TYPE {
-        TwistType::M => {
-            let mut c2 = coeffs.2;
-            c2.mul_assign_by_fp(&y);
-            c1.mul_assign_by_fp(&x);
-            f.mul_by_014(&c0, &c1, &c2);
-        }
-        TwistType::D => {
-            c0.mul_assign_by_fp(&y);
-            c1.mul_assign_by_fp(&x);
-            f.mul_by_034(&c0, &c1, &coeffs.2);
-        }
-    }
+    Ok((g1, g2))
 }
 
 #[cfg(test)]
@@ -147,14 +103,14 @@ mod tests {
     use {
         super::*,
         crate::{
-            encoding::{G1_BYTES, PAIR_BYTES, parse_g1},
+            encoding::{G1_BYTES, PAIR_BYTES},
             test_utils::{
                 be_add_one, decode_hex, fq_modulus_be, g1_bytes, non_subgroup_g2, pair_bytes,
                 random_g1, random_g2, rng, telescoping_pairs,
             },
         },
-        ark_bn254::{Fq, Fr, G1Projective, G2Projective},
-        ark_ec::{CurveGroup, PrimeGroup},
+        ark_bn254::{Fq, Fr, G1Affine, G1Projective, G2Affine, G2Projective},
+        ark_ec::{AffineRepr, CurveGroup, PrimeGroup},
         ark_ff::UniformRand,
         ark_std::rand::Rng,
     };
@@ -173,7 +129,7 @@ mod tests {
         let pairs = decode_hex(TRUE_PAIRS_HEX);
         assert_eq!(check(&pairs), Ok(true));
         // flip the sign of the first G1 point: the product is no longer 1
-        let g1 = parse_g1(&pairs[..G1_BYTES]).unwrap();
+        let g1 = crate::encoding::ark_g1_unchecked(pairs[..G1_BYTES].try_into().unwrap());
         let mut corrupted = pairs.clone();
         corrupted[..G1_BYTES].copy_from_slice(&g1_bytes(&-g1));
         assert_eq!(check(&corrupted), Ok(false));
@@ -186,7 +142,8 @@ mod tests {
             for corrupt in [false, true] {
                 let mut pairs = telescoping_pairs(&mut rng, n);
                 if corrupt {
-                    let g1 = parse_g1(&pairs[..G1_BYTES]).unwrap();
+                    let g1 =
+                        crate::encoding::ark_g1_unchecked(pairs[..G1_BYTES].try_into().unwrap());
                     pairs[..G1_BYTES].copy_from_slice(&g1_bytes(&-g1));
                 }
                 let expected = solana_bn254::prelude::alt_bn128_pairing_be(&pairs).unwrap();
@@ -221,7 +178,7 @@ mod tests {
         for n in [2usize, 4, 16] {
             let pairs = telescoping_pairs(&mut rng, n);
             assert_eq!(check(&pairs), Ok(true), "n = {n}");
-            let g1 = parse_g1(&pairs[..G1_BYTES]).unwrap();
+            let g1 = crate::encoding::ark_g1_unchecked(pairs[..G1_BYTES].try_into().unwrap());
             let mut flipped = pairs.clone();
             flipped[..G1_BYTES].copy_from_slice(&g1_bytes(&-g1));
             // an invalid product is a false verdict, not an error
@@ -242,8 +199,8 @@ mod tests {
         let telescoping = telescoping_pairs(&mut rng, 2);
         let infinity_g1 = pair_bytes(&G1Affine::zero(), &random_g2(&mut rng));
         let infinity_g2 = pair_bytes(&random_g1(&mut rng), &G2Affine::zero());
-        // an infinity member contributes the identity factor; also guards the
-        // prepare_g2 infinity assert from ever seeing a skipped pair
+        // an infinity member contributes the identity factor; the pair is
+        // skipped in Rust before any FFI sees it
         assert_eq!(
             check(&[telescoping.clone(), infinity_g1.to_vec()].concat()),
             Ok(true)
@@ -294,6 +251,25 @@ mod tests {
     }
 
     #[test]
+    fn test_subgroup_failure_order_across_pairs() {
+        // earlier-pair subgroup failure outranks a later parse error, and an
+        // earlier parse error hides a later subgroup failure: pins the
+        // deferred subgroup phase to the per-pair check order
+        let mut rng = rng();
+        let bad_subgroup = pair_bytes(&random_g1(&mut rng), &non_subgroup_g2());
+        let mut bad_parse = pair_bytes(&random_g1(&mut rng), &random_g2(&mut rng)).to_vec();
+        bad_parse[..32].copy_from_slice(&fq_modulus_be());
+        assert_eq!(
+            check(&[bad_subgroup.as_slice(), bad_parse.as_slice()].concat()),
+            Err(AltBn128BatchError::NotInSubgroup)
+        );
+        assert_eq!(
+            check(&[bad_parse.as_slice(), bad_subgroup.as_slice()].concat()),
+            Err(AltBn128BatchError::NonCanonical)
+        );
+    }
+
+    #[test]
     fn test_pairing_check_rejects_off_curve_points() {
         let mut rng = rng();
         let g1 = random_g1(&mut rng);
@@ -328,6 +304,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_pairing_check_near_inf_not_on_curve() {
+        // G2 x = 0 with y = (1, 0): not infinity, not on the twist
+        let mut rng = rng();
+        let mut near_inf = [0u8; 128];
+        near_inf[127] = 1;
+        let pair = [
+            g1_bytes(&random_g1(&mut rng)).as_slice(),
+            near_inf.as_slice(),
+        ]
+        .concat();
+        assert_eq!(check(&pair), Err(AltBn128BatchError::NotOnCurve));
     }
 
     #[test]

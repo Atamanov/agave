@@ -21,6 +21,7 @@ ark-ec = { version = "0.5", default-features = false }
 ark-ff = { version = "0.5", default-features = false }
 bytemuck = { workspace = true, features = ["min_const_generics"] }
 bytemuck_derive = { workspace = true }
+solana-bn254-mcl-sys = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

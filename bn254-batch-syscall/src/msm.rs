@@ -1,12 +1,17 @@
+//! G1 multi-scalar multiplication via mcl's `mulVec` (GLV-split Strauss for
+//! small n, Pippenger buckets for large n, dispatched internally).
+//!
+//! The n == 1 case needs no dedicated arm: `mulVec` at one point measured
+//! byte-for-byte the time of `mclBnG1_mul` (bn254-mcl-sys perf probe).
+
 use {
     crate::{
         Version,
-        encoding::MSM_MAX_POINTS,
+        encoding::{MSM_MAX_POINTS, parse_fr, serialize_g1},
         pod::{PodG1Point, PodScalar},
         validation::AltBn128BatchError,
     },
-    ark_bn254::{Fr, G1Projective},
-    ark_ec::{CurveGroup, VariableBaseMSM},
+    solana_bn254_mcl_sys::api,
 };
 
 /// Multi-scalar multiplication in G1: sum of scalars[i] * points[i].
@@ -33,16 +38,15 @@ pub fn alt_bn128_g1_msm(
 
     let mut bases = Vec::with_capacity(points.len());
     for point in points {
-        bases.push(point.to_affine()?);
+        bases.push(point.to_mcl()?);
     }
-    let mut exponents: Vec<Fr> = Vec::with_capacity(scalars.len());
+    let mut exponents = Vec::with_capacity(scalars.len());
     for scalar in scalars {
-        exponents.push(scalar.to_fr()?);
+        exponents.push(parse_fr(&scalar.0)?);
     }
 
-    // lengths are already equal, so the checked `msm` adds nothing here
-    let sum = G1Projective::msm_unchecked(&bases, &exponents);
-    Ok(PodG1Point::from(&sum.into_affine()))
+    let sum = api::g1_mul_vec(&mut bases, &exponents);
+    Ok(PodG1Point(serialize_g1(&sum)))
 }
 
 #[cfg(test)]
@@ -50,12 +54,13 @@ mod tests {
     use {
         super::*,
         crate::{
-            encoding::{G1_BYTES, SCALAR_BYTES, parse_g1},
+            encoding::{G1_BYTES, SCALAR_BYTES},
             test_utils::{
                 be_add_one, fq_modulus_be, fr_bytes, fr_modulus_be, g1_bytes, random_g1, rng,
             },
         },
         ark_bn254::{Fq, Fr, G1Affine, G1Projective},
+        ark_ec::{AffineRepr, CurveGroup, VariableBaseMSM},
         ark_ff::{One, UniformRand, Zero},
         ark_std::rand::Rng,
     };
@@ -81,23 +86,99 @@ mod tests {
         (points, scalars)
     }
 
+    fn msm_oracle(bases: &[G1Affine], exps: &[Fr]) -> [u8; G1_BYTES] {
+        // independent reference: plain per-term multiply-and-add, no MSM
+        let mut expected = G1Projective::zero();
+        for (p, s) in bases.iter().zip(exps) {
+            expected += *p * *s;
+        }
+        g1_bytes(&expected.into_affine())
+    }
+
     #[test]
     fn test_msm_matches_naive_sum() {
         let mut rng = rng();
         for n in [1usize, 2, 3, 17, 64] {
             let (points, scalars) = random_input(&mut rng, n);
-            // independent reference: plain per-term multiply-and-add, no MSM
-            let mut expected = G1Projective::zero();
-            for (p, s) in points
+            let bases: Vec<G1Affine> = points
                 .chunks_exact(G1_BYTES)
-                .zip(scalars.chunks_exact(SCALAR_BYTES))
-            {
-                expected +=
-                    crate::encoding::parse_g1(p).unwrap() * crate::encoding::parse_fr(s).unwrap();
-            }
+                .map(|p| crate::encoding::ark_g1_unchecked(p.try_into().unwrap()))
+                .collect();
+            let exps: Vec<Fr> = scalars
+                .chunks_exact(SCALAR_BYTES)
+                .map(|s| crate::encoding::ark_fr(s).unwrap())
+                .collect();
             assert_eq!(
                 msm(&points, &scalars).unwrap(),
-                g1_bytes(&expected.into_affine()),
+                msm_oracle(&bases, &exps),
+                "n = {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_msm_matches_naive_over_edge_lattice() {
+        // pool of edge and random points/scalars strided through every
+        // position across rounds; sizes cover any internal dispatch
+        // boundaries and the degenerate shapes
+        let mut rng = rng();
+        let g = G1Affine::generator();
+        let mut points = vec![G1Affine::zero(), g, -g];
+        let mut scalars = vec![Fr::zero(), Fr::from(1u64), -Fr::from(1u64)];
+        for _ in 0..24 {
+            points.push(random_g1(&mut rng));
+            scalars.push(Fr::rand(&mut rng));
+        }
+        for n in [1usize, 2, 3, 4, 5, 8, 15, 16, 17, 31, 32, 33, 63, 64] {
+            for round in 0..6 {
+                let bases: Vec<G1Affine> = (0..n)
+                    .map(|k| points[(round * 7 + k * 3 + n) % points.len()])
+                    .collect();
+                let exps: Vec<Fr> = (0..n)
+                    .map(|k| scalars[(round * 5 + k * 11 + n) % scalars.len()])
+                    .collect();
+                let point_bytes: Vec<u8> = bases.iter().flat_map(g1_bytes).collect();
+                let scalar_bytes: Vec<u8> = exps.iter().flat_map(fr_bytes).collect();
+                assert_eq!(
+                    msm(&point_bytes, &scalar_bytes).unwrap(),
+                    msm_oracle(&bases, &exps),
+                    "n = {n}, round = {round}"
+                );
+            }
+            // degenerate lattices: all infinity, all zero scalars
+            assert_eq!(
+                msm(
+                    &vec![0u8; n * G1_BYTES],
+                    &Vec::from_iter(std::iter::repeat_n(fr_bytes(&Fr::one()), n).flatten())
+                )
+                .unwrap(),
+                [0u8; G1_BYTES]
+            );
+            assert_eq!(
+                msm(
+                    &Vec::from_iter(std::iter::repeat_n(g1_bytes(&g), n).flatten()),
+                    &vec![0u8; n * SCALAR_BYTES]
+                )
+                .unwrap(),
+                [0u8; G1_BYTES]
+            );
+        }
+    }
+
+    #[test]
+    fn test_msm_large_matches_library() {
+        let mut rng = rng();
+        for n in [65usize, 96] {
+            let mut bases: Vec<G1Affine> = (0..n).map(|_| random_g1(&mut rng)).collect();
+            let mut exps: Vec<Fr> = (0..n).map(|_| Fr::rand(&mut rng)).collect();
+            bases[7] = G1Affine::zero();
+            exps[11] = Fr::zero();
+            exps[12] = -Fr::one();
+            let point_bytes: Vec<u8> = bases.iter().flat_map(g1_bytes).collect();
+            let scalar_bytes: Vec<u8> = exps.iter().flat_map(fr_bytes).collect();
+            assert_eq!(
+                msm(&point_bytes, &scalar_bytes).unwrap(),
+                g1_bytes(&G1Projective::msm_unchecked(&bases, &exps).into_affine()),
                 "n = {n}"
             );
         }
@@ -124,28 +205,27 @@ mod tests {
         let (points_b, scalars_b) = random_input(&mut rng, 3);
         let joined_points = [points_a.clone(), points_b.clone()].concat();
         let joined_scalars = [scalars_a.clone(), scalars_b.clone()].concat();
-        let sum_a = parse_g1(&msm(&points_a, &scalars_a).unwrap()).unwrap();
-        let sum_b = parse_g1(&msm(&points_b, &scalars_b).unwrap()).unwrap();
-        let joined = parse_g1(&msm(&joined_points, &joined_scalars).unwrap()).unwrap();
-        assert_eq!(joined, (sum_a + sum_b).into_affine());
+        let sum_a = crate::encoding::ark_g1_unchecked(&msm(&points_a, &scalars_a).unwrap());
+        let sum_b = crate::encoding::ark_g1_unchecked(&msm(&points_b, &scalars_b).unwrap());
+        assert_eq!(
+            msm(&joined_points, &joined_scalars).unwrap(),
+            g1_bytes(&(sum_a + sum_b).into_affine())
+        );
     }
 
     #[test]
     fn test_msm_accepts_infinity_point() {
         let mut rng = rng();
         let (mut points, scalars) = random_input(&mut rng, 3);
-        let without_middle = parse_g1(
-            &msm(
-                &[&points[..G1_BYTES], &points[2 * G1_BYTES..]].concat(),
-                &[&scalars[..SCALAR_BYTES], &scalars[2 * SCALAR_BYTES..]].concat(),
-            )
-            .unwrap(),
+        let without_middle = msm(
+            &[&points[..G1_BYTES], &points[2 * G1_BYTES..]].concat(),
+            &[&scalars[..SCALAR_BYTES], &scalars[2 * SCALAR_BYTES..]].concat(),
         )
         .unwrap();
         points[G1_BYTES..2 * G1_BYTES].copy_from_slice(&[0u8; G1_BYTES]);
         assert_eq!(
             msm(&points, &scalars).unwrap(),
-            g1_bytes(&without_middle),
+            without_middle,
             "an infinity base must contribute nothing"
         );
     }
@@ -206,7 +286,11 @@ mod tests {
         let mut rng = rng();
         for position in [0usize, 3, 7] {
             let (mut points, scalars) = random_input(&mut rng, 8);
-            let good = parse_g1(&points[position * G1_BYTES..(position + 1) * G1_BYTES]).unwrap();
+            let good = crate::encoding::ark_g1_unchecked(
+                points[position * G1_BYTES..(position + 1) * G1_BYTES]
+                    .try_into()
+                    .unwrap(),
+            );
             let off_curve = G1Affine::new_unchecked(good.x, good.y + Fq::one());
             points[position * G1_BYTES..(position + 1) * G1_BYTES]
                 .copy_from_slice(&g1_bytes(&off_curve));
@@ -256,7 +340,7 @@ mod tests {
         // validated first, pinning the cross-array order
         let mut rng = rng();
         let (mut points, mut scalars) = random_input(&mut rng, 2);
-        let good = parse_g1(&points[G1_BYTES..]).unwrap();
+        let good = crate::encoding::ark_g1_unchecked(points[G1_BYTES..].try_into().unwrap());
         points[G1_BYTES..].copy_from_slice(&g1_bytes(&G1Affine::new_unchecked(
             good.x,
             good.y + Fq::one(),

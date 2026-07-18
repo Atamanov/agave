@@ -49,7 +49,7 @@ pub(crate) mod test_utils {
     }
 
     pub fn g1_bytes(point: &G1Affine) -> [u8; G1_BYTES] {
-        crate::encoding::serialize_g1(point)
+        crate::encoding::serialize_g1_ark(point)
     }
 
     pub fn g2_bytes(point: &G2Affine) -> [u8; G2_BYTES] {

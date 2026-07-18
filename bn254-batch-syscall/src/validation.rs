@@ -1,7 +1,4 @@
-use {
-    ark_bn254::{G1Affine, G2Affine},
-    ark_ec::AffineRepr,
-};
+use solana_bn254_mcl_sys::{MclG1, MclG2, api};
 
 /// Stable error taxonomy for both batch syscalls. The syscall boundary
 /// flattens every variant to a nonzero return code; the distinctions exist for
@@ -26,28 +23,28 @@ pub enum AltBn128BatchError {
 
 // infinity is a valid group element at this layer; rejecting infinity in proof
 // positions is the on-chain verifier's job, not the syscall's
-pub(crate) fn validate_g1(point: &G1Affine) -> Result<(), AltBn128BatchError> {
-    if point.is_zero() {
+pub(crate) fn validate_g1(point: &MclG1) -> Result<(), AltBn128BatchError> {
+    if api::g1_is_zero(point) {
         return Ok(());
     }
-    if !point.is_on_curve() {
+    if !api::g1_is_on_curve(point) {
         return Err(AltBn128BatchError::NotOnCurve);
     }
     // G1 cofactor is 1: on-curve implies subgroup membership
     Ok(())
 }
 
-pub(crate) fn validate_g2(point: &G2Affine) -> Result<(), AltBn128BatchError> {
-    if point.is_zero() {
+pub(crate) fn validate_g2(point: &MclG2) -> Result<(), AltBn128BatchError> {
+    if api::g2_is_zero(point) {
         return Ok(());
     }
-    if !point.is_on_curve() {
+    if !api::g2_is_on_curve(point) {
         return Err(AltBn128BatchError::NotOnCurve);
     }
     // the twist cofactor is ~2^254, so on-curve says nothing about subgroup
-    // membership; arkworks 0.5 implements the fast endomorphism test
-    // [x+1]P + psi([x]P) + psi^2([x]P) == psi^3([2x]P)
-    if !point.is_in_correct_subgroup_assuming_on_curve() {
+    // membership; mcl's isValidOrder checks [r]P == 0 directly, the defining
+    // property every endomorphism-based fast test is proven equivalent to
+    if !api::g2_is_in_subgroup(point) {
         return Err(AltBn128BatchError::NotInSubgroup);
     }
     Ok(())
@@ -57,29 +54,38 @@ pub(crate) fn validate_g2(point: &G2Affine) -> Result<(), AltBn128BatchError> {
 mod tests {
     use {
         super::*,
-        crate::test_utils::{non_subgroup_g2, random_g1, random_g2, rng},
-        ark_bn254::Fq,
+        crate::{
+            encoding::{parse_g1, parse_g2},
+            test_utils::{g1_bytes, g2_bytes, non_subgroup_g2, random_g1, random_g2, rng},
+        },
+        ark_bn254::{Fq, G1Affine},
     };
 
     #[test]
     fn test_validate_g1() {
         let mut rng = rng();
-        assert_eq!(validate_g1(&G1Affine::zero()), Ok(()));
+        assert_eq!(validate_g1(&parse_g1(&[0u8; 64]).unwrap()), Ok(()));
         let point = random_g1(&mut rng);
-        assert_eq!(validate_g1(&point), Ok(()));
+        assert_eq!(validate_g1(&parse_g1(&g1_bytes(&point)).unwrap()), Ok(()));
         let off_curve = G1Affine::new_unchecked(point.x, point.y + Fq::from(1u64));
-        assert_eq!(validate_g1(&off_curve), Err(AltBn128BatchError::NotOnCurve));
+        assert_eq!(
+            validate_g1(&parse_g1(&g1_bytes(&off_curve)).unwrap()),
+            Err(AltBn128BatchError::NotOnCurve)
+        );
     }
 
     #[test]
     fn test_validate_g2() {
         let mut rng = rng();
-        assert_eq!(validate_g2(&G2Affine::zero()), Ok(()));
+        assert_eq!(validate_g2(&parse_g2(&[0u8; 128]).unwrap()), Ok(()));
         let point = random_g2(&mut rng);
-        assert_eq!(validate_g2(&point), Ok(()));
+        assert_eq!(validate_g2(&parse_g2(&g2_bytes(&point)).unwrap()), Ok(()));
         let mut off_curve = point;
         off_curve.y.c0 += Fq::from(1u64);
-        assert_eq!(validate_g2(&off_curve), Err(AltBn128BatchError::NotOnCurve));
+        assert_eq!(
+            validate_g2(&parse_g2(&g2_bytes(&off_curve)).unwrap()),
+            Err(AltBn128BatchError::NotOnCurve)
+        );
     }
 
     #[test]
@@ -88,8 +94,14 @@ mod tests {
         // validation stage, or those tests would exercise the wrong branch
         let point = non_subgroup_g2();
         assert!(point.is_on_curve());
-        assert_eq!(validate_g2(&point), Err(AltBn128BatchError::NotInSubgroup));
+        assert_eq!(
+            validate_g2(&parse_g2(&g2_bytes(&point)).unwrap()),
+            Err(AltBn128BatchError::NotInSubgroup)
+        );
         // its negation is out of the subgroup too (used by the cancellation test)
-        assert_eq!(validate_g2(&-point), Err(AltBn128BatchError::NotInSubgroup));
+        assert_eq!(
+            validate_g2(&parse_g2(&g2_bytes(&-point)).unwrap()),
+            Err(AltBn128BatchError::NotInSubgroup)
+        );
     }
 }
