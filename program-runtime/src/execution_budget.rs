@@ -281,18 +281,19 @@ impl Default for SVMTransactionExecutionCost {
             bls12_381_g2_validate_cost: 1_968,
             bls12_381_one_pair_cost: 25_445,
             bls12_381_additional_pair_cost: 13_023,
-            // Bench-derived: criterion 95%-CI upper bound / 33 ns per CU on an
-            // Apple M5 Pro, ark 0.5. MSM per-point is the n=1 anchor + 10%; the
-            // syscall scales it by a floor(log2 n)-bucketed discount so the
-            // model upper-bounds measured CU at every grid point. Pairing:
-            // base + per_pair * n least-squares fit over n in {1,2,3,4,8,16};
-            // the G2 subgroup component is measured standalone. Re-bench on
-            // validator-class x86 before activation.
+            // Bench-derived: criterion 95%-CI upper bound / 33 ns per CU on an AMD
+            // Ryzen 5 7500F (Zen 4) at the x86-64-v2 shipping profile, call-site optimized arkworks
+            // backend. MSM per-point is the n=1 anchor + 10%; the syscall scales it
+            // by a floor(log2 n)-bucketed discount so the model upper-bounds
+            // measured CU at every grid point. Pairing: base + per_pair * n fit over
+            // n in {1,2,3,4,8,16} with a distinct G2 per pair, the worst case a
+            // shared-G2 fold cannot discount; the G2 subgroup component is measured
+            // standalone.
             alt_bn128_g1_msm_base_cost: 100,
-            alt_bn128_g1_msm_per_point_cost: 2_698,
-            alt_bn128_pairing_check_base_cost: 11_156,
-            alt_bn128_pairing_check_per_pair_cost: 3_195,
-            alt_bn128_g2_subgroup_check_cost: 2_398,
+            alt_bn128_g1_msm_per_point_cost: 1_493,
+            alt_bn128_pairing_check_base_cost: 17_452,
+            alt_bn128_pairing_check_per_pair_cost: 3_843,
+            alt_bn128_g2_subgroup_check_cost: 3_719,
             // Scalar-field syscalls, same bench harness and 33 ns per CU. Both
             // are linear; per_term is the ceil of the measured per-element CU
             // slope, base a defensive floor that also covers the one field
@@ -300,9 +301,9 @@ impl Default for SVMTransactionExecutionCost {
             // measured CU at every grid point n in {1,16,64,256,1024,2048}
             // (lincomb slope ~1.7 CU, batch invert ~2.1 CU per term).
             alt_bn128_fr_lincomb_base_cost: 100,
-            alt_bn128_fr_lincomb_per_term_cost: 2,
+            alt_bn128_fr_lincomb_per_term_cost: 1,
             alt_bn128_fr_batch_invert_base_cost: 100,
-            alt_bn128_fr_batch_invert_per_term_cost: 3,
+            alt_bn128_fr_batch_invert_per_term_cost: 2,
         }
     }
 }
