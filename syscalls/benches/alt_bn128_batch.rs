@@ -8,7 +8,7 @@
 use {
     ark_bn254::{Fr, G1Projective, G2Affine, G2Projective},
     ark_ec::{AffineRepr, CurveGroup},
-    ark_ff::UniformRand,
+    ark_ff::{Field, UniformRand},
     ark_serialize::{CanonicalSerialize, Compress},
     ark_std::rand::{SeedableRng, rngs::StdRng},
     criterion::{BenchmarkId, Criterion, criterion_group, criterion_main},
@@ -82,28 +82,34 @@ fn random_msm_be(pool_size: usize, n: usize) -> MsmPool {
     pool
 }
 
-// `pool_size` sum-telescoping BE pairing inputs of `n` real pairs (n * 192
-// bytes), product == GT identity for n >= 2. Every pair is a real curve point,
-// so per-pair timing is undistorted; n == 1 is one random pair (verdict false,
-// same work).
+// `pool_size` BE pairing inputs of `n` real pairs (n * 192 bytes) whose
+// product is the GT identity for n >= 2: pair i is ([a_i]P, [s_i]Q) with the
+// last a_n chosen so sum a_i s_i = 0. Every G2 is a DISTINCT multiple of Q,
+// which is the worst case the price must cover: a backend may fold pairs
+// sharing one G2 encoding by bilinearity, and shared-Q fixtures would let
+// that optimization masquerade as a near-zero per-pair cost. n == 1 is one
+// random pair (verdict false, same work).
 fn random_pairing_check_be(pool_size: usize, n: usize) -> Vec<Vec<u8>> {
     let mut r = rng();
     let mut pool = Vec::with_capacity(pool_size);
     for _ in 0..pool_size {
-        let q_be = reverse_chunks(&g2_le(G2Projective::rand(&mut r)), 64);
         let p = G1Projective::rand(&mut r);
-        let mut sum = Fr::from(0u64);
+        let q = G2Projective::rand(&mut r);
+        let mut acc = Fr::from(0u64);
         let mut bytes = Vec::with_capacity(n * 192);
         for i in 0..n {
-            let g1 = if n >= 2 && i == n - 1 {
-                p * (-sum)
+            let s = Fr::rand(&mut r);
+            let a = if n >= 2 && i == n - 1 {
+                // closes sum a_i s_i = 0; s is invertible with probability
+                // 1 - 1/q, and rand never returns zero in practice
+                -acc * s.inverse().expect("random s is nonzero")
             } else {
-                let s = Fr::rand(&mut r);
-                sum += s;
-                p * s
+                let a = Fr::rand(&mut r);
+                acc += a * s;
+                a
             };
-            bytes.extend_from_slice(&reverse_chunks(&g1_le(g1), 32));
-            bytes.extend_from_slice(&q_be);
+            bytes.extend_from_slice(&reverse_chunks(&g1_le(p * a), 32));
+            bytes.extend_from_slice(&reverse_chunks(&g2_le(q * s), 64));
         }
         pool.push(bytes);
     }
