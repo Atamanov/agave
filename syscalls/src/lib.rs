@@ -2739,7 +2739,7 @@ declare_builtin_function!(
 );
 
 const ALT_BN128_G1_MSM_DISCOUNT_PER_THOUSAND: [u64; 12] =
-    [1000, 668, 484, 351, 270, 215, 183, 138, 121, 105, 90, 83];
+    [1000, 698, 553, 484, 446, 441, 428, 428, 351, 337, 250, 228];
 
 fn alt_bn128_g1_msm_cost(base_cost: u64, per_point_cost: u64, num_points: u64) -> u64 {
     let discount = match num_points {

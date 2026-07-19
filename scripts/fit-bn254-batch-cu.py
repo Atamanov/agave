@@ -82,19 +82,23 @@ def fit_msm(points):
     if anchor is None:
         sys.exit("error: msm sweep must include n = 1 (the per-point anchor)")
     per_point = math.ceil((anchor - base) * (1000 + MSM_MARGIN_PER_MILLE) / 1000)
-    discount = []
+    raw = []
     for n in sorted(points):
         bucket = min(n.bit_length() - 1, 11)
-        if bucket != len(discount):
+        if bucket != len(raw):
             sys.exit(f"error: msm sweep must hold one size per log2 bucket, got n = {n}")
-        if not discount:
-            # the anchor bucket keeps the full 10% margin the per-point cost
-            # carries; discounting it away here would cancel that headroom
-            discount.append(1000)
-            continue
-        d = math.ceil(1000 * (points[n] - base) / (per_point * n))
-        # buckets must not price a bigger batch above a smaller one per point
-        discount.append(min(discount[-1], d))
+        raw.append(math.ceil(1000 * (points[n] - base) / (per_point * n)))
+    # per-point pricing must never rise with batch size, and must upper-bound
+    # every measurement: the suffix maximum satisfies both by raising earlier
+    # buckets when a later one measures flat (never lowering a later one
+    # below its measurement). The anchor bucket keeps at least the full 10%
+    # margin the per-point cost carries.
+    discount = [0] * len(raw)
+    running = 0
+    for b in range(len(raw) - 1, -1, -1):
+        running = max(running, raw[b])
+        discount[b] = running
+    discount[0] = max(discount[0], 1000)
     return base, per_point, discount
 
 
