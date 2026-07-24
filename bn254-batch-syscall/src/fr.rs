@@ -1,7 +1,7 @@
 use {
     crate::{Version, encoding::FR_MAX_ELEMS, pod::PodScalar, validation::AltBn128BatchError},
     ark_bn254::Fr,
-    ark_ff::{Zero, batch_inversion},
+    ark_ff::{Field, Zero, batch_inversion},
 };
 
 /// Inner product over the BN254 scalar field: `sum_i a[i] * b[i] mod q`.
@@ -27,9 +27,28 @@ pub fn alt_bn128_fr_lincomb(
         return Err(AltBn128BatchError::CapExceeded);
     }
 
+    // arkworks' delayed-reduction inner product. Fixed 16-wide chunks match the
+    // sum_of_products array API; a[i] then b[i] decode in order, so the first
+    // non-canonical element faults at the same position as the naive path.
     let mut acc = Fr::zero();
-    for (x, y) in a.iter().zip(b) {
-        acc += x.to_fr()? * y.to_fr()?;
+    let mut ai = a.iter();
+    let mut bi = b.iter();
+    loop {
+        let mut xs = [Fr::zero(); 16];
+        let mut ys = [Fr::zero(); 16];
+        let mut k = 0;
+        while k < 16 {
+            let (Some(x), Some(y)) = (ai.next(), bi.next()) else {
+                break;
+            };
+            xs[k] = x.to_fr()?;
+            ys[k] = y.to_fr()?;
+            k += 1;
+        }
+        if k == 0 {
+            break;
+        }
+        acc += Fr::sum_of_products(&xs, &ys);
     }
     Ok(PodScalar::from(&acc))
 }
