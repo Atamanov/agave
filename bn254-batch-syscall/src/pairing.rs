@@ -2,7 +2,6 @@ use {
     crate::{
         Version,
         encoding::{PAIRING_MAX_PAIRS, parse_g2},
-        endo,
         pod::PodG1G2Pair,
         validation::AltBn128BatchError,
     },
@@ -90,7 +89,14 @@ pub fn alt_bn128_pairing_check(
             }
         }
     }
-    if endo::is_in_subgroup_x_psi_batch(&candidates).contains(&false) {
+    // De-risked: arkworks' own fast-endomorphism subgroup test, the same
+    // algorithm as the removed custom psi ladder, so pairing carries no bespoke
+    // subgroup-check audit surface. Candidates were collected in input order, so
+    // a subgroup failure still outranks a later deferred parse error.
+    if candidates
+        .iter()
+        .any(|g2| !g2.is_in_correct_subgroup_assuming_on_curve())
+    {
         return Err(AltBn128BatchError::NotInSubgroup);
     }
     if let Some(e) = deferred_err {

@@ -15,7 +15,6 @@ pub use crate::{
 
 pub(crate) mod arith;
 pub(crate) mod encoding;
-pub(crate) mod endo;
 pub(crate) mod fr;
 pub(crate) mod msm;
 pub(crate) mod pairing;
