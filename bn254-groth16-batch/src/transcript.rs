@@ -2,8 +2,14 @@ use {
     crate::{verify::Proof, vk::ValidatedVerifyingKey},
     ark_bn254::Fr,
     ark_ff::One,
-    solana_keccak_hasher::{Hasher, hashv},
+    solana_keccak_hasher::hashv,
 };
+
+/// Keccak over ordered chunks. Equivalent to sequential `Hasher` updates and
+/// works on SBF (where `solana_keccak_hasher::Hasher` is not available).
+fn keccak_parts(parts: &[&[u8]]) -> [u8; 32] {
+    hashv(parts).to_bytes()
+}
 
 /// How the per-equation randomizers derive from the seed. `Independent` gives
 /// a per-equation batch soundness error of 2^-128 with no dependence on the
@@ -38,27 +44,36 @@ pub(crate) fn derive_seed(
     // callers must bound the key list first (validate_batch_shape), or the u16
     // count prefix truncates and stops framing the digest list
     debug_assert!(vks.len() <= usize::from(u16::MAX));
-    let mut hasher = Hasher::default();
-    hasher.hash(mode.domain_tag());
-    hasher.hash(&(vks.len() as u16).to_be_bytes());
+    let vk_count = (vks.len() as u16).to_be_bytes();
+    let proof_count = (proofs.len() as u64).to_be_bytes();
+    let mut parts: Vec<&[u8]> = Vec::with_capacity(4 + vks.len() + proofs.len() * 8);
+    parts.push(mode.domain_tag());
+    parts.push(&vk_count);
     for vk in vks {
-        hasher.hash(vk.digest());
+        parts.push(vk.digest());
     }
-    hasher.hash(&(proofs.len() as u64).to_be_bytes());
+    parts.push(&proof_count);
+    // owned buffers for per-proof framing that must outlive the hash call
+    let mut owned: Vec<[u8; 8]> = Vec::with_capacity(proofs.len());
     for proof in proofs {
-        hasher.hash(&proof.vk_index.to_be_bytes());
-        hasher.hash(&proof.a.0);
-        hasher.hash(&proof.b.0);
-        hasher.hash(&proof.c.0);
+        let mut idx = [0u8; 8];
+        idx[..2].copy_from_slice(&proof.vk_index.to_be_bytes());
+        owned.push(idx);
+    }
+    for (proof, idx) in proofs.iter().zip(owned.iter()) {
+        parts.push(&idx[..2]);
+        parts.push(&proof.a.0);
+        parts.push(&proof.b.0);
+        parts.push(&proof.c.0);
         if let Some(commitment) = &proof.commitment {
-            hasher.hash(&commitment.com.0);
-            hasher.hash(&commitment.pok.0);
+            parts.push(&commitment.com.0);
+            parts.push(&commitment.pok.0);
         }
         for input in &proof.public_inputs {
-            hasher.hash(&input.0);
+            parts.push(&input.0);
         }
     }
-    hasher.result().to_bytes()
+    keccak_parts(&parts)
 }
 
 /// r_k = 1 + lo128(keccak256(seed || be64(k))): uniform on [1, 2^128], exactly
@@ -72,7 +87,8 @@ pub(crate) fn derive_randomizers(
     mode: RandomizerMode,
 ) -> Vec<Fr> {
     let draw = |k: u64| -> Fr {
-        let digest = hashv(&[seed, &k.to_be_bytes()]).to_bytes();
+        let k_be = k.to_be_bytes();
+        let digest = keccak_parts(&[seed, &k_be]);
         let mut lo = [0u8; 16];
         lo.copy_from_slice(&digest[16..]);
         Fr::from(u128::from_be_bytes(lo)) + Fr::one()
