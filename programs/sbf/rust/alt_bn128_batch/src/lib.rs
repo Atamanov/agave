@@ -4,31 +4,36 @@
 
 use {
     solana_bn254::prelude::{alt_bn128_g1_addition_be, alt_bn128_g1_multiplication_be},
-    solana_define_syscall::define_syscall,
+    solana_bn254_batch_syscall::{
+        PodG1G2Pair, PodG1Point, PodScalar, Version, alt_bn128_fr_batch_invert,
+        alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+    },
     solana_msg::msg,
     solana_program_entrypoint::{custom_heap_default, custom_panic_default},
 };
 
-// declared locally until the published solana-define-syscall ships them
-define_syscall!(fn sol_alt_bn128_g1_msm(num_points: u64, points_addr: *const u8, scalars_addr: *const u8, result_addr: *mut u8) -> u64);
-define_syscall!(fn sol_alt_bn128_pairing_check(num_pairs: u64, pairs_addr: *const u8, result_addr: *mut u8) -> u64);
-define_syscall!(fn sol_alt_bn128_fr_lincomb(num_elems: u64, a_addr: *const u8, b_addr: *const u8, result_addr: *mut u8) -> u64);
-define_syscall!(fn sol_alt_bn128_fr_batch_invert(num_elems: u64, a_addr: *const u8, result_addr: *mut u8) -> u64);
+fn g1_points(bytes: &[u8]) -> Vec<PodG1Point> {
+    bytes
+        .chunks_exact(64)
+        .map(|c| PodG1Point(c.try_into().unwrap()))
+        .collect()
+}
 
-// the syscall results as their own types, mirroring the host-side pods; the
-// arkworks-backed batch crate cannot come to the solana target, so the byte
-// newtypes are declared locally alongside the syscall stubs
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-struct PodG1Point([u8; 64]);
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-struct PodPairingResult([u8; 32]);
+fn scalars(bytes: &[u8]) -> Vec<PodScalar> {
+    bytes
+        .chunks_exact(32)
+        .map(|c| PodScalar(c.try_into().unwrap()))
+        .collect()
+}
 
-impl PodPairingResult {
-    fn verdict(&self) -> bool {
-        self.0[31] == 1
-    }
+fn pairs(bytes: &[u8]) -> Vec<PodG1G2Pair> {
+    bytes
+        .chunks_exact(192)
+        .map(|c| PodG1G2Pair {
+            g1: PodG1Point(c[..64].try_into().unwrap()),
+            g2: solana_bn254_batch_syscall::PodG2Point(c[64..].try_into().unwrap()),
+        })
+        .collect()
 }
 
 const G1_GENERATOR_BE: &str = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
@@ -47,45 +52,13 @@ fn hex(s: &str) -> Vec<u8> {
         .collect()
 }
 
-fn g1_msm(num_points: u64, points: &[u8], scalars: &[u8]) -> (u64, PodG1Point) {
-    let mut result = PodG1Point([0u8; 64]);
-    let code = unsafe {
-        sol_alt_bn128_g1_msm(
-            num_points,
-            points.as_ptr(),
-            scalars.as_ptr(),
-            result.0.as_mut_ptr(),
-        )
-    };
-    (code, result)
-}
-
-fn pairing_check(num_pairs: u64, pairs: &[u8]) -> (u64, PodPairingResult) {
-    let mut result = PodPairingResult([0u8; 32]);
-    let code =
-        unsafe { sol_alt_bn128_pairing_check(num_pairs, pairs.as_ptr(), result.0.as_mut_ptr()) };
-    (code, result)
-}
-
-fn fr_lincomb(num_elems: u64, a: &[u8], b: &[u8]) -> (u64, [u8; 32]) {
-    let mut result = [0u8; 32];
-    let code = unsafe {
-        sol_alt_bn128_fr_lincomb(num_elems, a.as_ptr(), b.as_ptr(), result.as_mut_ptr())
-    };
-    (code, result)
-}
-
-fn fr_batch_invert(num_elems: u64, a: &[u8], out: &mut [u8]) -> u64 {
-    unsafe { sol_alt_bn128_fr_batch_invert(num_elems, a.as_ptr(), out.as_mut_ptr()) }
-}
-
 fn g1_msm_matches_composed_group_ops() {
     // [2]G + [3]G via the MSM must equal mul+mul+add via the group op
     let generator = hex(G1_GENERATOR_BE);
     let points = [generator.clone(), generator.clone()].concat();
-    let mut scalars = vec![0u8; 64];
-    scalars[31] = 2;
-    scalars[63] = 3;
+    let mut scalar_bytes = vec![0u8; 64];
+    scalar_bytes[31] = 2;
+    scalar_bytes[63] = 3;
 
     let mul = |scalar_byte: u8| {
         let mut input = generator.clone();
@@ -94,49 +67,41 @@ fn g1_msm_matches_composed_group_ops() {
         input.extend_from_slice(&scalar);
         alt_bn128_g1_multiplication_be(&input).unwrap()
     };
-    let expected =
-        alt_bn128_g1_addition_be(&[mul(2), mul(3)].concat()).unwrap();
+    let expected = alt_bn128_g1_addition_be(&[mul(2), mul(3)].concat()).unwrap();
 
-    let (code, result) = g1_msm(2, &points, &scalars);
-    assert_eq!(code, 0);
+    let result =
+        alt_bn128_g1_msm(Version::V0, &g1_points(&points), &scalars(&scalar_bytes)).unwrap();
     assert_eq!(result.0.as_slice(), expected.as_slice());
 }
 
 fn g1_msm_rejects_empty_input() {
-    let (code, _) = g1_msm(0, &[], &[]);
-    assert_eq!(code, 1);
+    assert!(alt_bn128_g1_msm(Version::V0, &[], &[]).is_err());
 }
 
 fn pairing_check_verdicts() {
-    let pairs = hex(TRUE_PAIRS);
-    let (code, word) = pairing_check(2, &pairs);
-    assert_eq!(code, 0);
-    assert!(word.verdict(), "known-good vector must verify");
-    assert_eq!(&word.0[..31], &[0u8; 31]);
+    let true_pairs = hex(TRUE_PAIRS);
+    assert!(
+        alt_bn128_pairing_check(Version::V0, &pairs(&true_pairs)).unwrap(),
+        "known-good vector must verify"
+    );
 
-    // negate the first G1 point (multiply by r - 1): verdict flips to false,
-    // which is a zero word and NOT an error
-    let mut mul_input = pairs[..64].to_vec();
+    // negate the first G1 point (multiply by r - 1): the verdict flips to false,
+    // which is a value and NOT an error
+    let mut mul_input = true_pairs[..64].to_vec();
     mul_input.extend_from_slice(&hex(FR_MAX_BE));
     let negated = alt_bn128_g1_multiplication_be(&mul_input).unwrap();
-    let mut false_pairs = pairs;
+    let mut false_pairs = true_pairs;
     false_pairs[..64].copy_from_slice(&negated);
-    let (code, word) = pairing_check(2, &false_pairs);
-    assert_eq!(code, 0);
-    assert!(!word.verdict());
-    assert_eq!(word.0, [0u8; 32]);
+    assert!(!alt_bn128_pairing_check(Version::V0, &pairs(&false_pairs)).unwrap());
 }
 
 fn pairing_check_rejects_non_subgroup_g2() {
     let pair = [hex(G1_GENERATOR_BE), hex(NON_SUBGROUP_G2_BE)].concat();
-    let (code, word) = pairing_check(1, &pair);
-    assert_eq!(code, 1);
-    assert_eq!(word.0, [0u8; 32], "result must be untouched on error");
+    assert!(alt_bn128_pairing_check(Version::V0, &pairs(&pair)).is_err());
 }
 
 fn pairing_check_rejects_zero_pairs() {
-    let (code, _) = pairing_check(0, &[]);
-    assert_eq!(code, 1);
+    assert!(alt_bn128_pairing_check(Version::V0, &[]).is_err());
 }
 
 fn fr_lincomb_inner_product() {
@@ -147,15 +112,13 @@ fn fr_lincomb_inner_product() {
     let mut b = [0u8; 64];
     b[31] = 5;
     b[63] = 7;
-    let (code, result) = fr_lincomb(2, &a, &b);
-    assert_eq!(code, 0);
+    let result = alt_bn128_fr_lincomb(Version::V0, &scalars(&a), &scalars(&b)).unwrap();
     let mut expected = [0u8; 32];
     expected[31] = 31;
-    assert_eq!(result, expected);
+    assert_eq!(result.0, expected);
 
     // empty is a domain error, not a vacuous zero
-    let (code, _) = fr_lincomb(0, &[], &[]);
-    assert_eq!(code, 1);
+    assert!(alt_bn128_fr_lincomb(Version::V0, &[], &[]).is_err());
 }
 
 fn fr_batch_invert_roundtrip() {
@@ -163,20 +126,15 @@ fn fr_batch_invert_roundtrip() {
     let mut a = [0u8; 64];
     a[31] = 1;
     a[63] = 2;
-    let mut inv = [0u8; 64];
-    assert_eq!(fr_batch_invert(2, &a, &mut inv), 0);
+    let inv = alt_bn128_fr_batch_invert(Version::V0, &scalars(&a)).unwrap();
     let mut one = [0u8; 32];
     one[31] = 1;
-    assert_eq!(&inv[..32], &one, "1^-1 == 1");
-    let mut back = [0u8; 64];
-    assert_eq!(fr_batch_invert(2, &inv, &mut back), 0);
-    assert_eq!(back, a, "inverting twice is the identity");
+    assert_eq!(inv[0].0, one, "1^-1 == 1");
+    let back = alt_bn128_fr_batch_invert(Version::V0, &inv).unwrap();
+    assert_eq!(back, scalars(&a), "inverting twice is the identity");
 
-    // a zero element is a domain error and leaves the output untouched
-    let zeros = [0u8; 64];
-    let mut out = [0xabu8; 64];
-    assert_eq!(fr_batch_invert(2, &zeros, &mut out), 1);
-    assert_eq!(out, [0xabu8; 64]);
+    // a zero element is a domain error
+    assert!(alt_bn128_fr_batch_invert(Version::V0, &scalars(&[0u8; 64])).is_err());
 }
 
 #[unsafe(no_mangle)]
