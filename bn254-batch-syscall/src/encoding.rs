@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "solana"))]
 use {
     crate::validation::AltBn128BatchError,
     ark_bn254::{Fq, Fq2, Fr, G1Affine, G2Affine},
@@ -17,8 +18,10 @@ pub const MSM_MAX_POINTS: usize = 2048;
 pub const PAIRING_MAX_PAIRS: usize = 256;
 pub const FR_MAX_ELEMS: usize = 2048;
 
+#[cfg(not(target_os = "solana"))]
 const FQ_BYTES: usize = 32;
 
+#[cfg(not(target_os = "solana"))]
 fn bigint_from_be(bytes: &[u8]) -> BigInt<4> {
     debug_assert_eq!(bytes.len(), FQ_BYTES);
     let mut limbs = [0u64; 4];
@@ -33,10 +36,12 @@ fn bigint_from_be(bytes: &[u8]) -> BigInt<4> {
 
 // `from_bigint` returns `None` for values >= the modulus, which is exactly the
 // non-canonical rejection the validation order requires before any arithmetic
+#[cfg(not(target_os = "solana"))]
 fn fq_from_be(bytes: &[u8]) -> Result<Fq, AltBn128BatchError> {
     Fq::from_bigint(bigint_from_be(bytes)).ok_or(AltBn128BatchError::NonCanonical)
 }
 
+#[cfg(not(target_os = "solana"))]
 pub(crate) fn fq_to_be(value: &Fq, out: &mut [u8]) {
     debug_assert_eq!(out.len(), FQ_BYTES);
     for (i, limb) in value.into_bigint().0.iter().enumerate() {
@@ -45,6 +50,7 @@ pub(crate) fn fq_to_be(value: &Fq, out: &mut [u8]) {
     }
 }
 
+#[cfg(not(target_os = "solana"))]
 pub(crate) fn parse_g1(bytes: &[u8]) -> Result<G1Affine, AltBn128BatchError> {
     if bytes.len() != G1_BYTES {
         return Err(AltBn128BatchError::InvalidLength);
@@ -58,6 +64,7 @@ pub(crate) fn parse_g1(bytes: &[u8]) -> Result<G1Affine, AltBn128BatchError> {
 }
 
 // Fq2 limb order: imaginary part first (x1 | x0 | y1 | y0)
+#[cfg(not(target_os = "solana"))]
 pub(crate) fn parse_g2(bytes: &[u8]) -> Result<G2Affine, AltBn128BatchError> {
     if bytes.len() != G2_BYTES {
         return Err(AltBn128BatchError::InvalidLength);
@@ -74,6 +81,7 @@ pub(crate) fn parse_g2(bytes: &[u8]) -> Result<G2Affine, AltBn128BatchError> {
     Ok(G2Affine::new_unchecked(x, y))
 }
 
+#[cfg(not(target_os = "solana"))]
 pub(crate) fn parse_fr(bytes: &[u8]) -> Result<Fr, AltBn128BatchError> {
     if bytes.len() != SCALAR_BYTES {
         return Err(AltBn128BatchError::InvalidLength);
@@ -81,6 +89,7 @@ pub(crate) fn parse_fr(bytes: &[u8]) -> Result<Fr, AltBn128BatchError> {
     Fr::from_bigint(bigint_from_be(bytes)).ok_or(AltBn128BatchError::NonCanonical)
 }
 
+#[cfg(not(target_os = "solana"))]
 pub(crate) fn serialize_g1(point: &G1Affine) -> [u8; G1_BYTES] {
     let mut out = [0u8; G1_BYTES];
     if let Some((x, y)) = point.xy() {

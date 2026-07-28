@@ -6,18 +6,32 @@ pub use crate::{
         FR_MAX_ELEMS, G1_BYTES, G2_BYTES, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAX_PAIRS,
         SCALAR_BYTES,
     },
-    fr::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
-    msm::alt_bn128_g1_msm,
-    pairing::alt_bn128_pairing_check,
     pod::{PodG1G2Pair, PodG1Point, PodG2Point, PodPairingResult, PodScalar},
     validation::AltBn128BatchError,
 };
+// The wire encoding and the entry-point signatures are the same on both
+// targets. Off-chain the arithmetic runs here, on-chain the runtime performs it.
+#[cfg(target_os = "solana")]
+pub use crate::syscalls::{
+    alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+};
+#[cfg(not(target_os = "solana"))]
+pub use crate::{
+    fr::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
+    msm::alt_bn128_g1_msm,
+    pairing::alt_bn128_pairing_check,
+};
 
 pub(crate) mod encoding;
+#[cfg(not(target_os = "solana"))]
 pub(crate) mod fr;
+#[cfg(not(target_os = "solana"))]
 pub(crate) mod msm;
+#[cfg(not(target_os = "solana"))]
 pub(crate) mod pairing;
 pub(crate) mod pod;
+#[cfg(target_os = "solana")]
+pub(crate) mod syscalls;
 pub(crate) mod validation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
