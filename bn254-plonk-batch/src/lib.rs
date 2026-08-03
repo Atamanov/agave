@@ -24,6 +24,7 @@ use solana_bn254_batch_syscall::AltBn128BatchError;
 
 pub(crate) mod proof;
 pub(crate) mod reduce;
+pub(crate) mod scalar;
 pub(crate) mod transcript;
 pub(crate) mod verify;
 pub(crate) mod vk;

@@ -6,12 +6,18 @@ use {
     ark_bn254::Fr,
     ark_ff::{One, PrimeField},
     solana_bn254_batch_syscall::{PodG1Point, PodScalar},
-    solana_keccak_hasher::{Hasher, hashv},
+    solana_keccak_hasher::hashv,
 };
 
 // versioned ASCII constant carrying the protocol name, transcript version,
 // and lane; distinct per scheme and deployment
 const INNER_DOMAIN_TAG: &[u8] = b"solana-bn254-plonk-batch:v1:inner";
+
+/// Keccak over ordered chunks. Equivalent to sequential `Hasher` updates and
+/// works on SBF (where `solana_keccak_hasher::Hasher` is not available).
+fn keccak_parts(parts: &[&[u8]]) -> [u8; 32] {
+    hashv(parts).to_bytes()
+}
 
 /// One proof's internal challenges in round order. Batch-independent by
 /// construction: they are a function of the proof-local transcript only (VK
@@ -49,25 +55,28 @@ impl InnerTranscript {
     /// binds the context before any prover message: domain tag, VK digest,
     /// then the statement with a fixed-width count prefix
     pub(crate) fn new(vk: &ValidatedVerifyingKey, public_inputs: &[PodScalar]) -> Self {
-        let mut hasher = Hasher::default();
-        hasher.hash(INNER_DOMAIN_TAG);
-        hasher.hash(vk.digest());
-        hasher.hash(&(public_inputs.len() as u32).to_be_bytes());
+        let count = (public_inputs.len() as u32).to_be_bytes();
+        let mut parts: Vec<&[u8]> = Vec::with_capacity(3 + public_inputs.len());
+        parts.push(INNER_DOMAIN_TAG);
+        parts.push(vk.digest());
+        parts.push(&count);
         for input in public_inputs {
-            hasher.hash(&input.0);
+            parts.push(&input.0);
         }
         Self {
-            state: hasher.result().to_bytes(),
+            state: keccak_parts(&parts),
         }
     }
 
     fn absorb(&mut self, parts: &[&[u8]]) {
-        let mut hasher = Hasher::default();
-        hasher.hash(&self.state);
-        for part in parts {
-            hasher.hash(part);
-        }
-        self.state = hasher.result().to_bytes();
+        // the widest absorb is the six evaluation slots; a fixed buffer keeps
+        // the running-state update allocation-free
+        const MAX_PARTS: usize = 6;
+        debug_assert!(parts.len() <= MAX_PARTS);
+        let mut all: [&[u8]; MAX_PARTS + 1] = [&[]; MAX_PARTS + 1];
+        all[0] = &self.state;
+        all[1..=parts.len()].copy_from_slice(parts);
+        self.state = keccak_parts(&all[..=parts.len()]);
     }
 
     fn challenge(&self, phase_tag: u8) -> Fr {
@@ -115,6 +124,7 @@ impl InnerTranscript {
 
 /// The verifier-side derivation: replay the whole proof through the phased
 /// transcript.
+#[inline(never)]
 pub(crate) fn derive_inner(vk: &ValidatedVerifyingKey, proof: &Proof) -> InnerChallenges {
     let mut transcript = InnerTranscript::new(vk, &proof.public_inputs);
     let (beta, gamma) = transcript.wire_commitments(&proof.wire_commitments);
@@ -155,27 +165,29 @@ impl RandomizerMode {
 /// Per-proof records need no length prefixes: the single VK
 /// fixes the layout of every record, and validation pinned each proof's
 /// public input count to that key before any hashing.
+#[inline(never)]
 pub(crate) fn derive_seed(
     mode: RandomizerMode,
     vk: &ValidatedVerifyingKey,
     proofs: &[Proof],
 ) -> [u8; 32] {
-    let mut hasher = Hasher::default();
-    hasher.hash(mode.domain_tag());
-    hasher.hash(vk.digest());
-    hasher.hash(&(proofs.len() as u64).to_be_bytes());
+    let proof_count = (proofs.len() as u64).to_be_bytes();
+    let mut parts: Vec<&[u8]> = Vec::with_capacity(3 + proofs.len() * 16);
+    parts.push(mode.domain_tag());
+    parts.push(vk.digest());
+    parts.push(&proof_count);
     for proof in proofs {
         for point in proof.commitment_slots() {
-            hasher.hash(&point.0);
+            parts.push(&point.0);
         }
         for evaluation in proof.evaluations.slots() {
-            hasher.hash(&evaluation.0);
+            parts.push(&evaluation.0);
         }
         for input in &proof.public_inputs {
-            hasher.hash(&input.0);
+            parts.push(&input.0);
         }
     }
-    hasher.result().to_bytes()
+    keccak_parts(&parts)
 }
 
 /// rho_k = 1 + lo128(keccak256(seed || be64(k))): uniform on [1, 2^128],

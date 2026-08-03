@@ -14,7 +14,11 @@
 
 use {
     crate::{
-        PlonkBatchError, proof::Proof, transcript::InnerChallenges, vk::ValidatedVerifyingKey,
+        PlonkBatchError,
+        proof::Proof,
+        scalar::{fr_from_be, fr_to_pod},
+        transcript::InnerChallenges,
+        vk::ValidatedVerifyingKey,
     },
     ark_bn254::Fr,
     ark_ff::{Field, One, Zero},
@@ -92,9 +96,18 @@ pub(crate) fn lagrange_denominators(vk: &ValidatedVerifyingKey, zeta: Fr, count:
         .collect()
 }
 
+// inline(never): an inlined Montgomery multiply is ~1.4k SBF instructions;
+// reduce's straight-line chain of ~40 keeps each one a call so the function
+// stays inside the +-32k-instruction branch range and the 4KiB stack
+#[inline(never)]
+fn mul(a: Fr, b: Fr) -> Fr {
+    a * b
+}
+
 /// Verifier rounds 6-12 as coefficients. `denominator_inverses` are
 /// this proof's slice of the single batch-wide alt_bn128_fr_batch_invert
 /// call; `vanishing` is Z_H(zeta) from `vanishing_eval`.
+#[inline(never)]
 pub(crate) fn reduce(
     vk: &ValidatedVerifyingKey,
     proof: &Proof,
@@ -115,8 +128,8 @@ pub(crate) fn reduce(
     let mut lagrange = Vec::with_capacity(denominator_inverses.len());
     let mut root = Fr::one();
     for inverse in denominator_inverses {
-        lagrange.push(root * vanishing * inverse);
-        root *= vk.omega();
+        lagrange.push(mul(mul(root, vanishing), *inverse));
+        root = mul(root, vk.omega());
     }
     let l1 = lagrange[0];
 
@@ -126,60 +139,73 @@ pub(crate) fn reduce(
     let pi = if proof.public_inputs.is_empty() {
         Fr::zero()
     } else {
-        let lagrange_pods: Vec<PodScalar> = lagrange.iter().map(PodScalar::from).collect();
-        -alt_bn128_fr_lincomb(
+        let lagrange_pods: Vec<PodScalar> = lagrange.iter().map(fr_to_pod).collect();
+        let combined = alt_bn128_fr_lincomb(
             solana_bn254_batch_syscall::Version::V0,
             &proof.public_inputs,
             &lagrange_pods,
-        )?
-        .to_fr()
-        .map_err(PlonkBatchError::Syscall)?
+        )?;
+        -fr_from_be(&combined).ok_or(PlonkBatchError::NonCanonicalScalar)?
     };
 
     let evaluations = &proof.evaluations;
-    let non_canonical = |_| PlonkBatchError::NonCanonicalScalar;
-    let a_ev = evaluations.a.to_fr().map_err(non_canonical)?;
-    let b_ev = evaluations.b.to_fr().map_err(non_canonical)?;
-    let c_ev = evaluations.c.to_fr().map_err(non_canonical)?;
-    let s1_ev = evaluations.s_sigma1.to_fr().map_err(non_canonical)?;
-    let s2_ev = evaluations.s_sigma2.to_fr().map_err(non_canonical)?;
-    let zw_ev = evaluations.z_omega.to_fr().map_err(non_canonical)?;
+    let non_canonical = || PlonkBatchError::NonCanonicalScalar;
+    let a_ev = fr_from_be(&evaluations.a).ok_or_else(non_canonical)?;
+    let b_ev = fr_from_be(&evaluations.b).ok_or_else(non_canonical)?;
+    let c_ev = fr_from_be(&evaluations.c).ok_or_else(non_canonical)?;
+    let s1_ev = fr_from_be(&evaluations.s_sigma1).ok_or_else(non_canonical)?;
+    let s2_ev = fr_from_be(&evaluations.s_sigma2).ok_or_else(non_canonical)?;
+    let zw_ev = fr_from_be(&evaluations.z_omega).ok_or_else(non_canonical)?;
 
-    let alpha_sq = alpha.square();
-    let perm_a = a_ev + beta * s1_ev + gamma;
-    let perm_b = b_ev + beta * s2_ev + gamma;
+    let alpha_sq = mul(alpha, alpha);
+    let perm_a = a_ev + mul(beta, s1_ev) + gamma;
+    let perm_b = b_ev + mul(beta, s2_ev) + gamma;
 
     // round 8: r0 = PI(zeta) - L_1(zeta) alpha^2
     //               - alpha (a + beta s1 + gamma)(b + beta s2 + gamma)(c + gamma) z_omega
-    let r0 = pi - l1 * alpha_sq - alpha * perm_a * perm_b * (c_ev + gamma) * zw_ev;
+    let r0 = pi
+        - mul(l1, alpha_sq)
+        - mul(
+            mul(mul(mul(alpha, perm_a), perm_b), c_ev + gamma),
+            zw_ev,
+        );
 
     // round 9: coefficients of the linearized commitment D; the +u on [z]
     // and the u z_omega in E fold the shifted opening into the same check
-    let z = alpha
-        * (a_ev + beta * zeta + gamma)
-        * (b_ev + beta * vk.k1() * zeta + gamma)
-        * (c_ev + beta * vk.k2() * zeta + gamma)
-        + l1 * alpha_sq
+    let beta_zeta = mul(beta, zeta);
+    let z = mul(
+        mul(
+            mul(alpha, a_ev + beta_zeta + gamma),
+            b_ev + mul(vk.k1(), beta_zeta) + gamma,
+        ),
+        c_ev + mul(vk.k2(), beta_zeta) + gamma,
+    ) + mul(l1, alpha_sq)
         + u;
-    let s_sigma3 = -(alpha * beta * zw_ev * perm_a * perm_b);
+    let s_sigma3 = -mul(mul(mul(alpha, beta), zw_ev), mul(perm_a, perm_b));
     let zeta_n = vanishing + Fr::one();
     let t_lo = -vanishing;
-    let t_mid = -vanishing * zeta_n;
-    let t_hi = -vanishing * zeta_n.square();
+    let t_mid = -mul(vanishing, zeta_n);
+    let t_hi = -mul(vanishing, mul(zeta_n, zeta_n));
 
     // round 10: F adds v powers on the wire and permutation commitments
-    let v2 = v * v;
-    let v3 = v2 * v;
-    let v4 = v3 * v;
-    let v5 = v4 * v;
+    let v2 = mul(v, v);
+    let v3 = mul(v2, v);
+    let v4 = mul(v3, v);
+    let v5 = mul(v4, v);
 
     // round 11: E collects the expected openings on the generator; Q = ... - E,
     // so the generator coefficient is minus the E scalar
-    let e_scalar = -r0 + v * a_ev + v2 * b_ev + v3 * c_ev + v4 * s1_ev + v5 * s2_ev + u * zw_ev;
+    let e_scalar = -r0
+        + mul(v, a_ev)
+        + mul(v2, b_ev)
+        + mul(v3, c_ev)
+        + mul(v4, s1_ev)
+        + mul(v5, s2_ev)
+        + mul(u, zw_ev);
 
     Ok(ReducedProof {
         vk_coeffs: VkCoeffs {
-            q_m: a_ev * b_ev,
+            q_m: mul(a_ev, b_ev),
             q_l: a_ev,
             q_r: b_ev,
             q_o: c_ev,
@@ -196,7 +222,7 @@ pub(crate) fn reduce(
         b: v2,
         c: v3,
         w_zeta_q: zeta,
-        w_zeta_omega_q: u * zeta * vk.omega(),
+        w_zeta_omega_q: mul(mul(u, zeta), vk.omega()),
         generator: -e_scalar,
         w_zeta_p: Fr::one(),
         w_zeta_omega_p: u,

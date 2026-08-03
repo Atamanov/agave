@@ -1,11 +1,13 @@
 use {
-    crate::PlonkBatchError,
+    crate::{PlonkBatchError, scalar::fr_from_be},
     ark_bn254::Fr,
-    ark_ec::AffineRepr,
     ark_ff::{FftField, Field, One, Zero},
     solana_bn254_batch_syscall::{PodG1Point, PodG2Point, PodScalar},
-    solana_keccak_hasher::Hasher,
+    solana_keccak_hasher::hashv,
 };
+
+#[cfg(not(target_os = "solana"))]
+use ark_ec::AffineRepr;
 
 // BN254 Fr has 2-adicity 28, so 2^28 is the largest power-of-two subgroup
 // order for which a root of unity exists at all
@@ -54,14 +56,7 @@ pub struct ValidatedVerifyingKey {
 
 impl VerifyingKey {
     pub fn validate(self) -> Result<ValidatedVerifyingKey, PlonkBatchError> {
-        let invalid = PlonkBatchError::InvalidVerifyingKey;
-        let n = self.domain_size;
-        if !n.is_power_of_two() || !(MIN_DOMAIN_SIZE..=MAX_DOMAIN_SIZE).contains(&n) {
-            return Err(invalid("domain_size must be a power of two in [4, 2^28]"));
-        }
-        if u64::from(self.num_public_inputs) >= n {
-            return Err(invalid("num_public_inputs must be below domain_size"));
-        }
+        self.check_domain_shape()?;
         validate_g1(&self.q_m, "q_m")?;
         validate_g1(&self.q_l, "q_l")?;
         validate_g1(&self.q_r, "q_r")?;
@@ -72,9 +67,36 @@ impl VerifyingKey {
         validate_g1(&self.s_sigma[2], "s_sigma3")?;
         validate_g2(&self.g2_gen, "g2_gen")?;
         validate_g2(&self.g2_tau, "g2_tau")?;
+        self.finish_scalar_side()
+    }
 
-        let k1 = self.k1.to_fr().map_err(|_| invalid("k1"))?;
-        let k2 = self.k2.to_fr().map_err(|_| invalid("k2"))?;
+    /// Shape, domain, and coset-shift checks plus the digest, without curve
+    /// validation. For compile-time constant keys on SBF where curve checks
+    /// are not available (host should still prefer [`Self::validate`]).
+    pub fn trust(self) -> Result<ValidatedVerifyingKey, PlonkBatchError> {
+        self.check_domain_shape()?;
+        self.finish_scalar_side()
+    }
+
+    fn check_domain_shape(&self) -> Result<(), PlonkBatchError> {
+        let invalid = PlonkBatchError::InvalidVerifyingKey;
+        let n = self.domain_size;
+        if !n.is_power_of_two() || !(MIN_DOMAIN_SIZE..=MAX_DOMAIN_SIZE).contains(&n) {
+            return Err(invalid("domain_size must be a power of two in [4, 2^28]"));
+        }
+        if u64::from(self.num_public_inputs) >= n {
+            return Err(invalid("num_public_inputs must be below domain_size"));
+        }
+        Ok(())
+    }
+
+    // coset-shift and omega derivations; only Fr arithmetic, runs on every
+    // target
+    fn finish_scalar_side(self) -> Result<ValidatedVerifyingKey, PlonkBatchError> {
+        let invalid = PlonkBatchError::InvalidVerifyingKey;
+        let n = self.domain_size;
+        let k1 = fr_from_be(&self.k1).ok_or(invalid("k1"))?;
+        let k2 = fr_from_be(&self.k2).ok_or(invalid("k2"))?;
         if k1.is_zero() || k2.is_zero() {
             return Err(invalid("coset shifts must be nonzero"));
         }
@@ -141,27 +163,32 @@ impl ValidatedVerifyingKey {
 // and permutation commitments and the SRS points, and the domain shape and
 // coset shifts are verdict inputs just the same
 fn digest(key: &VerifyingKey) -> [u8; 32] {
-    let mut hasher = Hasher::default();
-    hasher.hash(&key.domain_size.to_be_bytes());
-    hasher.hash(&key.num_public_inputs.to_be_bytes());
-    hasher.hash(&key.q_m.0);
-    hasher.hash(&key.q_l.0);
-    hasher.hash(&key.q_r.0);
-    hasher.hash(&key.q_o.0);
-    hasher.hash(&key.q_c.0);
-    for s_sigma in &key.s_sigma {
-        hasher.hash(&s_sigma.0);
-    }
-    hasher.hash(&key.k1.0);
-    hasher.hash(&key.k2.0);
-    hasher.hash(&key.g2_gen.0);
-    hasher.hash(&key.g2_tau.0);
-    hasher.result().to_bytes()
+    // hashv over ordered chunks equals sequential Hasher updates and works on
+    // SBF, where the streaming Hasher is not available
+    hashv(&[
+        &key.domain_size.to_be_bytes(),
+        &key.num_public_inputs.to_be_bytes(),
+        &key.q_m.0,
+        &key.q_l.0,
+        &key.q_r.0,
+        &key.q_o.0,
+        &key.q_c.0,
+        &key.s_sigma[0].0,
+        &key.s_sigma[1].0,
+        &key.s_sigma[2].0,
+        &key.k1.0,
+        &key.k2.0,
+        &key.g2_gen.0,
+        &key.g2_tau.0,
+    ])
+    .to_bytes()
 }
 
 // `to_affine` does the canonical, on-curve, and (for G2) subgroup checks; a
 // key point must additionally never be infinity, which would erase entire
-// terms downstream
+// terms downstream. Host only — SBF uses [`VerifyingKey::trust`] for static
+// keys.
+#[cfg(not(target_os = "solana"))]
 fn validate_g1(point: &PodG1Point, what: &'static str) -> Result<(), PlonkBatchError> {
     let invalid = || PlonkBatchError::InvalidVerifyingKey(what);
     if point.to_affine().map_err(|_| invalid())?.is_zero() {
@@ -170,11 +197,22 @@ fn validate_g1(point: &PodG1Point, what: &'static str) -> Result<(), PlonkBatchE
     Ok(())
 }
 
+#[cfg(not(target_os = "solana"))]
 fn validate_g2(point: &PodG2Point, what: &'static str) -> Result<(), PlonkBatchError> {
     let invalid = || PlonkBatchError::InvalidVerifyingKey(what);
     if point.to_affine().map_err(|_| invalid())?.is_zero() {
         return Err(invalid());
     }
+    Ok(())
+}
+
+#[cfg(target_os = "solana")]
+fn validate_g1(_point: &PodG1Point, _what: &'static str) -> Result<(), PlonkBatchError> {
+    Ok(())
+}
+
+#[cfg(target_os = "solana")]
+fn validate_g2(_point: &PodG2Point, _what: &'static str) -> Result<(), PlonkBatchError> {
     Ok(())
 }
 

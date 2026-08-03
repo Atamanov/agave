@@ -79,14 +79,10 @@ impl Proof {
             }
         }
         for scalar in self.evaluations.slots() {
-            scalar
-                .to_fr()
-                .map_err(|_| PlonkBatchError::NonCanonicalScalar)?;
+            crate::scalar::fr_from_be(scalar).ok_or(PlonkBatchError::NonCanonicalScalar)?;
         }
         for input in &self.public_inputs {
-            input
-                .to_fr()
-                .map_err(|_| PlonkBatchError::NonCanonicalScalar)?;
+            crate::scalar::fr_from_be(input).ok_or(PlonkBatchError::NonCanonicalScalar)?;
         }
         Ok(())
     }

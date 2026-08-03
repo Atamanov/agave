@@ -3,13 +3,13 @@ use {
         PlonkBatchError, Version,
         proof::Proof,
         reduce::{ReducedProof, lagrange_count, lagrange_denominators, reduce, vanishing_eval},
+        scalar::{G1_GENERATOR, fr_from_be, fr_to_pod},
         transcript::{
             InnerChallenges, RandomizerMode, derive_inner, derive_randomizers, derive_seed,
         },
         vk::ValidatedVerifyingKey,
     },
-    ark_bn254::{Fr, G1Affine},
-    ark_ec::AffineRepr,
+    ark_bn254::Fr,
     solana_bn254_batch_syscall::{
         MSM_MAX_POINTS, PodG1G2Pair, PodG1Point, PodScalar, alt_bn128_fr_batch_invert,
         alt_bn128_g1_msm, alt_bn128_pairing_check,
@@ -87,6 +87,8 @@ pub fn plonk_batch_verify(
 
 /// Runs the per-proof reductions with the Lagrange denominators of the whole
 /// batch inverted in a single alt_bn128_fr_batch_invert call.
+// inline(never) on the batch stages keeps each frame under the 4KiB SBF stack
+#[inline(never)]
 pub(crate) fn reduce_batch(
     vk: &ValidatedVerifyingKey,
     proofs: &[Proof],
@@ -101,14 +103,14 @@ pub(crate) fn reduce_batch(
         denominators.extend(
             lagrange_denominators(vk, challenges.zeta, count)
                 .iter()
-                .map(PodScalar::from),
+                .map(fr_to_pod),
         );
     }
     let inverses =
         alt_bn128_fr_batch_invert(solana_bn254_batch_syscall::Version::V0, &denominators)?;
     let inverses: Vec<Fr> = inverses
         .iter()
-        .map(|scalar| scalar.to_fr())
+        .map(|scalar| fr_from_be(scalar).ok_or(PlonkBatchError::NonCanonicalScalar))
         .collect::<Result<_, _>>()?;
     proofs
         .iter()
@@ -132,6 +134,7 @@ pub(crate) fn reduce_batch(
 /// every Q coefficient before the MSM; no point is ever negated outside the
 /// field. Shared-basis coefficients collapse to rho-weighted sums, so the
 /// verifying-key commitments and the generator appear once whatever n is.
+#[inline(never)]
 pub(crate) fn assemble_msms(
     vk: &ValidatedVerifyingKey,
     proofs: &[Proof],
@@ -145,37 +148,39 @@ pub(crate) fn assemble_msms(
     let mut q_points = Vec::with_capacity(Q_SHARED_POINTS + Q_POINTS_PER_PROOF * n);
     let mut q_scalars = Vec::with_capacity(Q_SHARED_POINTS + Q_POINTS_PER_PROOF * n);
 
+    // reference arrays throughout: by-value point/coefficient arrays push the
+    // frame past the 4KiB SBF stack
     let mut shared = [Fr::from(0u64); Q_SHARED_POINTS];
     for (proof_coeffs, rho) in reduced.iter().zip(randomizers) {
         let vk_coeffs = &proof_coeffs.vk_coeffs;
-        let coefficients = [
-            vk_coeffs.q_m,
-            vk_coeffs.q_l,
-            vk_coeffs.q_r,
-            vk_coeffs.q_o,
-            vk_coeffs.q_c,
-            vk_coeffs.s_sigma1,
-            vk_coeffs.s_sigma2,
-            vk_coeffs.s_sigma3,
-            proof_coeffs.generator,
+        let coefficients: [&Fr; Q_SHARED_POINTS] = [
+            &vk_coeffs.q_m,
+            &vk_coeffs.q_l,
+            &vk_coeffs.q_r,
+            &vk_coeffs.q_o,
+            &vk_coeffs.q_c,
+            &vk_coeffs.s_sigma1,
+            &vk_coeffs.s_sigma2,
+            &vk_coeffs.s_sigma3,
+            &proof_coeffs.generator,
         ];
         for (accumulator, coefficient) in shared.iter_mut().zip(coefficients) {
-            *accumulator += *rho * coefficient;
+            *accumulator += *rho * *coefficient;
         }
     }
-    let shared_points = [
-        key.q_m,
-        key.q_l,
-        key.q_r,
-        key.q_o,
-        key.q_c,
-        key.s_sigma[0],
-        key.s_sigma[1],
-        key.s_sigma[2],
-        PodG1Point::from(&G1Affine::generator()),
+    let shared_points: [&PodG1Point; Q_SHARED_POINTS] = [
+        &key.q_m,
+        &key.q_l,
+        &key.q_r,
+        &key.q_o,
+        &key.q_c,
+        &key.s_sigma[0],
+        &key.s_sigma[1],
+        &key.s_sigma[2],
+        &G1_GENERATOR,
     ];
     for (point, coefficient) in shared_points.iter().zip(shared) {
-        q_points.push(*point);
+        q_points.push(**point);
         q_scalars.push(-coefficient);
     }
 
@@ -185,20 +190,20 @@ pub(crate) fn assemble_msms(
         p_points.push(proof.shifted_opening);
         p_scalars.push(*rho * proof_coeffs.w_zeta_omega_p);
 
-        let per_proof = [
-            (proof.grand_product, proof_coeffs.z),
-            (proof.quotient[0], proof_coeffs.t_lo),
-            (proof.quotient[1], proof_coeffs.t_mid),
-            (proof.quotient[2], proof_coeffs.t_hi),
-            (proof.wire_commitments[0], proof_coeffs.a),
-            (proof.wire_commitments[1], proof_coeffs.b),
-            (proof.wire_commitments[2], proof_coeffs.c),
-            (proof.opening, proof_coeffs.w_zeta_q),
-            (proof.shifted_opening, proof_coeffs.w_zeta_omega_q),
+        let per_proof: [(&PodG1Point, &Fr); Q_POINTS_PER_PROOF] = [
+            (&proof.grand_product, &proof_coeffs.z),
+            (&proof.quotient[0], &proof_coeffs.t_lo),
+            (&proof.quotient[1], &proof_coeffs.t_mid),
+            (&proof.quotient[2], &proof_coeffs.t_hi),
+            (&proof.wire_commitments[0], &proof_coeffs.a),
+            (&proof.wire_commitments[1], &proof_coeffs.b),
+            (&proof.wire_commitments[2], &proof_coeffs.c),
+            (&proof.opening, &proof_coeffs.w_zeta_q),
+            (&proof.shifted_opening, &proof_coeffs.w_zeta_omega_q),
         ];
         for (point, coefficient) in per_proof {
-            q_points.push(point);
-            q_scalars.push(-(*rho * coefficient));
+            q_points.push(*point);
+            q_scalars.push(-(*rho * *coefficient));
         }
     }
 
@@ -206,7 +211,7 @@ pub(crate) fn assemble_msms(
 }
 
 fn msm(points: &[PodG1Point], scalars: &[Fr]) -> Result<PodG1Point, PlonkBatchError> {
-    let scalars: Vec<PodScalar> = scalars.iter().map(PodScalar::from).collect();
+    let scalars: Vec<PodScalar> = scalars.iter().map(fr_to_pod).collect();
     Ok(alt_bn128_g1_msm(
         solana_bn254_batch_syscall::Version::V0,
         points,
@@ -222,8 +227,8 @@ mod tests {
             test_support::{Trapdoor, g1_bytes, make_proof, make_vk, make_vk_without_inputs, rng},
             transcript::RandomizerMode::Independent,
         },
-        ark_bn254::{Bn254, Fq, G1Projective},
-        ark_ec::{CurveGroup, pairing::Pairing},
+        ark_bn254::{Bn254, Fq, G1Affine, G1Projective},
+        ark_ec::{AffineRepr, CurveGroup, pairing::Pairing},
         ark_ff::{Field, One, PrimeField, UniformRand},
         ark_std::rand::rngs::StdRng,
     };
