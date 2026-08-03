@@ -1,9 +1,11 @@
 use {
     crate::Groth16BatchError,
-    ark_ec::AffineRepr,
     solana_bn254_batch_syscall::{PodG1Point, PodG2Point},
-    solana_keccak_hasher::Hasher,
+    solana_keccak_hasher::hashv,
 };
+
+#[cfg(not(target_os = "solana"))]
+use ark_ec::AffineRepr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PedersenKey {
@@ -37,6 +39,21 @@ pub struct ValidatedVerifyingKey {
 impl VerifyingKey {
     pub fn num_public_inputs(&self) -> usize {
         self.ic.len().saturating_sub(1)
+    }
+
+    /// Shape + digest only. For compile-time constant keys on SBF where curve
+    /// checks are not available (host should still prefer [`Self::validate`]).
+    pub fn trust(self) -> Result<ValidatedVerifyingKey, Groth16BatchError> {
+        if self.ic.is_empty() {
+            return Err(Groth16BatchError::InvalidVerifyingKey(
+                "ic must contain IC_0",
+            ));
+        }
+        if self.ic.len() > usize::from(u16::MAX) {
+            return Err(Groth16BatchError::InvalidVerifyingKey("too many IC points"));
+        }
+        let digest = digest(&self);
+        Ok(ValidatedVerifyingKey { key: self, digest })
     }
 
     pub fn validate(self) -> Result<ValidatedVerifyingKey, Groth16BatchError> {
@@ -77,28 +94,31 @@ impl ValidatedVerifyingKey {
 }
 
 fn digest(key: &VerifyingKey) -> [u8; 32] {
-    let mut hasher = Hasher::default();
     // the tag byte fixes the committed-vs-vanilla layout so two rails can
     // never serialize to one byte string
-    hasher.hash(&[u8::from(key.pedersen.is_some())]);
-    hasher.hash(&key.alpha_g1.0);
-    hasher.hash(&key.beta_g2.0);
-    hasher.hash(&key.gamma_g2.0);
-    hasher.hash(&key.delta_g2.0);
-    hasher.hash(&(key.ic.len() as u16).to_be_bytes());
+    let tag = [u8::from(key.pedersen.is_some())];
+    let ic_len = (key.ic.len() as u16).to_be_bytes();
+    let mut parts: Vec<&[u8]> = Vec::with_capacity(6 + key.ic.len() + 2);
+    parts.push(&tag);
+    parts.push(&key.alpha_g1.0);
+    parts.push(&key.beta_g2.0);
+    parts.push(&key.gamma_g2.0);
+    parts.push(&key.delta_g2.0);
+    parts.push(&ic_len);
     for ic in &key.ic {
-        hasher.hash(&ic.0);
+        parts.push(&ic.0);
     }
     if let Some(pedersen) = &key.pedersen {
-        hasher.hash(&pedersen.g2.0);
-        hasher.hash(&pedersen.sigma_g2.0);
+        parts.push(&pedersen.g2.0);
+        parts.push(&pedersen.sigma_g2.0);
     }
-    hasher.result().to_bytes()
+    hashv(&parts).to_bytes()
 }
 
 // `to_affine` does the canonical, on-curve, and (for G2) subgroup checks; a key
 // point must additionally never be infinity, which would void everything
-// downstream
+// downstream. Host only — SBF uses [`VerifyingKey::trust`] for static keys.
+#[cfg(not(target_os = "solana"))]
 fn validate_g1(point: &PodG1Point, what: &'static str) -> Result<(), Groth16BatchError> {
     let invalid = || Groth16BatchError::InvalidVerifyingKey(what);
     if point.to_affine().map_err(|_| invalid())?.is_zero() {
@@ -107,11 +127,22 @@ fn validate_g1(point: &PodG1Point, what: &'static str) -> Result<(), Groth16Batc
     Ok(())
 }
 
+#[cfg(not(target_os = "solana"))]
 fn validate_g2(point: &PodG2Point, what: &'static str) -> Result<(), Groth16BatchError> {
     let invalid = || Groth16BatchError::InvalidVerifyingKey(what);
     if point.to_affine().map_err(|_| invalid())?.is_zero() {
         return Err(invalid());
     }
+    Ok(())
+}
+
+#[cfg(target_os = "solana")]
+fn validate_g1(_point: &PodG1Point, _what: &'static str) -> Result<(), Groth16BatchError> {
+    Ok(())
+}
+
+#[cfg(target_os = "solana")]
+fn validate_g2(_point: &PodG2Point, _what: &'static str) -> Result<(), Groth16BatchError> {
     Ok(())
 }
 

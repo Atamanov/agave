@@ -225,9 +225,17 @@ fn fr_to_pod(scalar: &Fr) -> PodScalar {
 }
 
 fn fr_from_be(scalar: &PodScalar) -> Result<Fr, Groth16BatchError> {
-    scalar
-        .to_fr()
-        .map_err(|_| Groth16BatchError::NonCanonicalInput)
+    // Parse big-endian Fr without host-only PodScalar::to_fr (SBF-safe).
+    use ark_ff::PrimeField;
+    let mut limbs = [0u64; 4];
+    for (i, limb) in limbs.iter_mut().enumerate() {
+        let start = 32 - 8 * (i + 1);
+        let mut chunk = [0u8; 8];
+        chunk.copy_from_slice(&scalar.0[start..start + 8]);
+        *limb = u64::from_be_bytes(chunk);
+    }
+    let bi = <Fr as PrimeField>::BigInt::new(limbs);
+    Fr::from_bigint(bi).ok_or(Groth16BatchError::NonCanonicalInput)
 }
 
 #[cfg(test)]
