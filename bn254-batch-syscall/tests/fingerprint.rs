@@ -137,6 +137,8 @@ fn error_code(e: &AltBn128BatchError) -> u8 {
         AltBn128BatchError::ZeroInput => 5,
         AltBn128BatchError::CapExceeded => 6,
         AltBn128BatchError::LengthMismatch => 7,
+        // Only the solana target produces this, so no fingerprint case reaches it.
+        AltBn128BatchError::SyscallFailed => 8,
     }
 }
 

@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "solana"))]
 use {
     ark_bn254::{G1Affine, G2Affine},
     ark_ec::AffineRepr,
@@ -22,10 +23,15 @@ pub enum AltBn128BatchError {
     CapExceeded,
     #[error("points and scalars disagree in count")]
     LengthMismatch,
+    /// On the solana target the runtime reports every rejection as one nonzero
+    /// code, so the variants above are not recoverable there.
+    #[error("syscall rejected the input")]
+    SyscallFailed,
 }
 
 // infinity is a valid group element at this layer; rejecting infinity in proof
 // positions is the on-chain verifier's job, not the syscall's
+#[cfg(not(target_os = "solana"))]
 pub(crate) fn validate_g1(point: &G1Affine) -> Result<(), AltBn128BatchError> {
     if point.is_zero() {
         return Ok(());
@@ -37,6 +43,7 @@ pub(crate) fn validate_g1(point: &G1Affine) -> Result<(), AltBn128BatchError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "solana"))]
 pub(crate) fn validate_g2(point: &G2Affine) -> Result<(), AltBn128BatchError> {
     if point.is_zero() {
         return Ok(());

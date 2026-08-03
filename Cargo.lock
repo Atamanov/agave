@@ -7249,7 +7249,7 @@ dependencies = [
 
 [[package]]
 name = "solana-bn254-batch-syscall"
-version = "4.3.0-alpha.1"
+version = "4.1.2"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-ec 0.5.0",
@@ -7258,13 +7258,14 @@ dependencies = [
  "bytemuck",
  "bytemuck_derive",
  "solana-bn254",
+ "solana-define-syscall 4.0.1",
  "solana-keccak-hasher",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "solana-bn254-groth16-batch"
-version = "4.3.0-alpha.1"
+version = "4.1.2"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-ec 0.5.0",
@@ -7277,7 +7278,7 @@ dependencies = [
 
 [[package]]
 name = "solana-bn254-plonk-batch"
-version = "4.3.0-alpha.1"
+version = "4.1.2"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-ec 0.5.0",

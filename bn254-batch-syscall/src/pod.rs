@@ -1,11 +1,13 @@
+use crate::encoding::{G1_BYTES, G2_BYTES, SCALAR_BYTES};
+use bytemuck_derive::{Pod, Zeroable};
+#[cfg(not(target_os = "solana"))]
 use {
     crate::{
-        encoding::{G1_BYTES, G2_BYTES, SCALAR_BYTES, parse_fr, parse_g1, parse_g2, serialize_g1},
+        encoding::{parse_fr, parse_g1, parse_g2, serialize_g1},
         validation::{AltBn128BatchError, validate_g1, validate_g2},
     },
     ark_bn254::{Fr, G1Affine, G2Affine},
     ark_ff::PrimeField,
-    bytemuck_derive::{Pod, Zeroable},
 };
 
 /// G1 affine point: 64 big-endian bytes (x | y), all-zeros = infinity. The wire
@@ -39,6 +41,7 @@ pub struct PodG1G2Pair {
 #[repr(transparent)]
 pub struct PodPairingResult(pub [u8; 32]);
 
+#[cfg(not(target_os = "solana"))]
 impl PodG1Point {
     /// Canonical coordinates, on-curve; G1 cofactor is 1 so on-curve implies
     /// subgroup membership. Infinity is a valid group element here.
@@ -49,12 +52,14 @@ impl PodG1Point {
     }
 }
 
+#[cfg(not(target_os = "solana"))]
 impl From<&G1Affine> for PodG1Point {
     fn from(point: &G1Affine) -> Self {
         Self(serialize_g1(point))
     }
 }
 
+#[cfg(not(target_os = "solana"))]
 impl PodG2Point {
     /// Canonical coordinates, on-curve, r-order subgroup membership.
     pub fn to_affine(&self) -> Result<G2Affine, AltBn128BatchError> {
@@ -64,12 +69,14 @@ impl PodG2Point {
     }
 }
 
+#[cfg(not(target_os = "solana"))]
 impl PodScalar {
     pub fn to_fr(&self) -> Result<Fr, AltBn128BatchError> {
         parse_fr(&self.0)
     }
 }
 
+#[cfg(not(target_os = "solana"))]
 impl From<&Fr> for PodScalar {
     fn from(scalar: &Fr) -> Self {
         // serialize the four limbs big-endian in place; no allocation, unlike
