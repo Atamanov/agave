@@ -10,8 +10,11 @@
 //! G2 arithmetic, no prepared points, and no GT values appear anywhere.
 
 pub use crate::{
-    transcript::RandomizerMode,
-    verify::{Proof, ProofCommitment, groth16_batch_verify},
+    transcript::{RandomizerMode, derive_randomizers, derive_seed},
+    verify::{
+        Proof, ProofCommitment, equation_count, fold_pairs, groth16_batch_verify,
+        validate_batch_shape,
+    },
     vk::{PedersenKey, ValidatedVerifyingKey, VerifyingKey},
 };
 use solana_bn254_batch_syscall::AltBn128BatchError;
@@ -47,8 +50,8 @@ pub enum Groth16BatchError {
     Syscall(#[from] AltBn128BatchError),
 }
 
-#[cfg(test)]
-pub(crate) mod test_utils {
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod test_utils {
     use {
         crate::{
             verify::{Proof, ProofCommitment},

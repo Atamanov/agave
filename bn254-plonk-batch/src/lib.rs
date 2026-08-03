@@ -16,8 +16,8 @@
 
 pub use crate::{
     proof::{Evaluations, Proof},
-    transcript::RandomizerMode,
-    verify::{MAX_PROOFS, plonk_batch_verify},
+    transcript::{RandomizerMode, derive_randomizers, derive_seed},
+    verify::{FoldGroup, MAX_PROOFS, fold_msms, plonk_batch_verify, validate_batch_shape},
     vk::{ValidatedVerifyingKey, VerifyingKey},
 };
 use solana_bn254_batch_syscall::AltBn128BatchError;
@@ -43,6 +43,8 @@ pub enum PlonkBatchError {
     EmptyBatch,
     #[error("batch exceeds the Q-side MSM point budget")]
     TooManyProofs,
+    #[error("randomizer count does not match the proof count")]
+    RandomizerCountMismatch,
     #[error("public input count does not match the verifying key")]
     InputCountMismatch,
     #[error("infinity point in a proof position")]

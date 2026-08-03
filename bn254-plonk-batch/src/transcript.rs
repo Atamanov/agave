@@ -165,8 +165,11 @@ impl RandomizerMode {
 /// Per-proof records need no length prefixes: the single VK
 /// fixes the layout of every record, and validation pinned each proof's
 /// public input count to that key before any hashing.
+/// Public as a composition surface: a joint (multi-scheme) verifier absorbs
+/// this seed as a PLONK section digest, so one collision-resistant value
+/// binds the section's whole framing.
 #[inline(never)]
-pub(crate) fn derive_seed(
+pub fn derive_seed(
     mode: RandomizerMode,
     vk: &ValidatedVerifyingKey,
     proofs: &[Proof],
@@ -194,11 +197,7 @@ pub(crate) fn derive_seed(
 /// exactly 2^128 values, no zero and no bias. k is
 /// 1-based in proof order. In `Powers` mode the k-th randomizer is r^k of the
 /// single k = 1 draw.
-pub(crate) fn derive_randomizers(
-    seed: &[u8; 32],
-    num_proofs: u64,
-    mode: RandomizerMode,
-) -> Vec<Fr> {
+pub fn derive_randomizers(seed: &[u8; 32], num_proofs: u64, mode: RandomizerMode) -> Vec<Fr> {
     let draw = |k: u64| -> Fr {
         let digest = hashv(&[seed, &k.to_be_bytes()]).to_bytes();
         let mut lo = [0u8; 16];

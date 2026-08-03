@@ -49,12 +49,8 @@ pub fn groth16_batch_verify(
     // shape and canonicality checks come before any hashing
     validate_batch_shape(vks, proofs)?;
     let seed = derive_seed(mode, vks, proofs);
-    let num_equations = proofs
-        .iter()
-        .map(|proof| if proof.commitment.is_some() { 2u64 } else { 1 })
-        .sum();
-    let randomizers = derive_randomizers(&seed, num_equations, mode);
-    let pairs = assemble_pairs(vks, proofs, &randomizers)?;
+    let randomizers = derive_randomizers(&seed, equation_count(proofs), mode);
+    let pairs = fold_pairs(vks, proofs, &randomizers)?;
     Ok(alt_bn128_pairing_check(
         solana_bn254_batch_syscall::Version::V0,
         &pairs,
@@ -67,7 +63,19 @@ fn is_infinity_g1(point: &PodG1Point) -> bool {
     point.0 == [0u8; G1_BYTES]
 }
 
-fn validate_batch_shape(
+/// One verification equation per proof plus one more for a committed proof's
+/// Pedersen proof of knowledge; the randomizer stream is indexed by equation.
+pub fn equation_count(proofs: &[Proof]) -> u64 {
+    proofs
+        .iter()
+        .map(|proof| if proof.commitment.is_some() { 2u64 } else { 1 })
+        .sum()
+}
+
+/// Shape and canonicality checks over the frozen batch, before any hashing.
+/// Public as a composition surface: a joint (multi-scheme) verifier runs the
+/// same checks before absorbing this batch into its own transcript.
+pub fn validate_batch_shape(
     vks: &[ValidatedVerifyingKey],
     proofs: &[Proof],
 ) -> Result<(), Groth16BatchError> {
@@ -113,7 +121,13 @@ fn validate_batch_shape(
 /// The folded pair list: per proof e([r_i]A_i, B_i), then per key the
 /// MSM-fed fixed-G2 terms. Negations fold into the MSM scalars ((r - s)P
 /// = -[s]P), so no point is ever negated outside the field.
-pub(crate) fn assemble_pairs(
+///
+/// Public as a composition surface: a joint verifier concatenates this pair
+/// list with other schemes' pairs into one pairing check. `randomizers` are
+/// one per verification equation ([`equation_count`]) in proof order, the
+/// Groth16 equation before the PoK within a committed proof; the caller runs
+/// [`validate_batch_shape`] first.
+pub fn fold_pairs(
     vks: &[ValidatedVerifyingKey],
     proofs: &[Proof],
     randomizers: &[Fr],
@@ -323,7 +337,7 @@ mod tests {
         proofs[1].c = g1_bytes(&(c1 - d).into_affine());
 
         let ones = vec![Fr::one(); 2];
-        let pairs = assemble_pairs(&vks, &proofs, &ones).unwrap();
+        let pairs = fold_pairs(&vks, &proofs, &ones).unwrap();
         let naive = alt_bn128_pairing_check(solana_bn254_batch_syscall::Version::V0, &pairs);
         assert_eq!(
             naive,
@@ -350,7 +364,7 @@ mod tests {
         // n + 5 pair terms for one committed key
         let seed = derive_seed(Independent, &vks, &proofs);
         let randomizers = derive_randomizers(&seed, 6, Independent);
-        let pairs = assemble_pairs(&vks, &proofs, &randomizers).unwrap();
+        let pairs = fold_pairs(&vks, &proofs, &randomizers).unwrap();
         assert_eq!(pairs.len(), 3 + 5);
 
         // ... and a committed proof draws two distinct randomizers
@@ -364,7 +378,7 @@ mod tests {
         let (_, vks, proofs) = vanilla_batch(&mut rng, 4);
         let seed = derive_seed(Independent, &vks, &proofs);
         let randomizers = derive_randomizers(&seed, 4, Independent);
-        let pairs = assemble_pairs(&vks, &proofs, &randomizers).unwrap();
+        let pairs = fold_pairs(&vks, &proofs, &randomizers).unwrap();
         assert_eq!(pairs.len(), 4 + 3);
     }
 
@@ -385,7 +399,7 @@ mod tests {
         // n + 3 + 5 pair terms for one vanilla and one committed key
         let seed = derive_seed(Independent, &vks, &proofs);
         let randomizers = derive_randomizers(&seed, 4, Independent);
-        let pairs = assemble_pairs(&vks, &proofs, &randomizers).unwrap();
+        let pairs = fold_pairs(&vks, &proofs, &randomizers).unwrap();
         assert_eq!(pairs.len(), 3 + 3 + 5);
 
         // one bad proof anywhere fails the mixed batch

@@ -14,11 +14,15 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
 agave-unstable-api = []
+# exposes the trapdoor fixture prover in `test_utils` to dependent test
+# suites; never part of the verification API
+test-fixtures = ["dep:ark-std"]
 
 [dependencies]
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
 ark-ec = { version = "0.5", default-features = false }
 ark-ff = { version = "0.5", default-features = false }
+ark-std = { version = "0.5", default-features = false, optional = true }
 solana-bn254-batch-syscall = { workspace = true }
 solana-keccak-hasher = { workspace = true, features = ["sha3"] }
 thiserror = { workspace = true }

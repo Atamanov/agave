@@ -36,7 +36,10 @@ impl RandomizerMode {
 /// key index does double duty: it binds each proof to its
 /// circuit and it fixes the record layout, since whether `com`/`pok` are
 /// present is a function of the named key.
-pub(crate) fn derive_seed(
+/// Public as a composition surface: a joint (multi-scheme) verifier absorbs
+/// this seed as its Groth16 section digest, so one collision-resistant value
+/// binds the section's whole framing.
+pub fn derive_seed(
     mode: RandomizerMode,
     vks: &[ValidatedVerifyingKey],
     proofs: &[Proof],
@@ -81,11 +84,7 @@ pub(crate) fn derive_seed(
 /// equations in proof order, the Groth16 equation before the PoK within a
 /// committed proof. In `Powers` mode the k-th randomizer is r^k of the single
 /// k = 1 draw.
-pub(crate) fn derive_randomizers(
-    seed: &[u8; 32],
-    num_equations: u64,
-    mode: RandomizerMode,
-) -> Vec<Fr> {
+pub fn derive_randomizers(seed: &[u8; 32], num_equations: u64, mode: RandomizerMode) -> Vec<Fr> {
     let draw = |k: u64| -> Fr {
         let k_be = k.to_be_bytes();
         let digest = keccak_parts(&[seed, &k_be]);
