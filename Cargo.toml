@@ -12,6 +12,7 @@ members = [
     "bloom",
     "bls-cert-verify",
     "bn254-batch-syscall",
+    "bn254-groth16-batch",
     "bucket_map",
     "builtins",
     "builtins-default-costs",
