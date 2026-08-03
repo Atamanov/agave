@@ -5,8 +5,8 @@ use {
         pod::{PodG1Point, PodScalar},
         validation::AltBn128BatchError,
     },
-    ark_bn254::{Fr, G1Projective},
-    ark_ec::{CurveGroup, VariableBaseMSM},
+    ark_bn254::{Fr, G1Projective, g1::Config as G1Config},
+    ark_ec::{AffineRepr, CurveGroup, VariableBaseMSM, scalar_mul::glv::GLVConfig},
 };
 
 /// Multi-scalar multiplication in G1: sum of scalars[i] * points[i].
@@ -40,8 +40,14 @@ pub fn alt_bn128_g1_msm(
         exponents.push(scalar.to_fr()?);
     }
 
-    // lengths are already equal, so the checked `msm` adds nothing here
-    let sum = G1Projective::msm_unchecked(&bases, &exponents);
+    // arkworks' best single-scalar path is the GLV endomorphism mul; its MSM
+    // (Pippenger) carries fixed setup that only pays off across many points, so
+    // route n == 1 to glv_mul and larger n to the library MSM.
+    let sum = if bases.len() == 1 {
+        G1Config::glv_mul_projective(bases[0].into_group(), exponents[0])
+    } else {
+        G1Projective::msm_unchecked(&bases, &exponents)
+    };
     Ok(PodG1Point::from(&sum.into_affine()))
 }
 

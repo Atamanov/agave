@@ -2,28 +2,10 @@ use {
     crate::{
         Version, encoding::PAIRING_MAX_PAIRS, pod::PodG1G2Pair, validation::AltBn128BatchError,
     },
-    ark_bn254::{Bn254, Fq12, G1Affine, G2Affine},
-    ark_ec::{
-        AffineRepr,
-        bn::{BnConfig, G2Prepared, TwistType},
-        pairing::{MillerLoopOutput, Pairing},
-    },
-    ark_ff::{CyclotomicMultSubgroup, Field, One},
+    ark_bn254::{Bn254, Fq12},
+    ark_ec::{AffineRepr, pairing::Pairing},
+    ark_ff::One,
 };
-
-type EllCoeff = ark_ec::bn::g2::EllCoeff<ark_bn254::Config>;
-type PreparedG2 = G2Prepared<ark_bn254::Config>;
-
-// number of line coefficients arkworks precomputes for a non-infinity BN254 G2
-pub(crate) const ELL_COEFFS_PER_PREPARED_G2: usize = 87;
-
-fn prepare_g2(g2: &G2Affine) -> PreparedG2 {
-    debug_assert!(
-        !g2.is_zero(),
-        "infinity pairs are skipped before preparation"
-    );
-    (*g2).into()
-}
 
 /// Boolean multi-pairing check: true iff the product of e(G1_i, G2_i) is the
 /// identity in GT.
@@ -49,10 +31,8 @@ pub fn alt_bn128_pairing_check(
         return Err(AltBn128BatchError::CapExceeded);
     }
 
-    // 256 prepared points hold ~4.3 MB of line coefficients on the host heap;
-    // the miller product is multiplicative across pairs, so chunking the
-    // preparation is a possible follow-up if that ever matters
-    let mut prepared: Vec<(G1Affine, PreparedG2)> = Vec::with_capacity(pairs.len());
+    let mut g1s = Vec::with_capacity(pairs.len());
+    let mut g2s = Vec::with_capacity(pairs.len());
     for pair in pairs {
         let g1 = pair.g1.to_affine()?;
         let g2 = pair.g2.to_affine()?;
@@ -60,86 +40,16 @@ pub fn alt_bn128_pairing_check(
         if g1.is_zero() || g2.is_zero() {
             continue;
         }
-        prepared.push((g1, prepare_g2(&g2)));
+        g1s.push(g1);
+        g2s.push(g2);
     }
-    if prepared.is_empty() {
+    if g1s.is_empty() {
         return Ok(true);
     }
 
-    let f = multi_miller_loop_prepared(&prepared);
-    match Bn254::final_exponentiation(MillerLoopOutput(f)) {
-        Some(gt) => Ok(gt.0 == Fq12::one()),
-        None => {
-            // unreachable: a miller output over validated non-infinity pairs
-            // is nonzero, and final exponentiation only fails on zero
-            debug_assert!(
-                false,
-                "final exponentiation of a nonzero miller output cannot fail"
-            );
-            Ok(false)
-        }
-    }
-}
-
-// one shared miller loop over precomputed line coefficients, one squaring per
-// iteration for the whole batch; no allocation in the loop
-fn multi_miller_loop_prepared(pairs: &[(G1Affine, PreparedG2)]) -> Fq12 {
-    let mut f = Fq12::one();
-    let loop_count = <ark_bn254::Config as BnConfig>::ATE_LOOP_COUNT;
-    let mut idx = 0usize;
-
-    for i in (1..loop_count.len()).rev() {
-        if i != loop_count.len() - 1 {
-            f.square_in_place();
-        }
-        for (g1, prep) in pairs {
-            ell(&mut f, &prep.ell_coeffs[idx], g1);
-        }
-        idx += 1;
-        let bit = loop_count[i - 1];
-        if bit == 1 || bit == -1 {
-            for (g1, prep) in pairs {
-                ell(&mut f, &prep.ell_coeffs[idx], g1);
-            }
-            idx += 1;
-        }
-    }
-
-    if <ark_bn254::Config as BnConfig>::X_IS_NEGATIVE {
-        f.cyclotomic_inverse_in_place();
-    }
-
-    for (g1, prep) in pairs {
-        ell(&mut f, &prep.ell_coeffs[idx], g1);
-    }
-    idx += 1;
-    for (g1, prep) in pairs {
-        ell(&mut f, &prep.ell_coeffs[idx], g1);
-    }
-    debug_assert_eq!(idx + 1, ELL_COEFFS_PER_PREPARED_G2);
-    f
-}
-
-#[inline]
-fn ell(f: &mut Fq12, coeffs: &EllCoeff, p: &G1Affine) {
-    let Some((x, y)) = p.xy() else {
-        return;
-    };
-    let mut c0 = coeffs.0;
-    let mut c1 = coeffs.1;
-    match <ark_bn254::Config as BnConfig>::TWIST_TYPE {
-        TwistType::M => {
-            let mut c2 = coeffs.2;
-            c2.mul_assign_by_fp(&y);
-            c1.mul_assign_by_fp(&x);
-            f.mul_by_014(&c0, &c1, &c2);
-        }
-        TwistType::D => {
-            c0.mul_assign_by_fp(&y);
-            c1.mul_assign_by_fp(&x);
-            f.mul_by_034(&c0, &c1, &coeffs.2);
-        }
-    }
+    // arkworks' multi_pairing: one shared Miller loop over prepared lines and a
+    // single final exponentiation, the reference batch pairing-product primitive.
+    Ok(Bn254::multi_pairing(g1s, g2s).0 == Fq12::one())
 }
 
 #[cfg(test)]
@@ -153,7 +63,7 @@ mod tests {
                 random_g1, random_g2, rng, telescoping_pairs,
             },
         },
-        ark_bn254::{Fq, Fr, G1Projective, G2Projective},
+        ark_bn254::{Fq, Fr, G1Affine, G1Projective, G2Affine, G2Projective},
         ark_ec::{CurveGroup, PrimeGroup},
         ark_ff::UniformRand,
         ark_std::rand::Rng,
