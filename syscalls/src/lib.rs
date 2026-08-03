@@ -521,6 +521,18 @@ pub fn create_program_runtime_environment(
         "sol_alt_bn128_pairing_check",
         SyscallAltBn128PairingCheck
     )?;
+    register_feature_gated_function!(
+        result,
+        enable_alt_bn128_batch_syscalls,
+        "sol_alt_bn128_fr_lincomb",
+        SyscallAltBn128FrLincomb
+    )?;
+    register_feature_gated_function!(
+        result,
+        enable_alt_bn128_batch_syscalls,
+        "sol_alt_bn128_fr_batch_invert",
+        SyscallAltBn128FrBatchInvert
+    )?;
 
     // Big_mod_exp
     register_feature_gated_function!(
@@ -2865,6 +2877,106 @@ declare_builtin_function!(
                     let result_ref_mut: (&mut PodPairingResult) = map(result_addr)?;
                 );
                 *result_ref_mut = PodPairingResult::from_verdict(verdict);
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+// both scalar-field syscalls are priced base + per_term * n
+fn alt_bn128_fr_cost(base_cost: u64, per_term_cost: u64, num_elems: u64) -> u64 {
+    base_cost.saturating_add(per_term_cost.saturating_mul(num_elems))
+}
+
+declare_builtin_function!(
+    /// Inner product over the BN254 (alt_bn128) scalar field: writes the 32-byte
+    /// big-endian scalar `sum(a[i] * b[i]) mod q` to `result_addr`.
+    ///
+    /// Inputs are two `num_elems` x 32-byte canonical big-endian scalar arrays
+    /// (< q) at `a_addr` and `b_addr`, which may alias. At most 2048 elements;
+    /// an empty input is an error. Compute is charged up front from the declared
+    /// `num_elems`, so malformed input costs the same as valid input. Returns 0
+    /// on success and 1 on any validation error.
+    SyscallAltBn128FrLincomb,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        num_elems: u64,
+        a_addr: u64,
+        b_addr: u64,
+        result_addr: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{Version, alt_bn128_fr_lincomb, PodScalar};
+
+        let check_aligned = invoke_context.get_check_aligned();
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = alt_bn128_fr_cost(
+            execution_cost.alt_bn128_fr_lincomb_base_cost,
+            execution_cost.alt_bn128_fr_lincomb_per_term_cost,
+            num_elems,
+        );
+        invoke_context.compute_meter.consume_checked(cost)?;
+
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let a = translate_slice::<PodScalar>(memory_mapping, a_addr, num_elems, check_aligned)?;
+        let b = translate_slice::<PodScalar>(memory_mapping, b_addr, num_elems, check_aligned)?;
+
+        match alt_bn128_fr_lincomb(Version::V0, a, b) {
+            Ok(result) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: (&mut PodScalar) = map(result_addr)?;
+                );
+                *result_ref_mut = result;
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    /// Batch inverse over the BN254 (alt_bn128) scalar field: writes `num_elems`
+    /// x 32-byte big-endian scalars `a[i]^-1 mod q` to `result_addr`.
+    ///
+    /// Input is `num_elems` x 32-byte canonical big-endian scalars (< q) at
+    /// `a_addr`, every one nonzero (the inverse of zero is undefined). At most
+    /// 2048 elements; an empty input is an error. The whole input is validated
+    /// before any output byte is written. Compute is charged up front from the
+    /// declared `num_elems`. Returns 0 on success and 1 on any validation error.
+    SyscallAltBn128FrBatchInvert,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        num_elems: u64,
+        a_addr: u64,
+        result_addr: u64,
+        _arg4: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{Version, alt_bn128_fr_batch_invert, PodScalar};
+
+        let check_aligned = invoke_context.get_check_aligned();
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = alt_bn128_fr_cost(
+            execution_cost.alt_bn128_fr_batch_invert_base_cost,
+            execution_cost.alt_bn128_fr_batch_invert_per_term_cost,
+            num_elems,
+        );
+        invoke_context.compute_meter.consume_checked(cost)?;
+
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let a = translate_slice::<PodScalar>(memory_mapping, a_addr, num_elems, check_aligned)?;
+
+        match alt_bn128_fr_batch_invert(Version::V0, a) {
+            Ok(result) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: (&mut [PodScalar]) = map(result_addr, num_elems)?;
+                );
+                result_ref_mut.copy_from_slice(&result);
                 Ok(SUCCESS)
             }
             Err(_) => Ok(1),
@@ -8824,6 +8936,181 @@ mod tests {
             0,
             0,
         );
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+    }
+
+    fn fr_lincomb_cost(invoke_context: &InvokeContext, num_elems: u64) -> u64 {
+        let c = invoke_context.get_execution_cost();
+        alt_bn128_fr_cost(
+            c.alt_bn128_fr_lincomb_base_cost,
+            c.alt_bn128_fr_lincomb_per_term_cost,
+            num_elems,
+        )
+    }
+
+    fn fr_batch_invert_cost(invoke_context: &InvokeContext, num_elems: u64) -> u64 {
+        let c = invoke_context.get_execution_cost();
+        alt_bn128_fr_cost(
+            c.alt_bn128_fr_batch_invert_base_cost,
+            c.alt_bn128_fr_batch_invert_per_term_cost,
+            num_elems,
+        )
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_fr_lincomb() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        // <[2, 3], [5, 7]> = 10 + 21 = 31
+        let mut a = [0u8; 64];
+        a[31] = 2;
+        a[63] = 3;
+        let mut b = [0u8; 64];
+        b[31] = 5;
+        b[63] = 7;
+        let mut expected = [0u8; 32];
+        expected[31] = 31;
+
+        let a_va = 0x100000000;
+        let b_va = 0x200000000;
+        let result_va = 0x300000000;
+        let mut result_buf = [0u8; 32];
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const a[..], a_va),
+                    MemoryRegion::new(&raw const b[..], b_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+
+        let cost = fr_lincomb_cost(&invoke_context, 2);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        let code = SyscallAltBn128FrLincomb::rust(&mut invoke_context, 2, a_va, b_va, result_va, 0)
+            .unwrap();
+        assert_eq!(code, SUCCESS);
+        assert_eq!(result_buf, expected);
+
+        // one unit short aborts before any work, pinning the exact charge
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(cost.saturating_sub(1));
+        let result =
+            SyscallAltBn128FrLincomb::rust(&mut invoke_context, 2, a_va, b_va, result_va, 0);
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+
+        // num_elems = u64::MAX saturates the up-front charge and exhausts any budget
+        invoke_context.compute_meter.mock_set_remaining(10_000_000);
+        let result =
+            SyscallAltBn128FrLincomb::rust(&mut invoke_context, u64::MAX, a_va, b_va, result_va, 0);
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_fr_batch_invert() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        // invert [1, 2]: 1^-1 == 1 (checked); the second slot is the nonzero 2^-1
+        let mut a = [0u8; 64];
+        a[31] = 1;
+        a[63] = 2;
+        let a_va = 0x100000000;
+        let result_va = 0x300000000;
+        let mut result_buf = [0u8; 64];
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const a[..], a_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+
+        let cost = fr_batch_invert_cost(&invoke_context, 2);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        let code =
+            SyscallAltBn128FrBatchInvert::rust(&mut invoke_context, 2, a_va, result_va, 0, 0)
+                .unwrap();
+        assert_eq!(code, SUCCESS);
+        let mut one = [0u8; 32];
+        one[31] = 1;
+        assert_eq!(&result_buf[..32], &one, "1^-1 == 1");
+        assert_ne!(&result_buf[32..], &[0u8; 32], "2^-1 is nonzero");
+
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(cost.saturating_sub(1));
+        let result =
+            SyscallAltBn128FrBatchInvert::rust(&mut invoke_context, 2, a_va, result_va, 0, 0);
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_fr_errors_charge_declared_cost_and_leave_output() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        // two zero scalars: batch invert is a domain error, must charge the full
+        // declared cost (not an oracle) and leave the result buffer untouched
+        let a = [0u8; 64];
+        let a_va = 0x100000000;
+        let result_va = 0x300000000;
+        let mut result_buf = [0xabu8; 64];
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const a[..], a_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+
+        let cost = fr_batch_invert_cost(&invoke_context, 2);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        let code =
+            SyscallAltBn128FrBatchInvert::rust(&mut invoke_context, 2, a_va, result_va, 0, 0)
+                .unwrap();
+        assert_eq!(code, 1, "zero element is a domain error");
+        assert_eq!(result_buf, [0xabu8; 64], "output untouched on error");
+
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(cost.saturating_sub(1));
+        let result =
+            SyscallAltBn128FrBatchInvert::rust(&mut invoke_context, 2, a_va, result_va, 0, 0);
         assert_matches!(
             result,
             Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded

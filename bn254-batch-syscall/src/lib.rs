@@ -2,7 +2,11 @@
 #![allow(clippy::arithmetic_side_effects)]
 
 pub use crate::{
-    encoding::{G1_BYTES, G2_BYTES, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAX_PAIRS, SCALAR_BYTES},
+    encoding::{
+        FR_MAX_ELEMS, G1_BYTES, G2_BYTES, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAX_PAIRS,
+        SCALAR_BYTES,
+    },
+    fr::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
     msm::alt_bn128_g1_msm,
     pairing::alt_bn128_pairing_check,
     pod::{PodG1G2Pair, PodG1Point, PodG2Point, PodPairingResult, PodScalar},
@@ -10,6 +14,7 @@ pub use crate::{
 };
 
 pub(crate) mod encoding;
+pub(crate) mod fr;
 pub(crate) mod msm;
 pub(crate) mod pairing;
 pub(crate) mod pod;

@@ -15,6 +15,7 @@ pub const SCALAR_BYTES: usize = 32;
 
 pub const MSM_MAX_POINTS: usize = 2048;
 pub const PAIRING_MAX_PAIRS: usize = 256;
+pub const FR_MAX_ELEMS: usize = 2048;
 
 const FQ_BYTES: usize = 32;
 
