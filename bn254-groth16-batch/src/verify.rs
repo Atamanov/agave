@@ -39,14 +39,14 @@ pub struct Proof {
 /// per vanilla key and n + 5 per committed key in a single boolean pairing
 /// check. Randomizers attach to verification equations, not proofs: a
 /// committed proof draws r_i for the Groth16 relation and a separate s_i for
-/// the Pedersen proof of knowledge (spec item 22).
+/// the Pedersen proof of knowledge.
 pub fn groth16_batch_verify(
     _version: Version,
     vks: &[ValidatedVerifyingKey],
     proofs: &[Proof],
     mode: RandomizerMode,
 ) -> Result<bool, Groth16BatchError> {
-    // shape and canonicality checks come before any hashing (spec item 20)
+    // shape and canonicality checks come before any hashing
     validate_batch_shape(vks, proofs)?;
     let seed = derive_seed(mode, vks, proofs);
     let num_equations = proofs
@@ -72,8 +72,8 @@ fn validate_batch_shape(
     proofs: &[Proof],
 ) -> Result<(), Groth16BatchError> {
     if proofs.is_empty() {
-        // an empty batch would vacuously accept (spec item 24); the syscall
-        // rejects zero pairs too, but the SDK boundary rejects first
+        // an empty batch would vacuously accept; the syscall rejects zero
+        // pairs too, but the SDK boundary rejects first
         return Err(Groth16BatchError::EmptyBatch);
     }
     // vk_index is a u16 and the transcript frames the key count as a u16, so a
@@ -188,7 +188,7 @@ pub(crate) fn assemble_pairs(
 
         // committed rail: e(sum [s_i] com_i, g2) * e(-sum [s_i] pok_i,
         // sigma_g2), two pair terms per key whatever n is; the PoK equations
-        // take their own s_i, never the proof's r_i (spec item 22)
+        // take their own s_i, never the proof's r_i
         if let Some(pedersen) = &key.pedersen {
             let mut com_points: Vec<PodG1Point> = Vec::new();
             let mut pok_points: Vec<PodG1Point> = Vec::new();
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_duplicate_invalid_proof_still_rejected() {
-        // spec item 23: a duplicated bad proof contributes E^(r_a + r_b),
+        // a duplicated bad proof contributes E^(r_a + r_b),
         // which is 1 only with probability 2^-128
         let mut rng = rng();
         let (_, vks, mut proofs) = vanilla_batch(&mut rng, 2);
@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_batch_of_one_matches_direct_verification() {
-        // spec item 24: n = 1 is a batch of one, checked like any other; pin
+        // n = 1 is a batch of one, checked like any other; pin
         // it against an independent direct computation of the Groth16
         // equation e(A,B) e(-alpha,beta) e(-L,gamma) e(-C,delta) == 1 with
         // arkworks' own multi_pairing
