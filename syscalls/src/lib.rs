@@ -321,6 +321,7 @@ pub fn create_program_runtime_environment(
     debugging_features: bool,
 ) -> Result<ProgramRuntimeEnvironment, Error> {
     let enable_alt_bn128_syscall = feature_set.enable_alt_bn128_syscall;
+    let enable_alt_bn128_batch_syscalls = feature_set.enable_alt_bn128_batch_syscalls;
     let enable_alt_bn128_compression_syscall = feature_set.enable_alt_bn128_compression_syscall;
     let enable_big_mod_exp_syscall = feature_set.enable_big_mod_exp_syscall;
     let blake3_syscall_enabled = feature_set.blake3_syscall_enabled;
@@ -505,6 +506,20 @@ pub fn create_program_runtime_environment(
         enable_alt_bn128_syscall,
         "sol_alt_bn128_group_op",
         SyscallAltBn128
+    )?;
+
+    // Alt_bn128 batch verification
+    register_feature_gated_function!(
+        result,
+        enable_alt_bn128_batch_syscalls,
+        "sol_alt_bn128_g1_msm",
+        SyscallAltBn128G1Msm
+    )?;
+    register_feature_gated_function!(
+        result,
+        enable_alt_bn128_batch_syscalls,
+        "sol_alt_bn128_pairing_check",
+        SyscallAltBn128PairingCheck
     )?;
 
     // Big_mod_exp
@@ -2707,6 +2722,152 @@ declare_builtin_function!(
             let vote_address = translate_type::<Pubkey>(memory_mapping, var_addr, check_aligned)?;
 
             Ok(invoke_context.get_epoch_stake_for_vote_account(vote_address))
+        }
+    }
+);
+
+const ALT_BN128_G1_MSM_DISCOUNT_PER_THOUSAND: [u64; 12] =
+    [1000, 668, 484, 351, 270, 215, 183, 138, 121, 105, 90, 83];
+
+fn alt_bn128_g1_msm_cost(base_cost: u64, per_point_cost: u64, num_points: u64) -> u64 {
+    let discount = match num_points {
+        0 => 1000,
+        n => {
+            let bucket = core::cmp::min(n.ilog2() as usize, 11);
+            ALT_BN128_G1_MSM_DISCOUNT_PER_THOUSAND[bucket]
+        }
+    };
+    base_cost.saturating_add(
+        per_point_cost
+            .saturating_mul(num_points)
+            .saturating_mul(discount)
+            .saturating_div(1000),
+    )
+}
+
+declare_builtin_function!(
+    /// G1 multi-scalar multiplication on BN254 (alt_bn128): writes the 64-byte
+    /// big-endian G1 point `sum(scalars[i] * points[i])` to `result_addr`.
+    ///
+    /// Inputs are big-endian, byte-for-byte the G1
+    /// encoding of `sol_alt_bn128_group_op`: `num_points` x 64 bytes of G1
+    /// (all-zeros = infinity) at `points_addr` and `num_points` x 32 bytes of
+    /// scalars (< r) at `scalars_addr`. Every point is validated (canonical
+    /// coordinates, on-curve) before any arithmetic; at most 2048 points; an
+    /// empty input is an error. Compute is charged up front from the declared
+    /// `num_points`, so malformed input costs the same as valid input. Returns
+    /// 0 on success and 1 on any validation error.
+    SyscallAltBn128G1Msm,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        num_points: u64,
+        points_addr: u64,
+        scalars_addr: u64,
+        result_addr: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{alt_bn128_g1_msm, PodG1Point, PodScalar, Version};
+
+        let check_aligned = invoke_context.get_check_aligned();
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = alt_bn128_g1_msm_cost(
+            execution_cost.alt_bn128_g1_msm_base_cost,
+            execution_cost.alt_bn128_g1_msm_per_point_cost,
+            num_points,
+        );
+        invoke_context.compute_meter.consume_checked(cost)?;
+
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let points = translate_slice::<PodG1Point>(
+            memory_mapping,
+            points_addr,
+            num_points,
+            check_aligned,
+        )?;
+        let scalars = translate_slice::<PodScalar>(
+            memory_mapping,
+            scalars_addr,
+            num_points,
+            check_aligned,
+        )?;
+
+        match alt_bn128_g1_msm(Version::V0, points, scalars) {
+            Ok(result_point) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: (&mut PodG1Point) = map(result_addr)?;
+                );
+                *result_ref_mut = result_point;
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    /// Boolean multi-pairing check on BN254 (alt_bn128): writes a 32-byte
+    /// big-endian word to `result_addr`, ending in 0x01 iff the product of
+    /// e(G1_i, G2_i) over all pairs is the identity in GT, all zeros
+    /// otherwise.
+    ///
+    /// Input is `num_pairs` x 192 bytes at `pairs_addr`, big-endian and
+    /// byte-for-byte the input encoding of the `sol_alt_bn128_group_op`
+    /// pairing: 64 bytes G1 (x | y) then 128 bytes G2
+    /// (x1 | x0 | y1 | y0). Every point is validated before any arithmetic --
+    /// canonical coordinates, on-curve, and G2 subgroup membership -- and G2
+    /// preparation, the Miller loop, the shared final exponentiation, and the
+    /// identity compare all happen inside the call: no prepared point and no
+    /// GT/Fq12 value crosses the syscall boundary in either direction. A pair
+    /// with an infinity member contributes the identity factor.
+    /// At most 256 pairs; zero pairs is an error, not a vacuous accept.
+    /// Compute is charged up front from the declared `num_pairs`. Returns 0 on
+    /// success (whatever the verdict) and 1 on any validation error.
+    SyscallAltBn128PairingCheck,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        num_pairs: u64,
+        pairs_addr: u64,
+        result_addr: u64,
+        _arg4: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{
+            alt_bn128_pairing_check, PodG1G2Pair, PodPairingResult, Version,
+        };
+
+        let check_aligned = invoke_context.get_check_aligned();
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = execution_cost
+            .alt_bn128_pairing_check_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_pairing_check_per_pair_cost
+                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
+                    .saturating_mul(num_pairs),
+            );
+        invoke_context.compute_meter.consume_checked(cost)?;
+
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let pairs = translate_slice::<PodG1G2Pair>(
+            memory_mapping,
+            pairs_addr,
+            num_pairs,
+            check_aligned,
+        )?;
+
+        match alt_bn128_pairing_check(Version::V0, pairs) {
+            Ok(verdict) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: (&mut PodPairingResult) = map(result_addr)?;
+                );
+                *result_ref_mut = PodPairingResult::from_verdict(verdict);
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
         }
     }
 );
@@ -8028,6 +8189,641 @@ mod tests {
         assert_access_violation!(result, rw_va - 1, solana_hash_512::HASH_BYTES as u64);
         let result =
             SyscallHash::<Sha512Hasher>::rust(&mut invoke_context, ro_va, ro_len, rw_va, 0, 0);
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+    }
+
+    // ---- alt_bn128 batch syscalls ----
+    fn bn254_hex(hex: &str) -> Vec<u8> {
+        assert!(hex.len().is_multiple_of(2));
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    const BN254_G1_GENERATOR_BE: &str = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
+    // r - 1 and r for the BN254 scalar field, big-endian
+    const BN254_FR_MAX_BE: &str =
+        "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000";
+    const BN254_FR_MODULUS_BE: &str =
+        "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001";
+    // deterministic G2 point on the twist curve (x = (1, 0), greatest y) that is
+    // NOT in the r-order subgroup; found by iterating small x, verified
+    // on-curve and non-subgroup by bn254-batch-syscall's `non_subgroup_g2` test
+    const BN254_NON_SUBGROUP_G2_BE: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000012351dcdda257b62181cbd745dfee16d5fdf4eb185bbcf33c20a0fe6eaa9cb4a307fb3d558dafafb6bf6dd326a5fefe0beca3f9ac3bd999a390d504fad34b0b8c";
+    const BN254_VALID_PAIRS: &str = "1c76476f4def4bb94541d57ebba1193381ffa7aa76ada664dd31c16024c43f593034dd2920f673e204fee2811c678745fc819b55d3e9d294e45c9b03a76aef41209dd15ebff5d46c4bd888e51a93cf99a7329636c63514396b4a452003a35bf704bf11ca01483bfa8b34b43561848d28905960114c8ac04049af4b6315a416782bb8324af6cfc93537a2ad1a445cfd0ca2a71acd7ac41fadbf933c2a51be344d120a2a4cf30c1bf9845f20c6fe39e07ea2cce61f0c9bb048165fe5e4de877550111e129f1cf1097710d41c4ac70fcdfa5ba2023c6ff1cbeac322de49d1b6df7c2032c61a830e3c17286de9462bf242fca2883585b93870a73853face6a6bf411198e9393920d483a7260bfb731fb5d25f1aa493335a9e71297e485b7aef312c21800deef121f1e76426a00665e5c4479674322d4f75edadd46debd5cd992f6ed090689d0585ff075ec9e99ad690c3395bc4b313370b38ef355acdadcd122975b12c85ea5db8c6deb4aab71808dcb408fe3d1e7690c43d37b4ce6cc0166fa7daa";
+
+    fn msm_cost(invoke_context: &InvokeContext, num_points: u64) -> u64 {
+        let execution_cost = invoke_context.get_execution_cost();
+        alt_bn128_g1_msm_cost(
+            execution_cost.alt_bn128_g1_msm_base_cost,
+            execution_cost.alt_bn128_g1_msm_per_point_cost,
+            num_points,
+        )
+    }
+
+    fn pairing_check_cost(invoke_context: &InvokeContext, num_pairs: u64) -> u64 {
+        let execution_cost = invoke_context.get_execution_cost();
+        execution_cost
+            .alt_bn128_pairing_check_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_pairing_check_per_pair_cost
+                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
+                    .saturating_mul(num_pairs),
+            )
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_g1_msm() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        // [2]G + [3]G must equal [5]G as computed by the existing group op
+        let generator = bn254_hex(BN254_G1_GENERATOR_BE);
+        let points = [generator.clone(), generator.clone()].concat();
+        let mut scalars = [0u8; 64];
+        scalars[31] = 2;
+        scalars[63] = 3;
+        let mut mul_input = generator.clone();
+        mul_input.extend_from_slice(&{
+            let mut scalar = [0u8; 32];
+            scalar[31] = 5;
+            scalar
+        });
+        let expected = solana_bn254::prelude::alt_bn128_g1_multiplication_be(&mul_input).unwrap();
+
+        let points_va = 0x100000000;
+        let scalars_va = 0x200000000;
+        let result_va = 0x300000000;
+        let mut result_buf = [0u8; 64];
+
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const points[..], points_va),
+                    MemoryRegion::new(&raw const scalars[..], scalars_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+
+        // exactly the declared cost is consumed, no more and no less
+        let cost = msm_cost(&invoke_context, 2);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        let code =
+            SyscallAltBn128G1Msm::rust(&mut invoke_context, 2, points_va, scalars_va, result_va, 0)
+                .unwrap();
+        assert_eq!(code, SUCCESS);
+        assert_eq!(result_buf.as_slice(), expected.as_slice());
+
+        // one unit short of the declared cost aborts before any work, which
+        // together with the success above pins the exact charge
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(cost.saturating_sub(1));
+        let result =
+            SyscallAltBn128G1Msm::rust(&mut invoke_context, 2, points_va, scalars_va, result_va, 0);
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+
+        // num_points = u64::MAX saturates the up-front charge instead of
+        // overflowing, and exhausts any realistic budget
+        invoke_context.compute_meter.mock_set_remaining(10_000_000);
+        let result = SyscallAltBn128G1Msm::rust(
+            &mut invoke_context,
+            u64::MAX,
+            points_va,
+            scalars_va,
+            result_va,
+            0,
+        );
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_g1_msm_infinity_result() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        // [1]G + [r-1]G = [r]G = infinity, which serializes as all zeros
+        let generator = bn254_hex(BN254_G1_GENERATOR_BE);
+        let points = [generator.clone(), generator].concat();
+        let mut scalars = vec![0u8; 32];
+        scalars[31] = 1;
+        scalars.extend_from_slice(&bn254_hex(BN254_FR_MAX_BE));
+
+        let points_va = 0x100000000;
+        let scalars_va = 0x200000000;
+        let result_va = 0x300000000;
+        let mut result_buf = [0xaau8; 64];
+
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const points[..], points_va),
+                    MemoryRegion::new(&raw const scalars[..], scalars_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(msm_cost(&invoke_context, 2));
+
+        let code =
+            SyscallAltBn128G1Msm::rust(&mut invoke_context, 2, points_va, scalars_va, result_va, 0)
+                .unwrap();
+        assert_eq!(code, SUCCESS);
+        assert_eq!(result_buf, [0u8; 64]);
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_g1_msm_errors_charge_declared_cost() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        let generator = bn254_hex(BN254_G1_GENERATOR_BE);
+        // off-curve point: the generator with y = 3
+        let mut off_curve = generator.clone();
+        off_curve[63] = 3;
+        // non-canonical scalar: exactly r
+        let scalar_r = bn254_hex(BN254_FR_MODULUS_BE);
+        let mut valid_scalar = vec![0u8; 32];
+        valid_scalar[31] = 7;
+
+        let points_va = 0x100000000;
+        let scalars_va = 0x200000000;
+        let result_va = 0x300000000;
+
+        // (points, scalars, expected_code) cases at n = 1: valid input and each
+        // malformed input must consume the identical declared cost
+        let cases: Vec<(Vec<u8>, Vec<u8>, u64)> = vec![
+            (generator.clone(), valid_scalar.clone(), SUCCESS),
+            (off_curve, valid_scalar.clone(), 1),
+            (generator, scalar_r, 1),
+        ];
+        for (points, scalars, expected_code) in cases {
+            let mut result_buf = [0u8; 64];
+            let memory_mapping = unsafe {
+                MemoryMapping::new(
+                    vec![
+                        MemoryRegion::new(&raw const points[..], points_va),
+                        MemoryRegion::new(&raw const scalars[..], scalars_va),
+                        MemoryRegion::new(&raw mut result_buf[..], result_va),
+                    ],
+                    &config,
+                    SBPFVersion::V3,
+                )
+                .unwrap()
+            };
+            invoke_context
+                .memory_contexts
+                .mock_set_mapping_abi_v1(memory_mapping);
+            invoke_context
+                .compute_meter
+                .mock_set_remaining(msm_cost(&invoke_context, 1));
+            let code = SyscallAltBn128G1Msm::rust(
+                &mut invoke_context,
+                1,
+                points_va,
+                scalars_va,
+                result_va,
+                0,
+            )
+            .unwrap();
+            assert_eq!(code, expected_code);
+            if expected_code != SUCCESS {
+                assert_eq!(result_buf, [0u8; 64], "result must be untouched on error");
+            }
+            // one unit short exhausts the budget for malformed input exactly as
+            // for valid input: the meter is not a validation oracle
+            invoke_context
+                .compute_meter
+                .mock_set_remaining(msm_cost(&invoke_context, 1).saturating_sub(1));
+            let result = SyscallAltBn128G1Msm::rust(
+                &mut invoke_context,
+                1,
+                points_va,
+                scalars_va,
+                result_va,
+                0,
+            );
+            assert_matches!(
+                result,
+                Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+            );
+        }
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_g1_msm_zero_and_cap() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        const CAP: usize = 2048;
+        // all-infinity points with zero scalars are valid, so only the count
+        // decides between acceptance and the cap error
+        let points = vec![0u8; (CAP + 1) * 64];
+        let scalars = vec![0u8; (CAP + 1) * 32];
+        let points_va = 0x100000000;
+        let scalars_va = 0x200000000;
+        let result_va = 0x300000000;
+        let mut result_buf = [0xaau8; 64];
+
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const points[..], points_va),
+                    MemoryRegion::new(&raw const scalars[..], scalars_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+
+        // zero points is an error, charged at the base cost
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(msm_cost(&invoke_context, 0));
+        let code =
+            SyscallAltBn128G1Msm::rust(&mut invoke_context, 0, points_va, scalars_va, result_va, 0)
+                .unwrap();
+        assert_eq!(code, 1);
+
+        // the cap itself is accepted (sum of infinities = infinity)
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(msm_cost(&invoke_context, CAP as u64));
+        let code = SyscallAltBn128G1Msm::rust(
+            &mut invoke_context,
+            CAP as u64,
+            points_va,
+            scalars_va,
+            result_va,
+            0,
+        )
+        .unwrap();
+        assert_eq!(code, SUCCESS);
+        assert_eq!(result_buf, [0u8; 64]);
+
+        // one past the cap is an error, still charged from the declared size
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(msm_cost(&invoke_context, (CAP + 1) as u64));
+        let code = SyscallAltBn128G1Msm::rust(
+            &mut invoke_context,
+            (CAP + 1) as u64,
+            points_va,
+            scalars_va,
+            result_va,
+            0,
+        )
+        .unwrap();
+        assert_eq!(code, 1);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(msm_cost(&invoke_context, (CAP + 1) as u64).saturating_sub(1));
+        let result = SyscallAltBn128G1Msm::rust(
+            &mut invoke_context,
+            (CAP + 1) as u64,
+            points_va,
+            scalars_va,
+            result_va,
+            0,
+        );
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_g1_msm_truncated_region_charges_first() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        // one byte short of the two declared points: translation fails, but the
+        // up-front charge has already happened
+        let points = [0u8; 2 * 64 - 1];
+        let scalars = [0u8; 2 * 32];
+        let points_va = 0x100000000;
+        let scalars_va = 0x200000000;
+        let result_va = 0x300000000;
+        let mut result_buf = [0u8; 64];
+
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const points[..], points_va),
+                    MemoryRegion::new(&raw const scalars[..], scalars_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+
+        // with one unit short, the failure is budget exhaustion, not the
+        // access violation: the charge happens before translation
+        let cost = msm_cost(&invoke_context, 2);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(cost.saturating_sub(1));
+        let result =
+            SyscallAltBn128G1Msm::rust(&mut invoke_context, 2, points_va, scalars_va, result_va, 0);
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+
+        // with enough budget, the truncated region faults after the charge
+        invoke_context.compute_meter.mock_set_remaining(cost + 5);
+        let result =
+            SyscallAltBn128G1Msm::rust(&mut invoke_context, 2, points_va, scalars_va, result_va, 0);
+        assert!(result.is_err(), "truncated input region must fault");
+        assert!(
+            result
+                .unwrap_err()
+                .downcast_ref::<InstructionError>()
+                .is_none_or(|error| error != &InstructionError::ComputationalBudgetExceeded),
+            "the fault must be the access violation, not budget exhaustion"
+        );
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_pairing_check() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        let pairs = bn254_hex(BN254_VALID_PAIRS);
+        // negate the first G1 point (multiply by r - 1 via the group op): the
+        // product is then no longer the identity
+        let mut mul_input = pairs[..64].to_vec();
+        mul_input.extend_from_slice(&bn254_hex(BN254_FR_MAX_BE));
+        let negated_g1 = solana_bn254::prelude::alt_bn128_g1_multiplication_be(&mul_input).unwrap();
+        let mut false_pairs = pairs.clone();
+        false_pairs[..64].copy_from_slice(&negated_g1);
+
+        let mut expected_true_word = [0u8; 32];
+        expected_true_word[31] = 1;
+
+        let pairs_va = 0x100000000;
+        let result_va = 0x200000000;
+
+        // (input, expected verdict word) with identical CU consumption
+        for (input, expected_word) in [(pairs, expected_true_word), (false_pairs, [0u8; 32])] {
+            let mut result_buf = [0xaau8; 32];
+            let memory_mapping = unsafe {
+                MemoryMapping::new(
+                    vec![
+                        MemoryRegion::new(&raw const input[..], pairs_va),
+                        MemoryRegion::new(&raw mut result_buf[..], result_va),
+                    ],
+                    &config,
+                    SBPFVersion::V3,
+                )
+                .unwrap()
+            };
+            invoke_context
+                .memory_contexts
+                .mock_set_mapping_abi_v1(memory_mapping);
+            invoke_context
+                .compute_meter
+                .mock_set_remaining(pairing_check_cost(&invoke_context, 2));
+            let code = SyscallAltBn128PairingCheck::rust(
+                &mut invoke_context,
+                2,
+                pairs_va,
+                result_va,
+                0,
+                0,
+            )
+            .unwrap();
+            assert_eq!(code, SUCCESS);
+            assert_eq!(result_buf, expected_word);
+            // one unit short aborts, pinning the exact charge for both verdicts
+            invoke_context
+                .compute_meter
+                .mock_set_remaining(pairing_check_cost(&invoke_context, 2).saturating_sub(1));
+            let result = SyscallAltBn128PairingCheck::rust(
+                &mut invoke_context,
+                2,
+                pairs_va,
+                result_va,
+                0,
+                0,
+            );
+            assert_matches!(
+                result,
+                Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+            );
+        }
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_pairing_check_rejects_invalid_points() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        let generator = bn254_hex(BN254_G1_GENERATOR_BE);
+        let non_subgroup_g2 = bn254_hex(BN254_NON_SUBGROUP_G2_BE);
+        let valid_pairs = bn254_hex(BN254_VALID_PAIRS);
+
+        // on-curve but out-of-subgroup G2
+        let non_subgroup_pair = [generator.clone(), non_subgroup_g2.clone()].concat();
+        // off-curve G2: bump the last y byte of the non-subgroup point
+        let mut off_curve_g2 = non_subgroup_g2;
+        off_curve_g2[127] = off_curve_g2[127].wrapping_add(1);
+        let off_curve_pair = [generator.clone(), off_curve_g2].concat();
+        // a valid single real pair, for the CU-equality comparison (its verdict
+        // is false, but the call succeeds)
+        let single_valid_pair = valid_pairs[..192].to_vec();
+
+        let pairs_va = 0x100000000;
+        let result_va = 0x200000000;
+
+        for (input, expected_code) in [
+            (single_valid_pair, SUCCESS),
+            (non_subgroup_pair, 1),
+            (off_curve_pair, 1),
+        ] {
+            let mut result_buf = [0u8; 32];
+            let memory_mapping = unsafe {
+                MemoryMapping::new(
+                    vec![
+                        MemoryRegion::new(&raw const input[..], pairs_va),
+                        MemoryRegion::new(&raw mut result_buf[..], result_va),
+                    ],
+                    &config,
+                    SBPFVersion::V3,
+                )
+                .unwrap()
+            };
+            invoke_context
+                .memory_contexts
+                .mock_set_mapping_abi_v1(memory_mapping);
+            invoke_context
+                .compute_meter
+                .mock_set_remaining(pairing_check_cost(&invoke_context, 1));
+            let code = SyscallAltBn128PairingCheck::rust(
+                &mut invoke_context,
+                1,
+                pairs_va,
+                result_va,
+                0,
+                0,
+            )
+            .unwrap();
+            assert_eq!(code, expected_code);
+            if expected_code != SUCCESS {
+                assert_eq!(result_buf, [0u8; 32], "result must be untouched on error");
+            }
+            // malformed input exhausts the same budget as valid input: the
+            // meter is not a validation oracle
+            invoke_context
+                .compute_meter
+                .mock_set_remaining(pairing_check_cost(&invoke_context, 1).saturating_sub(1));
+            let result = SyscallAltBn128PairingCheck::rust(
+                &mut invoke_context,
+                1,
+                pairs_va,
+                result_va,
+                0,
+                0,
+            );
+            assert_matches!(
+                result,
+                Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+            );
+        }
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_pairing_check_zero_cap_and_infinity() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        const CAP: usize = 256;
+        // all-infinity pairs are valid and skipped; the product of an all-
+        // skipped batch is the identity
+        let pairs = vec![0u8; (CAP + 1) * 192];
+        let pairs_va = 0x100000000;
+        let result_va = 0x200000000;
+        let mut result_buf = [0u8; 32];
+        let mut expected_true_word = [0u8; 32];
+        expected_true_word[31] = 1;
+
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const pairs[..], pairs_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+
+        // zero pairs is an error, never a vacuous accept
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(&invoke_context, 0));
+        let code =
+            SyscallAltBn128PairingCheck::rust(&mut invoke_context, 0, pairs_va, result_va, 0, 0)
+                .unwrap();
+        assert_eq!(code, 1);
+        assert_eq!(result_buf, [0u8; 32]);
+
+        // the cap itself is accepted
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(&invoke_context, CAP as u64));
+        let code = SyscallAltBn128PairingCheck::rust(
+            &mut invoke_context,
+            CAP as u64,
+            pairs_va,
+            result_va,
+            0,
+            0,
+        )
+        .unwrap();
+        assert_eq!(code, SUCCESS);
+        assert_eq!(result_buf, expected_true_word);
+
+        // one past the cap is an error, still charged from the declared size
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(&invoke_context, (CAP + 1) as u64));
+        let code = SyscallAltBn128PairingCheck::rust(
+            &mut invoke_context,
+            (CAP + 1) as u64,
+            pairs_va,
+            result_va,
+            0,
+            0,
+        )
+        .unwrap();
+        assert_eq!(code, 1);
+        invoke_context.compute_meter.mock_set_remaining(
+            pairing_check_cost(&invoke_context, (CAP + 1) as u64).saturating_sub(1),
+        );
+        let result = SyscallAltBn128PairingCheck::rust(
+            &mut invoke_context,
+            (CAP + 1) as u64,
+            pairs_va,
+            result_va,
+            0,
+            0,
+        );
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
+
+        // num_pairs = u64::MAX saturates the charge instead of overflowing
+        invoke_context.compute_meter.mock_set_remaining(10_000_000);
+        let result = SyscallAltBn128PairingCheck::rust(
+            &mut invoke_context,
+            u64::MAX,
+            pairs_va,
+            result_va,
+            0,
+            0,
+        );
         assert_matches!(
             result,
             Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded

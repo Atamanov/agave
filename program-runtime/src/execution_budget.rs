@@ -200,6 +200,22 @@ pub struct SVMTransactionExecutionCost {
     pub bls12_381_one_pair_cost: u64,
     /// Incremental number of compute units consumed per pair in a bls12_381 pairing.
     pub bls12_381_additional_pair_cost: u64,
+    /// Base number of compute units consumed by an alt_bn128 G1 MSM.
+    pub alt_bn128_g1_msm_base_cost: u64,
+    /// Per-point compute units for an alt_bn128 G1 MSM, before the
+    /// size-bucketed discount applied at the syscall (Pippenger is sublinear).
+    pub alt_bn128_g1_msm_per_point_cost: u64,
+    /// Base number of compute units consumed by an alt_bn128 pairing check
+    /// (covers the shared final exponentiation).
+    pub alt_bn128_pairing_check_base_cost: u64,
+    /// Per-pair compute units for an alt_bn128 pairing check: parse,
+    /// validation minus the subgroup check, G2 preparation, and the miller
+    /// loop share.
+    pub alt_bn128_pairing_check_per_pair_cost: u64,
+    /// Compute units for one alt_bn128 G2 subgroup membership check, priced
+    /// separately so the surcharge stays auditable and reusable by any future
+    /// G2-input syscall.
+    pub alt_bn128_g2_subgroup_check_cost: u64,
 }
 
 impl Default for SVMTransactionExecutionCost {
@@ -256,6 +272,18 @@ impl Default for SVMTransactionExecutionCost {
             bls12_381_g2_validate_cost: 1_968,
             bls12_381_one_pair_cost: 25_445,
             bls12_381_additional_pair_cost: 13_023,
+            // Bench-derived: criterion 95%-CI upper bound / 33 ns per CU on an
+            // Apple M5 Pro, ark 0.5. MSM per-point is the n=1 anchor + 10%; the
+            // syscall scales it by a floor(log2 n)-bucketed discount so the
+            // model upper-bounds measured CU at every grid point. Pairing:
+            // base + per_pair * n least-squares fit over n in {1,2,3,4,8,16};
+            // the G2 subgroup component is measured standalone. Re-bench on
+            // validator-class x86 before activation.
+            alt_bn128_g1_msm_base_cost: 100,
+            alt_bn128_g1_msm_per_point_cost: 2_698,
+            alt_bn128_pairing_check_base_cost: 11_156,
+            alt_bn128_pairing_check_per_pair_cost: 3_195,
+            alt_bn128_g2_subgroup_check_cost: 2_398,
         }
     }
 }

@@ -89,6 +89,7 @@ pub struct FeatureSnapshot {
     pub enable_tx_v1: bool,
     pub define_ltds_fee_only_semantics: bool,
     pub validate_chained_block_id_2: bool,
+    pub enable_alt_bn128_batch_syscalls: bool,
 }
 
 impl From<&AHashMap<Pubkey, u64>> for FeatureSnapshot {
@@ -206,6 +207,7 @@ impl From<&AHashMap<Pubkey, u64>> for FeatureSnapshot {
             enable_tx_v1: is_active(&enable_tx_v1::ID),
             define_ltds_fee_only_semantics: is_active(&define_ltds_fee_only_semantics::ID),
             validate_chained_block_id_2: is_active(&validate_chained_block_id_2::ID),
+            enable_alt_bn128_batch_syscalls: is_active(&enable_alt_bn128_batch_syscalls::ID),
         }
     }
 }
@@ -372,6 +374,7 @@ impl FeatureSet {
             enable_sha512_syscall: snapshot.enable_sha512_syscall,
             relax_post_exec_min_balance_check: snapshot.relax_post_exec_min_balance_check,
             define_ltds_fee_only_semantics: snapshot.define_ltds_fee_only_semantics,
+            enable_alt_bn128_batch_syscalls: snapshot.enable_alt_bn128_batch_syscalls,
         }
     }
 }
@@ -1553,6 +1556,12 @@ pub mod define_ltds_fee_only_semantics {
     solana_pubkey::declare_id!("LTDSzjZKFJMKHYpNycG1FrWwGGTaFFwqEFjB5GGLNVD");
 }
 
+// Placeholder pubkey: sha256("enable_alt_bn128_batch_syscalls_v1") base58.
+// Replace with the SIMD-issued pubkey before activating on any cluster.
+pub mod enable_alt_bn128_batch_syscalls {
+    solana_pubkey::declare_id!("3b6tZJzjf2J7pHNhojgSxpQ4dvTGCxiz9kwLbvRDURzo");
+}
+
 pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::new(|| {
     [
         (secp256k1_program_enabled::id(), "secp256k1 program"),
@@ -2614,6 +2623,10 @@ pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::n
         (
             validate_chained_block_id_2::id(),
             "SIMD-340: Encompassing check for validate chained block ID",
+        ),
+        (
+            enable_alt_bn128_batch_syscalls::id(),
+            "SIMD-TBD: alt_bn128 G1 MSM and boolean pairing-check syscalls",
         ),
         /*************** ADD NEW FEATURES HERE ***************/
         /***** ADD NEW FEATURE BOOL TO `FeatureSnapshot` *****/

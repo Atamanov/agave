@@ -33,6 +33,7 @@ solana-big-mod-exp = { workspace = true }
 solana-blake3-hasher = { workspace = true, features = ["blake3"] }
 solana-bls12-381-syscall = { workspace = true }
 solana-bn254 = { workspace = true }
+solana-bn254-batch-syscall = { workspace = true }
 solana-clock = { workspace = true }
 solana-cpi = { workspace = true }
 solana-curve25519 = { workspace = true }
@@ -60,7 +61,14 @@ solana-transaction-context = { workspace = true, features = ["bincode"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+ark-bn254 = "0.5"
+ark-ec = "0.5"
+ark-ff = "0.5"
+ark-serialize = "0.5"
+ark-std = "0.5"
 assert_matches = { workspace = true }
+bytemuck = { workspace = true }
+criterion = { workspace = true }
 solana-epoch-rewards = { workspace = true }
 solana-epoch-schedule = { workspace = true }
 solana-fee-calculator = { workspace = true }
@@ -75,3 +83,7 @@ test-case = { workspace = true }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "alt_bn128_batch"
+harness = false
