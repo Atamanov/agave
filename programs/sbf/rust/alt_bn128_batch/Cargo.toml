@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 solana-bn254 = { workspace = true }
-solana-define-syscall = { workspace = true }
+solana-bn254-batch-syscall = { workspace = true, features = ["agave-unstable-api"] }
 solana-msg = { workspace = true }
 solana-program-entrypoint = { workspace = true }
 
