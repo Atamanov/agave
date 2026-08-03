@@ -2808,7 +2808,7 @@ declare_builtin_function!(
                 translate_mut!(
                     memory_mapping,
                     check_aligned,
-                    let result_ref_mut: (&mut PodG1Point) = map(result_addr)?;
+                    let result_ref_mut: &mut PodG1Point = map(result_addr)?;
                 );
                 *result_ref_mut = result_point;
                 Ok(SUCCESS)
@@ -2874,7 +2874,7 @@ declare_builtin_function!(
                 translate_mut!(
                     memory_mapping,
                     check_aligned,
-                    let result_ref_mut: (&mut PodPairingResult) = map(result_addr)?;
+                    let result_ref_mut: &mut PodPairingResult = map(result_addr)?;
                 );
                 *result_ref_mut = PodPairingResult::from_verdict(verdict);
                 Ok(SUCCESS)
@@ -2927,7 +2927,7 @@ declare_builtin_function!(
                 translate_mut!(
                     memory_mapping,
                     check_aligned,
-                    let result_ref_mut: (&mut PodScalar) = map(result_addr)?;
+                    let result_ref_mut: &mut PodScalar = map(result_addr)?;
                 );
                 *result_ref_mut = result;
                 Ok(SUCCESS)
@@ -2974,7 +2974,7 @@ declare_builtin_function!(
                 translate_mut!(
                     memory_mapping,
                     check_aligned,
-                    let result_ref_mut: (&mut [PodScalar]) = map(result_addr, num_elems)?;
+                    let result_ref_mut: &mut [PodScalar] = map(result_addr, num_elems)?;
                 );
                 result_ref_mut.copy_from_slice(&result);
                 Ok(SUCCESS)
