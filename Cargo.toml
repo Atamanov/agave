@@ -13,6 +13,7 @@ members = [
     "bls-cert-verify",
     "bn254-batch-syscall",
     "bn254-groth16-batch",
+    "bn254-mixed-batch",
     "bn254-plonk-batch",
     "bucket_map",
     "builtins",
@@ -373,6 +374,8 @@ solana-bls-signatures = { version = "3.3.0", features = ["serde"] }
 solana-bls12-381-syscall = "0.1.0"
 solana-bn254 = "3.2.1"
 solana-bn254-batch-syscall = { path = "bn254-batch-syscall", version = "=4.1.2", features = ["agave-unstable-api"] }
+solana-bn254-groth16-batch = { path = "bn254-groth16-batch", version = "=4.1.2", features = ["agave-unstable-api"] }
+solana-bn254-plonk-batch = { path = "bn254-plonk-batch", version = "=4.1.2", features = ["agave-unstable-api"] }
 solana-borsh = "3.0.2"
 solana-bpf-loader-program = { path = "programs/bpf_loader", version = "=4.1.2", default-features = false, features = ["agave-unstable-api"] }
 solana-bucket-map = { path = "bucket_map", version = "=4.1.2", features = ["agave-unstable-api"] }

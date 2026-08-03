@@ -23,8 +23,10 @@ fn keccak_parts(parts: &[&[u8]]) -> [u8; 32] {
 /// construction: they are a function of the proof-local transcript only (VK
 /// digest, statement, commitments in phase order), never of the batch, so a
 /// proof's challenges are identical alone or in any batch.
+// item-level pub for the test_support re-export; the module stays pub(crate),
+// so the only external path is the fixture surface
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct InnerChallenges {
+pub struct InnerChallenges {
     pub beta: Fr,
     pub gamma: Fr,
     pub alpha: Fr,
@@ -125,7 +127,7 @@ impl InnerTranscript {
 /// The verifier-side derivation: replay the whole proof through the phased
 /// transcript.
 #[inline(never)]
-pub(crate) fn derive_inner(vk: &ValidatedVerifyingKey, proof: &Proof) -> InnerChallenges {
+pub fn derive_inner(vk: &ValidatedVerifyingKey, proof: &Proof) -> InnerChallenges {
     let mut transcript = InnerTranscript::new(vk, &proof.public_inputs);
     let (beta, gamma) = transcript.wire_commitments(&proof.wire_commitments);
     let alpha = transcript.grand_product(&proof.grand_product);

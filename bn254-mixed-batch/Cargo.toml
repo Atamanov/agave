@@ -1,0 +1,34 @@
+[package]
+name = "solana-bn254-mixed-batch"
+description = "Reference mixed Groth16 + PLONK batch verifier over the alt_bn128 batch syscalls"
+documentation = "https://docs.rs/solana-bn254-mixed-batch"
+version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+edition = { workspace = true }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+agave-unstable-api = []
+
+[dependencies]
+ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
+solana-bn254-batch-syscall = { workspace = true }
+solana-bn254-groth16-batch = { workspace = true }
+solana-bn254-plonk-batch = { workspace = true }
+solana-keccak-hasher = { workspace = true, features = ["sha3"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+ark-ec = { version = "0.5", default-features = false }
+ark-ff = { version = "0.5", default-features = false }
+ark-std = { version = "0.5", default-features = false }
+solana-bn254-groth16-batch = { workspace = true, features = ["test-fixtures"] }
+solana-bn254-plonk-batch = { workspace = true, features = ["test-fixtures"] }
+
+[lints]
+workspace = true

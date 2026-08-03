@@ -8,6 +8,7 @@
 //! its challenges through the verifier's own `InnerTranscript` phases;
 //! batch completeness is the test that the phase layout matches.
 
+pub use crate::transcript::{InnerChallenges, derive_inner};
 use {
     crate::{
         proof::{Evaluations, Proof},
@@ -204,16 +205,21 @@ pub struct Trapdoor {
 }
 
 pub fn make_vk(rng: &mut StdRng) -> (Trapdoor, ValidatedVerifyingKey) {
-    make_vk_impl(rng, true)
+    make_vk_impl(Fr::rand(rng), true)
 }
 
 /// The zero-input circuit variant: no public-input row, PI identically zero.
 pub fn make_vk_without_inputs(rng: &mut StdRng) -> (Trapdoor, ValidatedVerifyingKey) {
-    make_vk_impl(rng, false)
+    make_vk_impl(Fr::rand(rng), false)
 }
 
-fn make_vk_impl(rng: &mut StdRng, with_input: bool) -> (Trapdoor, ValidatedVerifyingKey) {
-    let tau = Fr::rand(rng);
+/// A key under a caller-chosen tau, so two distinct circuits can share one
+/// SRS in shared-SRS fold fixtures.
+pub fn make_vk_with_tau(tau: Fr, with_input: bool) -> (Trapdoor, ValidatedVerifyingKey) {
+    make_vk_impl(tau, with_input)
+}
+
+fn make_vk_impl(tau: Fr, with_input: bool) -> (Trapdoor, ValidatedVerifyingKey) {
     let omega = Fr::get_root_of_unity(DOMAIN_SIZE).unwrap();
     // 2 and 3 shift H into disjoint cosets: 2^8, 3^8, and (3/2)^8 are all
     // far from 1 in Fr, which vk validation re-checks

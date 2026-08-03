@@ -7277,6 +7277,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-bn254-mixed-batch"
+version = "4.1.2"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "ark-std 0.5.0",
+ "solana-bn254-batch-syscall",
+ "solana-bn254-groth16-batch",
+ "solana-bn254-plonk-batch",
+ "solana-keccak-hasher",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "solana-bn254-plonk-batch"
 version = "4.1.2"
 dependencies = [
