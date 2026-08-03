@@ -98,10 +98,10 @@ fn validate_batch_shape(
         if is_infinity_g1(&proof.a) || proof.b.0 == [0u8; G2_BYTES] || is_infinity_g1(&proof.c) {
             return Err(Groth16BatchError::InfinityInProofPosition);
         }
-        if let Some(commitment) = &proof.commitment
-            && (is_infinity_g1(&commitment.com) || is_infinity_g1(&commitment.pok))
-        {
-            return Err(Groth16BatchError::InfinityInProofPosition);
+        if let Some(commitment) = &proof.commitment {
+            if is_infinity_g1(&commitment.com) || is_infinity_g1(&commitment.pok) {
+                return Err(Groth16BatchError::InfinityInProofPosition);
+            }
         }
         for input in &proof.public_inputs {
             fr_from_be(input)?;
