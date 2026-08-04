@@ -17,6 +17,7 @@ features = ["agave-unstable-api", "backend-b1-arkworks"]
 [features]
 default = ["backend-b1-arkworks"]
 agave-unstable-api = ["solana-bn254-batch-syscall/agave-unstable-api"]
+research-observer = ["solana-bn254-batch-syscall/research-observer"]
 backend-b1-arkworks = ["solana-bn254-batch-syscall/backend-b1-arkworks"]
 backend-b2-arkworks-optimized = ["solana-bn254-batch-syscall/backend-b2-arkworks-optimized"]
 backend-b3-mcl = ["solana-bn254-batch-syscall/backend-b3-mcl"]
@@ -32,6 +33,7 @@ ark-ff = { version = "0.5", default-features = false }
 ark-std = { version = "0.5", default-features = false, optional = true }
 solana-bn254-batch-syscall = { workspace = true }
 solana-keccak-hasher = { workspace = true, features = ["sha3"] }
+solana-bn254 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

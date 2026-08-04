@@ -5,19 +5,31 @@
 //! Reference for on-chain programs: the transcript derivation in
 //! [`transcript`], the verification-equation folding in [`verify`], and the
 //! verifying-key validation in [`vk`] together define the batch layer.
-//! Every fold is a G1 MSM and the verdict is one boolean pairing check; no
-//! G2 arithmetic, no prepared points, and no GT values appear anywhere.
+//! The ordinary path ends in one boolean pairing check. The dedicated
+//! [`same_vk`] path instead maps exactly `n + 2` pairs and compares the
+//! canonical output directly with a caller-authenticated `e(alpha, beta)`
+//! target; it never performs target-group arithmetic. Target provenance is a
+//! concrete program-handler responsibility, not a property of the Rust type.
 
 pub use crate::{
+    current_fp12::{
+        CurrentFp12Target, current_fp12_pairs, groth16_current_fp12_verify, legacy_current_vk_x,
+    },
+    same_vk::{
+        SAME_VK_FP12_MAX_PROOFS, SameVkTarget, derive_same_vk_sum_one_randomizers,
+        fold_same_vk_target_pairs, groth16_same_vk_fp12_verify, same_vk_target_pair_count,
+    },
     transcript::{RandomizerMode, derive_randomizers, derive_seed},
     verify::{
-        Proof, ProofCommitment, equation_count, fold_pairs, fold_pairs_prevalidated,
-        groth16_batch_verify, validate_batch_shape,
+        Proof, ProofCommitment, equation_count, fold_pairs, fold_pairs_for_verification,
+        fold_pairs_prevalidated, groth16_batch_verify, validate_batch_shape,
     },
     vk::{PedersenKey, ValidatedVerifyingKey, VerifyingKey},
 };
 use solana_bn254_batch_syscall::AltBn128BatchError;
 
+pub mod current_fp12;
+pub mod same_vk;
 pub(crate) mod transcript;
 pub(crate) mod verify;
 pub(crate) mod vk;
@@ -47,6 +59,14 @@ pub enum Groth16BatchError {
     InfinityInProofPosition,
     #[error("public input is not a canonical field element")]
     NonCanonicalInput,
+    #[error("same-VK FP12 target verification supports only vanilla Groth16 keys")]
+    SameVkTargetRequiresVanillaKey,
+    #[error("same-VK FP12 coefficients must be nonzero and sum to one")]
+    InvalidSameVkRandomizers,
+    #[error("same-VK FP12 target is bound to a different verifying key")]
+    SameVkTargetKeyMismatch,
+    #[error("legacy alt_bn128 G1 operation failed")]
+    LegacyGroupOperationFailed,
     #[error("invalid verifying key: {0}")]
     InvalidVerifyingKey(&'static str),
     #[error("syscall: {0}")]

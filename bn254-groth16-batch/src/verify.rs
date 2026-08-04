@@ -47,15 +47,28 @@ pub fn groth16_batch_verify(
     proofs: &[Proof],
     mode: RandomizerMode,
 ) -> Result<bool, Groth16BatchError> {
-    // shape and canonicality checks come before any hashing
-    validate_batch_shape(vks, proofs)?;
-    let seed = derive_seed(mode, vks, proofs);
-    let randomizers = derive_randomizers(&seed, equation_count(proofs), mode);
-    let pairs = fold_pairs_prevalidated(vks, proofs, &randomizers)?;
+    let pairs = fold_pairs_for_verification(vks, proofs, mode)?;
     Ok(alt_bn128_pairing_check(
         solana_bn254_batch_syscall::Version::V0,
         &pairs,
     )?)
+}
+
+/// Build the exact pair list consumed by [`groth16_batch_verify`], including
+/// the verifier's canonical transcript-derived randomizers. Registry-backed
+/// runtimes use this composition surface to send the leading proof terms as
+/// full pairs and the fixed-key suffix as authenticated prepared-G2 terms
+/// without reimplementing or drifting the B5 transcript.
+pub fn fold_pairs_for_verification(
+    vks: &[ValidatedVerifyingKey],
+    proofs: &[Proof],
+    mode: RandomizerMode,
+) -> Result<Vec<PodG1G2Pair>, Groth16BatchError> {
+    // Shape and canonicality checks come before any hashing.
+    validate_batch_shape(vks, proofs)?;
+    let seed = derive_seed(mode, vks, proofs);
+    let randomizers = derive_randomizers(&seed, equation_count(proofs), mode);
+    fold_pairs_prevalidated(vks, proofs, &randomizers)
 }
 
 /// One verification equation per proof plus one more for a committed proof's
@@ -272,7 +285,7 @@ fn is_infinity_g1(point: &PodG1Point) -> bool {
     point.0 == [0u8; G1_BYTES]
 }
 
-fn msm(points: &[PodG1Point], scalars: &[Fr]) -> Result<PodG1Point, Groth16BatchError> {
+pub(crate) fn msm(points: &[PodG1Point], scalars: &[Fr]) -> Result<PodG1Point, Groth16BatchError> {
     let scalars: Vec<PodScalar> = scalars.iter().map(fr_to_pod).collect();
     Ok(alt_bn128_g1_msm(
         solana_bn254_batch_syscall::Version::V0,
@@ -287,7 +300,7 @@ fn fr_to_pod(scalar: &Fr) -> PodScalar {
     PodScalar(bytes)
 }
 
-fn fr_from_be(scalar: &PodScalar) -> Result<Fr, Groth16BatchError> {
+pub(crate) fn fr_from_be(scalar: &PodScalar) -> Result<Fr, Groth16BatchError> {
     // Parse big-endian Fr without host-only PodScalar::to_fr (SBF-safe).
     use ark_ff::PrimeField;
     let mut limbs = [0u64; 4];
