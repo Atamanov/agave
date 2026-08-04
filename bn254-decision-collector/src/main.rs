@@ -673,9 +673,16 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
 fn main() {
     let result = (|| {
         let cli = parse_cli()?;
+        // The collector reports charged CU, which the runtime schedule fixes
+        // for a given syscall shape, so it does not depend on the host. A build
+        // without IFMA runs the portable path and charges the same. Only a
+        // timing capture needs the kernel itself: that is what `require-ifma`
+        // is for, and it fails the build rather than the run.
         #[cfg(feature = "backend-b5-helius-ifma")]
         if !solana_bn254_decision_litesvm::selected_backend_compiled_with_avx512_ifma() {
-            return Err("collector selected B5 without compile-time AVX-512 IFMA".into());
+            eprintln!(
+                "note: B5 without compile-time AVX-512 IFMA. Charges are unaffected; wall time is not representative."
+            );
         }
         let mut stdin = Vec::new();
         io::stdin()
