@@ -11,10 +11,17 @@ edition = { workspace = true }
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+no-default-features = true
+features = ["agave-unstable-api", "backend-b1-arkworks"]
 
 [features]
-default = ["metrics"]
-agave-unstable-api = []
+default = ["metrics", "backend-b1-arkworks"]
+agave-unstable-api = ["solana-bn254-batch-syscall/agave-unstable-api"]
+backend-b1-arkworks = ["solana-bn254-batch-syscall/backend-b1-arkworks"]
+backend-b2-arkworks-optimized = ["solana-bn254-batch-syscall/backend-b2-arkworks-optimized"]
+backend-b3-mcl = ["solana-bn254-batch-syscall/backend-b3-mcl"]
+backend-b4-helios = ["solana-bn254-batch-syscall/backend-b4-helios"]
+backend-b5-helios-ifma = ["solana-bn254-batch-syscall/backend-b5-helios-ifma"]
 metrics = ["solana-program-runtime/metrics"]
 shuttle-test = [
     "solana-program-runtime/shuttle-test",

@@ -16,6 +16,11 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
 agave-unstable-api = []
+backend-b1-arkworks = ["solana-test-validator/backend-b1-arkworks"]
+backend-b2-arkworks-optimized = ["solana-test-validator/backend-b2-arkworks-optimized"]
+backend-b3-mcl = ["solana-test-validator/backend-b3-mcl"]
+backend-b4-helios = ["solana-test-validator/backend-b4-helios"]
+backend-b5-helios-ifma = ["solana-test-validator/backend-b5-helios-ifma"]
 
 [dependencies]
 agave-logger = { workspace = true }

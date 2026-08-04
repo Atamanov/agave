@@ -54,6 +54,7 @@ pub struct SVMFeatureSet {
     pub relax_post_exec_min_balance_check: bool,
     pub define_ltds_fee_only_semantics: bool,
     pub enable_alt_bn128_batch_syscalls: bool,
+    pub enable_alt_bn128_plonk_research_syscall: bool,
 }
 
 impl SVMFeatureSet {
@@ -112,6 +113,7 @@ impl SVMFeatureSet {
             relax_post_exec_min_balance_check: true,
             define_ltds_fee_only_semantics: true,
             enable_alt_bn128_batch_syscalls: true,
+            enable_alt_bn128_plonk_research_syscall: true,
         }
     }
 }

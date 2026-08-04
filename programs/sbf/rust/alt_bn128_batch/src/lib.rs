@@ -1,17 +1,19 @@
-//! Alt_bn128 batch syscalls tests: `sol_alt_bn128_g1_msm`,
-//! `sol_alt_bn128_pairing_check`, `sol_alt_bn128_pairing_map`,
-//! `sol_alt_bn128_fr_lincomb`, and
-//! `sol_alt_bn128_fr_batch_invert`.
+//! Fixed-vector checks for all BN254 batch syscalls.
 
 use {
     solana_bn254::prelude::{alt_bn128_g1_addition_be, alt_bn128_g1_multiplication_be},
     solana_bn254_batch_syscall::{
-        PodG1G2Pair, PodG1Point, PodScalar, Version, alt_bn128_fr_batch_invert,
-        alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
-        alt_bn128_pairing_map,
+        PodG1G2Pair, PodG1Point, PodG2Point, PodPlonkReductionContext, PodPlonkReductionInput,
+        PodScalar, PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput,
+        PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput, Version,
+        alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+        alt_bn128_pairing_map, alt_bn128_plonk_batch_reduce, alt_bn128_snarkjs_plonk_batch_reduce,
+        alt_bn128_snarkjs_plonk_multi_vk_batch_reduce, plonk_reduction_output_count,
+        snarkjs_plonk_multi_vk_output_count,
     },
     solana_msg::msg,
     solana_program_entrypoint::{custom_heap_default, custom_panic_default},
+    solana_sha256_hasher::hash,
 };
 
 fn g1_points(bytes: &[u8]) -> Vec<PodG1Point> {
@@ -41,6 +43,12 @@ fn pairs(bytes: &[u8]) -> Vec<PodG1G2Pair> {
 const G1_GENERATOR_BE: &str = "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
 // r - 1 for the BN254 scalar field, big-endian
 const FR_MAX_BE: &str = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000";
+const PLONK_OMEGA_8_BE: &str = "2b337de1c8c14f22ec9b9e2f96afef3652627366f8170a0a948dad4ac1bd5e80";
+const PLONK_OUTPUT_DIGESTS: [&str; 3] = [
+    "d0df536b1747dbd7aa51cf5bea0b8f0c414d4370b5fd2a8e705dd238cdfdaacf",
+    "f025a54f60400c89b216520464a878d6152b4581ccad15c383223cfc9191d584",
+    "0ab3a0a371075d6e0c5b132379e6ff67be62094ffc4df59dc98b5d74378fe561",
+];
 // on the twist curve, not in the r-order subgroup (x = (1, 0), greatest y)
 const NON_SUBGROUP_G2_BE: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000012351dcdda257b62181cbd745dfee16d5fdf4eb185bbcf33c20a0fe6eaa9cb4a307fb3d558dafafb6bf6dd326a5fefe0beca3f9ac3bd999a390d504fad34b0b8c";
 // the "jeff1" test vector (two pairs, product == 1)
@@ -155,6 +163,151 @@ fn fr_batch_invert_roundtrip() {
     assert!(alt_bn128_fr_batch_invert(Version::V0, &scalars(&[0u8; 64])).is_err());
 }
 
+fn scalar(value: u8) -> PodScalar {
+    let mut bytes = [0u8; 32];
+    bytes[31] = value;
+    PodScalar(bytes)
+}
+
+fn plonk_context() -> PodPlonkReductionContext {
+    PodPlonkReductionContext {
+        domain_size_be: 8u64.to_be_bytes(),
+        num_public_inputs_be: 1u32.to_be_bytes(),
+        reserved: [0u8; 4],
+        omega: PodScalar(hex(PLONK_OMEGA_8_BE).try_into().unwrap()),
+        k1: scalar(2),
+        k2: scalar(3),
+    }
+}
+
+fn plonk_input(seed: u8) -> PodPlonkReductionInput {
+    PodPlonkReductionInput {
+        challenge_digests: core::array::from_fn(|index| {
+            scalar(seed.saturating_add(u8::try_from(index).unwrap_or(u8::MAX))).0
+        }),
+        evaluations: core::array::from_fn(|index| {
+            scalar(
+                seed.saturating_add(11)
+                    .saturating_add(u8::try_from(index).unwrap_or(u8::MAX)),
+            )
+        }),
+        rho: scalar(seed.saturating_add(1)),
+    }
+}
+
+fn snarkjs_context(seed: u8) -> PodSnarkjsPlonkReductionContext {
+    PodSnarkjsPlonkReductionContext {
+        domain_size_be: 8u64.to_be_bytes(),
+        num_public_inputs_be: 1u32.to_be_bytes(),
+        reserved: [0u8; 4],
+        omega: PodScalar(hex(PLONK_OMEGA_8_BE).try_into().unwrap()),
+        k1: scalar(2),
+        k2: scalar(3),
+        transcript_vk_points: core::array::from_fn(|index| {
+            let mut bytes = [0u8; 64];
+            bytes[31] = seed;
+            bytes[63] = u8::try_from(index).unwrap_or(u8::MAX).saturating_add(1);
+            PodG1Point(bytes)
+        }),
+        x_2: {
+            let mut bytes = [0u8; 128];
+            bytes[31] = seed;
+            bytes[127] = 42;
+            PodG2Point(bytes)
+        },
+    }
+}
+
+fn snarkjs_input(seed: u8) -> PodSnarkjsPlonkReductionInput {
+    PodSnarkjsPlonkReductionInput {
+        transcript_points: core::array::from_fn(|index| {
+            let mut bytes = [0u8; 64];
+            bytes[31] = seed;
+            bytes[63] = u8::try_from(index).unwrap_or(u8::MAX).saturating_add(1);
+            PodG1Point(bytes)
+        }),
+        evaluations: core::array::from_fn(|index| {
+            scalar(
+                seed.saturating_add(11)
+                    .saturating_add(u8::try_from(index).unwrap_or(u8::MAX)),
+            )
+        }),
+    }
+}
+
+fn plonk_reducer_outputs() -> [Vec<PodScalar>; 3] {
+    let public_inputs = [scalar(101)];
+    let synthetic = alt_bn128_plonk_batch_reduce(
+        Version::V0,
+        &plonk_context(),
+        &[plonk_input(7)],
+        &public_inputs,
+    )
+    .unwrap();
+    let canonical = alt_bn128_snarkjs_plonk_batch_reduce(
+        Version::V0,
+        &snarkjs_context(7),
+        &[snarkjs_input(11)],
+        &public_inputs,
+    )
+    .unwrap();
+    let contexts = [PodSnarkjsPlonkMultiVkContext {
+        context_index_be: 0u32.to_be_bytes(),
+        reserved: [0u8; 4],
+        application_context: [9u8; 32],
+        reduction: snarkjs_context(9),
+        g2_gen: {
+            let mut bytes = [0u8; 128];
+            bytes[0] = 9;
+            bytes[127] = 1;
+            PodG2Point(bytes)
+        },
+    }];
+    let inputs = [PodSnarkjsPlonkMultiVkInput {
+        proof_index_be: 0u32.to_be_bytes(),
+        context_index_be: 0u32.to_be_bytes(),
+        proof: snarkjs_input(13),
+    }];
+    let multi = alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
+        Version::V0,
+        &contexts,
+        &inputs,
+        &public_inputs,
+    )
+    .unwrap();
+    [synthetic, canonical, multi]
+}
+
+fn scalar_digest(values: &[PodScalar]) -> [u8; 32] {
+    let bytes: Vec<u8> = values.iter().flat_map(|value| value.0).collect();
+    hash(&bytes).to_bytes()
+}
+
+fn plonk_reducers_match_fixed_outputs() {
+    let [synthetic, canonical, multi] = plonk_reducer_outputs();
+    assert_eq!(synthetic.len(), plonk_reduction_output_count(1).unwrap());
+    assert_eq!(canonical.len(), plonk_reduction_output_count(1).unwrap());
+    assert_eq!(
+        multi.len(),
+        snarkjs_plonk_multi_vk_output_count(1, 1).unwrap()
+    );
+    for (values, expected) in [
+        (synthetic.as_slice(), PLONK_OUTPUT_DIGESTS[0]),
+        (canonical.as_slice(), PLONK_OUTPUT_DIGESTS[1]),
+        (multi.as_slice(), PLONK_OUTPUT_DIGESTS[2]),
+    ] {
+        assert_eq!(scalar_digest(values).as_slice(), hex(expected));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn plonk_outputs_match() {
+        super::plonk_reducers_match_fixed_outputs();
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn entrypoint(_input: *mut u8) -> u64 {
     msg!("alt_bn128_batch");
@@ -166,6 +319,7 @@ pub extern "C" fn entrypoint(_input: *mut u8) -> u64 {
     pairing_check_rejects_zero_pairs();
     fr_lincomb_inner_product();
     fr_batch_invert_roundtrip();
+    plonk_reducers_match_fixed_outputs();
 
     0
 }

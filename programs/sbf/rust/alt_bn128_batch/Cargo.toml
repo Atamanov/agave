@@ -16,6 +16,7 @@ solana-bn254 = { workspace = true }
 solana-bn254-batch-syscall = { workspace = true, features = ["agave-unstable-api"] }
 solana-msg = { workspace = true }
 solana-program-entrypoint = { workspace = true }
+solana-sha256-hasher = { workspace = true }
 
 [lints]
 workspace = true

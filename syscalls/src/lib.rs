@@ -15,6 +15,9 @@ use {
     crate::mem_ops::is_nonoverlapping,
     solana_big_mod_exp::{BigModExpParams, big_mod_exp},
     solana_blake3_hasher as blake3,
+    solana_bn254_batch_syscall::{
+        FR_MAX_ELEMS, MSM_MAX_POINTS, PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS,
+    },
     solana_cpi::MAX_RETURN_DATA,
     solana_hash::Hash,
     solana_hash_512::Hash512,
@@ -322,6 +325,8 @@ pub fn create_program_runtime_environment(
 ) -> Result<ProgramRuntimeEnvironment, Error> {
     let enable_alt_bn128_syscall = feature_set.enable_alt_bn128_syscall;
     let enable_alt_bn128_batch_syscalls = feature_set.enable_alt_bn128_batch_syscalls;
+    let enable_alt_bn128_plonk_research_syscall =
+        feature_set.enable_alt_bn128_plonk_research_syscall;
     let enable_alt_bn128_compression_syscall = feature_set.enable_alt_bn128_compression_syscall;
     let enable_big_mod_exp_syscall = feature_set.enable_big_mod_exp_syscall;
     let blake3_syscall_enabled = feature_set.blake3_syscall_enabled;
@@ -541,7 +546,7 @@ pub fn create_program_runtime_environment(
     )?;
     register_feature_gated_function!(
         result,
-        enable_alt_bn128_batch_syscalls,
+        enable_alt_bn128_plonk_research_syscall,
         "sol_alt_bn128_plonk_batch_reduce",
         SyscallAltBn128PlonkBatchReduce
     )?;
@@ -780,266 +785,6 @@ declare_builtin_function!(
         _arg5: u64,
     ) -> Result<u64, Error> {
         Err(SyscallError::Abort.into())
-    }
-);
-
-declare_builtin_function!(
-    /// Atomic canonical snarkjs PLONK reduction across verifier-resolved
-    /// contexts. The packed shape declares context, proof, and flattened
-    /// public-input counts so charging and all translations are exact.
-    SyscallAltBn128SnarkjsPlonkMultiVkBatchReduce,
-    fn rust(
-        invoke_context: &mut InvokeContext<'_, '_>,
-        shape: u64,
-        contexts_addr: u64,
-        inputs_addr: u64,
-        public_inputs_addr: u64,
-        result_addr: u64,
-    ) -> Result<u64, Error> {
-        use solana_bn254_batch_syscall::{
-            PodScalar, PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput, Version,
-            alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
-            snarkjs_plonk_multi_vk_output_count, unpack_snarkjs_plonk_multi_vk_shape,
-        };
-
-        let (num_contexts, num_proofs, num_public_inputs) =
-            unpack_snarkjs_plonk_multi_vk_shape(shape);
-        let execution_cost = invoke_context.get_execution_cost();
-        // Prototype B1 pricing. The scalar term reuses the experimental shape
-        // parameters; the transcript term charges every declared context,
-        // proof, and public scalar before translating guest memory. Production
-        // activation still requires validator-class B1/B3/B5 calibration.
-        let scalar_cost = execution_cost
-            .alt_bn128_plonk_batch_reduce_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_plonk_batch_reduce_per_proof_cost
-                    .saturating_mul(num_proofs),
-            )
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_plonk_batch_reduce_per_lagrange_cost
-                    .saturating_mul(num_public_inputs.saturating_add(num_proofs)),
-            );
-        let transcript_cost = 200u64
-            .saturating_add(800u64.saturating_mul(num_contexts))
-            .saturating_add(1719u64.saturating_mul(num_proofs))
-            .saturating_add(32u64.saturating_mul(num_public_inputs));
-        invoke_context
-            .compute_meter
-            .consume_checked(scalar_cost.saturating_add(transcript_cost))?;
-
-        let Some(output_count) = usize::try_from(num_contexts)
-            .ok()
-            .and_then(|contexts| {
-                usize::try_from(num_proofs)
-                    .ok()
-                    .and_then(|proofs| snarkjs_plonk_multi_vk_output_count(contexts, proofs))
-            })
-        else {
-            return Ok(1);
-        };
-        let check_aligned = invoke_context.get_check_aligned();
-        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
-        let contexts = translate_slice::<PodSnarkjsPlonkMultiVkContext>(
-            memory_mapping,
-            contexts_addr,
-            num_contexts,
-            check_aligned,
-        )?;
-        let inputs = translate_slice::<PodSnarkjsPlonkMultiVkInput>(
-            memory_mapping,
-            inputs_addr,
-            num_proofs,
-            check_aligned,
-        )?;
-        let public_inputs = translate_slice::<PodScalar>(
-            memory_mapping,
-            public_inputs_addr,
-            num_public_inputs,
-            check_aligned,
-        )?;
-
-        match alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
-            Version::V0,
-            contexts,
-            inputs,
-            public_inputs,
-        ) {
-            Ok(output) => {
-                translate_mut!(
-                    memory_mapping,
-                    check_aligned,
-                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count as u64)?;
-                );
-                result_ref_mut.copy_from_slice(&output);
-                Ok(SUCCESS)
-            }
-            Err(_) => Ok(1),
-        }
-    }
-);
-
-declare_builtin_function!(
-    /// BN254 pairing map returning the post-final-exponentiation target-group
-    /// element as twelve canonical 32-byte big-endian Fq coefficients.
-    ///
-    /// Input validation and limits are identical to
-    /// `sol_alt_bn128_pairing_check`.  This does not expose a Miller-loop
-    /// intermediate or backend-native Montgomery limbs.  Callers may compose
-    /// the authenticated result inside one verifier invocation, but must not
-    /// treat arbitrary caller-supplied Fq12 bytes as syscall-proven GT values.
-    SyscallAltBn128PairingMap,
-    fn rust(
-        invoke_context: &mut InvokeContext<'_, '_>,
-        num_pairs: u64,
-        pairs_addr: u64,
-        result_addr: u64,
-        _arg4: u64,
-        _arg5: u64,
-    ) -> Result<u64, Error> {
-        use solana_bn254_batch_syscall::{
-            PodG1G2Pair, PodGtElement, Version, alt_bn128_pairing_map,
-        };
-
-        let check_aligned = invoke_context.get_check_aligned();
-        let execution_cost = invoke_context.get_execution_cost();
-        // Pairing check and pairing map share validation, preparation, Miller
-        // loop, and final exponentiation.  This experimental path reuses the
-        // existing pairing schedule.  Fresh local map-vs-check measurements
-        // show that schedule exceeds observed time at n={1,2,3,4,8,16} on the
-        // study host only; this is not release or validator-fleet calibration.
-        let cost = execution_cost
-            .alt_bn128_pairing_check_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_pairing_check_per_pair_cost
-                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
-                    .saturating_mul(num_pairs),
-            );
-        invoke_context.compute_meter.consume_checked(cost)?;
-
-        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
-        let pairs = translate_slice::<PodG1G2Pair>(
-            memory_mapping,
-            pairs_addr,
-            num_pairs,
-            check_aligned,
-        )?;
-
-        match alt_bn128_pairing_map(Version::V0, pairs) {
-            Ok(result) => {
-                translate_mut!(
-                    memory_mapping,
-                    check_aligned,
-                    let result_ref_mut: &mut PodGtElement = map(result_addr)?;
-                );
-                *result_ref_mut = result;
-                Ok(SUCCESS)
-            }
-            Err(_) => Ok(1),
-        }
-    }
-);
-
-declare_builtin_function!(
-    /// Canonical snarkjs PLONK transcript plus scalar reduction. The context
-    /// contains raw `(Qm,Ql,Qr,Qo,Qc,S1,S2,S3)` bytes and each input contains
-    /// raw `(A,B,C,Z,T1,T2,T3,Wxi,Wxiw)` bytes. The native side derives all
-    /// six phased Keccak challenges and returns only two-MSM coefficients.
-    SyscallAltBn128SnarkjsPlonkBatchReduce,
-    fn rust(
-        invoke_context: &mut InvokeContext<'_, '_>,
-        shape: u64,
-        context_addr: u64,
-        inputs_addr: u64,
-        public_inputs_addr: u64,
-        result_addr: u64,
-    ) -> Result<u64, Error> {
-        use solana_bn254_batch_syscall::{
-            PodScalar, PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput, Version,
-            alt_bn128_snarkjs_plonk_batch_reduce, plonk_reduction_output_count,
-            unpack_plonk_reduction_shape,
-        };
-
-        let (num_proofs, num_public_inputs) = unpack_plonk_reduction_shape(shape);
-        let execution_cost = invoke_context.get_execution_cost();
-        // Prototype only. Scalar-reduction terms are the Apple M5 Pro fit
-        // used by the synthetic operation. The additional terms conservatively
-        // charge both the six proof-local canonical transcript hashes and the
-        // full-batch seed/nonzero-rho derivation at the existing SBF Keccak
-        // slice schedule. Recalibrate on validator-class x86 before activation.
-        let scalar_cost = execution_cost
-            .alt_bn128_plonk_batch_reduce_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_plonk_batch_reduce_per_proof_cost
-                    .saturating_mul(num_proofs),
-            )
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_plonk_batch_reduce_per_lagrange_cost
-                    .saturating_mul(num_proofs)
-                    .saturating_mul(num_public_inputs.max(1)),
-            );
-        // The fixed outer-batch seed includes X_2 as one 128-byte slice:
-        // max(mem_op_base=10, sha256_byte_cost=1 * 128/2) = 64 CU.
-        let transcript_cost = 498u64.saturating_add(
-            num_proofs.saturating_mul(
-                1719u64.saturating_add(32u64.saturating_mul(num_public_inputs)),
-            ),
-        );
-        invoke_context
-            .compute_meter
-            .consume_checked(scalar_cost.saturating_add(transcript_cost))?;
-
-        let Some(output_count) = usize::try_from(num_proofs)
-            .ok()
-            .and_then(plonk_reduction_output_count)
-        else {
-            return Ok(1);
-        };
-        let check_aligned = invoke_context.get_check_aligned();
-        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
-        let context = translate_type::<PodSnarkjsPlonkReductionContext>(
-            memory_mapping,
-            context_addr,
-            check_aligned,
-        )?;
-        if u64::from(context.num_public_inputs()) != num_public_inputs {
-            return Ok(1);
-        }
-        let inputs = translate_slice::<PodSnarkjsPlonkReductionInput>(
-            memory_mapping,
-            inputs_addr,
-            num_proofs,
-            check_aligned,
-        )?;
-        let total_public_inputs = num_proofs.saturating_mul(num_public_inputs);
-        let public_inputs = translate_slice::<PodScalar>(
-            memory_mapping,
-            public_inputs_addr,
-            total_public_inputs,
-            check_aligned,
-        )?;
-
-        match alt_bn128_snarkjs_plonk_batch_reduce(
-            Version::V0,
-            context,
-            inputs,
-            public_inputs,
-        ) {
-            Ok(output) => {
-                translate_mut!(
-                    memory_mapping,
-                    check_aligned,
-                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count as u64)?;
-                );
-                result_ref_mut.copy_from_slice(&output);
-                Ok(SUCCESS)
-            }
-            Err(_) => Ok(1),
-        }
     }
 );
 
@@ -3025,6 +2770,21 @@ declare_builtin_function!(
 const ALT_BN128_G1_MSM_DISCOUNT_PER_THOUSAND: [u64; 12] =
     [1000, 636, 449, 320, 246, 199, 166, 131, 113, 98, 85, 79];
 
+#[derive(Clone, Copy)]
+enum EmptyInput {
+    Allow,
+    Reject,
+}
+
+fn checked_slice_count<T>(declared: u64, max: usize, empty: EmptyInput) -> Option<u64> {
+    let count = usize::try_from(declared).ok()?;
+    if count > max || (matches!(empty, EmptyInput::Reject) && count == 0) {
+        return None;
+    }
+    size_of::<T>().checked_mul(count)?;
+    Some(declared)
+}
+
 fn alt_bn128_g1_msm_cost(base_cost: u64, per_point_cost: u64, num_points: u64) -> u64 {
     let discount = match num_points {
         0 => 1000,
@@ -3073,21 +2833,31 @@ declare_builtin_function!(
         );
         invoke_context.compute_meter.consume_checked(cost)?;
 
+        if checked_slice_count::<PodG1Point>(num_points, MSM_MAX_POINTS, EmptyInput::Reject)
+            .is_none()
+            || checked_slice_count::<PodScalar>(num_points, MSM_MAX_POINTS, EmptyInput::Reject)
+                .is_none()
+        {
+            return Ok(1);
+        }
+
         let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
         let points = translate_slice::<PodG1Point>(
             memory_mapping,
             points_addr,
             num_points,
             check_aligned,
-        )?;
+        )?
+        .to_vec();
         let scalars = translate_slice::<PodScalar>(
             memory_mapping,
             scalars_addr,
             num_points,
             check_aligned,
-        )?;
+        )?
+        .to_vec();
 
-        match alt_bn128_g1_msm(Version::V0, points, scalars) {
+        match alt_bn128_g1_msm(Version::V0, &points, &scalars) {
             Ok(result_point) => {
                 translate_mut!(
                     memory_mapping,
@@ -3145,15 +2915,26 @@ declare_builtin_function!(
             );
         invoke_context.compute_meter.consume_checked(cost)?;
 
+        if checked_slice_count::<PodG1G2Pair>(
+            num_pairs,
+            PAIRING_MAX_PAIRS,
+            EmptyInput::Reject,
+        )
+        .is_none()
+        {
+            return Ok(1);
+        }
+
         let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
         let pairs = translate_slice::<PodG1G2Pair>(
             memory_mapping,
             pairs_addr,
             num_pairs,
             check_aligned,
-        )?;
+        )?
+        .to_vec();
 
-        match alt_bn128_pairing_check(Version::V0, pairs) {
+        match alt_bn128_pairing_check(Version::V0, &pairs) {
             Ok(verdict) => {
                 translate_mut!(
                     memory_mapping,
@@ -3161,6 +2942,72 @@ declare_builtin_function!(
                     let result_ref_mut: &mut PodPairingResult = map(result_addr)?;
                 );
                 *result_ref_mut = PodPairingResult::from_verdict(verdict);
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    /// BN254 pairing map returning the post-final-exponentiation target-group
+    /// element as twelve canonical 32-byte big-endian Fq coefficients.
+    ///
+    /// Validation matches `sol_alt_bn128_pairing_check`, but this map accepts
+    /// at most 16 pairs. It does not expose Miller-loop or native field data.
+    SyscallAltBn128PairingMap,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        num_pairs: u64,
+        pairs_addr: u64,
+        result_addr: u64,
+        _arg4: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{
+            PodG1G2Pair, PodGtElement, Version, alt_bn128_pairing_map,
+        };
+
+        let check_aligned = invoke_context.get_check_aligned();
+        let execution_cost = invoke_context.get_execution_cost();
+        // The research map uses the pairing-check schedule until fleet calibration.
+        let cost = execution_cost
+            .alt_bn128_pairing_check_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_pairing_check_per_pair_cost
+                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
+                    .saturating_mul(num_pairs),
+            );
+        invoke_context.compute_meter.consume_checked(cost)?;
+
+        if checked_slice_count::<PodG1G2Pair>(
+            num_pairs,
+            PAIRING_MAP_MAX_PAIRS,
+            EmptyInput::Reject,
+        )
+        .is_none()
+        {
+            return Ok(1);
+        }
+
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let pairs = translate_slice::<PodG1G2Pair>(
+            memory_mapping,
+            pairs_addr,
+            num_pairs,
+            check_aligned,
+        )?
+        .to_vec();
+
+        match alt_bn128_pairing_map(Version::V0, &pairs) {
+            Ok(result) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: &mut PodGtElement = map(result_addr)?;
+                );
+                *result_ref_mut = result;
                 Ok(SUCCESS)
             }
             Err(_) => Ok(1),
@@ -3202,11 +3049,17 @@ declare_builtin_function!(
         );
         invoke_context.compute_meter.consume_checked(cost)?;
 
-        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
-        let a = translate_slice::<PodScalar>(memory_mapping, a_addr, num_elems, check_aligned)?;
-        let b = translate_slice::<PodScalar>(memory_mapping, b_addr, num_elems, check_aligned)?;
+        if checked_slice_count::<PodScalar>(num_elems, FR_MAX_ELEMS, EmptyInput::Reject).is_none() {
+            return Ok(1);
+        }
 
-        match alt_bn128_fr_lincomb(Version::V0, a, b) {
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let a = translate_slice::<PodScalar>(memory_mapping, a_addr, num_elems, check_aligned)?
+            .to_vec();
+        let b = translate_slice::<PodScalar>(memory_mapping, b_addr, num_elems, check_aligned)?
+            .to_vec();
+
+        match alt_bn128_fr_lincomb(Version::V0, &a, &b) {
             Ok(result) => {
                 translate_mut!(
                     memory_mapping,
@@ -3250,10 +3103,15 @@ declare_builtin_function!(
         );
         invoke_context.compute_meter.consume_checked(cost)?;
 
-        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
-        let a = translate_slice::<PodScalar>(memory_mapping, a_addr, num_elems, check_aligned)?;
+        if checked_slice_count::<PodScalar>(num_elems, FR_MAX_ELEMS, EmptyInput::Reject).is_none() {
+            return Ok(1);
+        }
 
-        match alt_bn128_fr_batch_invert(Version::V0, a) {
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let a = translate_slice::<PodScalar>(memory_mapping, a_addr, num_elems, check_aligned)?
+            .to_vec();
+
+        match alt_bn128_fr_batch_invert(Version::V0, &a) {
             Ok(result) => {
                 translate_mut!(
                     memory_mapping,
@@ -3320,9 +3178,38 @@ declare_builtin_function!(
         else {
             return Ok(1);
         };
+        if checked_slice_count::<PodPlonkReductionInput>(
+            num_proofs,
+            MSM_MAX_POINTS,
+            EmptyInput::Reject,
+        )
+        .is_none()
+        {
+            return Ok(1);
+        }
+        let Some(total_public_inputs) = num_proofs
+            .checked_mul(num_public_inputs)
+            .and_then(|count| {
+                checked_slice_count::<PodScalar>(count, FR_MAX_ELEMS, EmptyInput::Allow)
+            })
+        else {
+            return Ok(1);
+        };
+        let Some(output_count_u64) = u64::try_from(output_count).ok() else {
+            return Ok(1);
+        };
+        if checked_slice_count::<PodScalar>(
+            output_count_u64,
+            usize::MAX,
+            EmptyInput::Reject,
+        )
+        .is_none()
+        {
+            return Ok(1);
+        }
         let check_aligned = invoke_context.get_check_aligned();
         let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
-        let context = translate_type::<PodPlonkReductionContext>(
+        let context = *translate_type::<PodPlonkReductionContext>(
             memory_mapping,
             context_addr,
             check_aligned,
@@ -3335,21 +3222,286 @@ declare_builtin_function!(
             inputs_addr,
             num_proofs,
             check_aligned,
-        )?;
-        let total_public_inputs = num_proofs.saturating_mul(num_public_inputs);
+        )?
+        .to_vec();
         let public_inputs = translate_slice::<PodScalar>(
             memory_mapping,
             public_inputs_addr,
             total_public_inputs,
             check_aligned,
-        )?;
+        )?
+        .to_vec();
 
-        match alt_bn128_plonk_batch_reduce(Version::V0, context, inputs, public_inputs) {
+        match alt_bn128_plonk_batch_reduce(Version::V0, &context, &inputs, &public_inputs) {
             Ok(output) => {
                 translate_mut!(
                     memory_mapping,
                     check_aligned,
-                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count as u64)?;
+                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count_u64)?;
+                );
+                result_ref_mut.copy_from_slice(&output);
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    /// Canonical snarkjs PLONK transcript plus scalar reduction. The context
+    /// contains raw `(Qm,Ql,Qr,Qo,Qc,S1,S2,S3)` bytes and each input contains
+    /// raw `(A,B,C,Z,T1,T2,T3,Wxi,Wxiw)` bytes. The native side derives all
+    /// six phased Keccak challenges and returns only two-MSM coefficients.
+    SyscallAltBn128SnarkjsPlonkBatchReduce,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        shape: u64,
+        context_addr: u64,
+        inputs_addr: u64,
+        public_inputs_addr: u64,
+        result_addr: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{
+            PodScalar, PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput, Version,
+            alt_bn128_snarkjs_plonk_batch_reduce, plonk_reduction_output_count,
+            unpack_plonk_reduction_shape,
+        };
+
+        let (num_proofs, num_public_inputs) = unpack_plonk_reduction_shape(shape);
+        let execution_cost = invoke_context.get_execution_cost();
+        // Prototype only. Scalar-reduction terms are the Apple M5 Pro fit
+        // used by the synthetic operation. The additional terms conservatively
+        // charge both the six proof-local canonical transcript hashes and the
+        // full-batch seed/nonzero-rho derivation at the existing SBF Keccak
+        // slice schedule. Recalibrate on validator-class x86 before activation.
+        let scalar_cost = execution_cost
+            .alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(num_proofs),
+            )
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_lagrange_cost
+                    .saturating_mul(num_proofs)
+                    .saturating_mul(num_public_inputs.max(1)),
+            );
+        // The fixed outer-batch seed includes X_2 as one 128-byte slice:
+        // max(mem_op_base=10, sha256_byte_cost=1 * 128/2) = 64 CU.
+        let transcript_cost = 498u64.saturating_add(
+            num_proofs.saturating_mul(
+                1719u64.saturating_add(32u64.saturating_mul(num_public_inputs)),
+            ),
+        );
+        invoke_context
+            .compute_meter
+            .consume_checked(scalar_cost.saturating_add(transcript_cost))?;
+
+        let Some(output_count) = usize::try_from(num_proofs)
+            .ok()
+            .and_then(plonk_reduction_output_count)
+        else {
+            return Ok(1);
+        };
+        if checked_slice_count::<PodSnarkjsPlonkReductionInput>(
+            num_proofs,
+            MSM_MAX_POINTS,
+            EmptyInput::Reject,
+        )
+        .is_none()
+        {
+            return Ok(1);
+        }
+        let Some(total_public_inputs) = num_proofs
+            .checked_mul(num_public_inputs)
+            .and_then(|count| {
+                checked_slice_count::<PodScalar>(count, FR_MAX_ELEMS, EmptyInput::Allow)
+            })
+        else {
+            return Ok(1);
+        };
+        let Some(output_count_u64) = u64::try_from(output_count).ok() else {
+            return Ok(1);
+        };
+        if checked_slice_count::<PodScalar>(
+            output_count_u64,
+            usize::MAX,
+            EmptyInput::Reject,
+        )
+        .is_none()
+        {
+            return Ok(1);
+        }
+        let check_aligned = invoke_context.get_check_aligned();
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let context = *translate_type::<PodSnarkjsPlonkReductionContext>(
+            memory_mapping,
+            context_addr,
+            check_aligned,
+        )?;
+        if u64::from(context.num_public_inputs()) != num_public_inputs {
+            return Ok(1);
+        }
+        let inputs = translate_slice::<PodSnarkjsPlonkReductionInput>(
+            memory_mapping,
+            inputs_addr,
+            num_proofs,
+            check_aligned,
+        )?
+        .to_vec();
+        let public_inputs = translate_slice::<PodScalar>(
+            memory_mapping,
+            public_inputs_addr,
+            total_public_inputs,
+            check_aligned,
+        )?
+        .to_vec();
+
+        match alt_bn128_snarkjs_plonk_batch_reduce(
+            Version::V0,
+            &context,
+            &inputs,
+            &public_inputs,
+        ) {
+            Ok(output) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count_u64)?;
+                );
+                result_ref_mut.copy_from_slice(&output);
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    /// Atomic canonical snarkjs PLONK reduction across verifier-resolved
+    /// contexts. The packed shape declares context, proof, and flattened
+    /// public-input counts so charging and all translations are exact.
+    SyscallAltBn128SnarkjsPlonkMultiVkBatchReduce,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        shape: u64,
+        contexts_addr: u64,
+        inputs_addr: u64,
+        public_inputs_addr: u64,
+        result_addr: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{
+            PodScalar, PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput, Version,
+            alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
+            snarkjs_plonk_multi_vk_output_count, unpack_snarkjs_plonk_multi_vk_shape,
+        };
+
+        let (num_contexts, num_proofs, num_public_inputs) =
+            unpack_snarkjs_plonk_multi_vk_shape(shape);
+        let execution_cost = invoke_context.get_execution_cost();
+        // Prototype B1 pricing. The scalar term reuses the experimental shape
+        // parameters; the transcript term charges every declared context,
+        // proof, and public scalar before translating guest memory. Production
+        // activation still requires validator-class B1/B3/B5 calibration.
+        let scalar_cost = execution_cost
+            .alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(num_proofs),
+            )
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_lagrange_cost
+                    .saturating_mul(num_public_inputs.saturating_add(num_proofs)),
+            );
+        let transcript_cost = 200u64
+            .saturating_add(800u64.saturating_mul(num_contexts))
+            .saturating_add(1719u64.saturating_mul(num_proofs))
+            .saturating_add(32u64.saturating_mul(num_public_inputs));
+        invoke_context
+            .compute_meter
+            .consume_checked(scalar_cost.saturating_add(transcript_cost))?;
+
+        let Some(output_count) = usize::try_from(num_contexts)
+            .ok()
+            .and_then(|contexts| {
+                usize::try_from(num_proofs)
+                    .ok()
+                    .and_then(|proofs| snarkjs_plonk_multi_vk_output_count(contexts, proofs))
+            })
+        else {
+            return Ok(1);
+        };
+        if checked_slice_count::<PodSnarkjsPlonkMultiVkContext>(
+            num_contexts,
+            MSM_MAX_POINTS,
+            EmptyInput::Reject,
+        )
+        .is_none()
+            || checked_slice_count::<PodSnarkjsPlonkMultiVkInput>(
+                num_proofs,
+                MSM_MAX_POINTS,
+                EmptyInput::Reject,
+            )
+            .is_none()
+            || checked_slice_count::<PodScalar>(
+                num_public_inputs,
+                FR_MAX_ELEMS,
+                EmptyInput::Allow,
+            )
+            .is_none()
+        {
+            return Ok(1);
+        }
+        let Some(output_count_u64) = u64::try_from(output_count).ok() else {
+            return Ok(1);
+        };
+        if checked_slice_count::<PodScalar>(
+            output_count_u64,
+            usize::MAX,
+            EmptyInput::Reject,
+        )
+        .is_none()
+        {
+            return Ok(1);
+        }
+        let check_aligned = invoke_context.get_check_aligned();
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let contexts = translate_slice::<PodSnarkjsPlonkMultiVkContext>(
+            memory_mapping,
+            contexts_addr,
+            num_contexts,
+            check_aligned,
+        )?
+        .to_vec();
+        let inputs = translate_slice::<PodSnarkjsPlonkMultiVkInput>(
+            memory_mapping,
+            inputs_addr,
+            num_proofs,
+            check_aligned,
+        )?
+        .to_vec();
+        let public_inputs = translate_slice::<PodScalar>(
+            memory_mapping,
+            public_inputs_addr,
+            num_public_inputs,
+            check_aligned,
+        )?
+        .to_vec();
+
+        match alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
+            Version::V0,
+            &contexts,
+            &inputs,
+            &public_inputs,
+        ) {
+            Ok(output) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count_u64)?;
                 );
                 result_ref_mut.copy_from_slice(&output);
                 Ok(SUCCESS)
@@ -3367,10 +3519,19 @@ mod tests {
     use solana_sysvar::fees::Fees;
     use {
         super::*,
+        ark_bn254::Fr,
+        ark_ff::FftField,
         assert_matches::assert_matches,
         core::slice,
         solana_account::{AccountSharedData, create_account_shared_data_for_test},
         solana_account_info::AccountInfo,
+        solana_bn254_batch_syscall::{
+            PLONK_REDUCE_MAX_PROOFS, PodG1Point, PodG2Point, PodPlonkReductionContext,
+            PodPlonkReductionInput, PodScalar, PodSnarkjsPlonkMultiVkContext,
+            PodSnarkjsPlonkMultiVkInput, PodSnarkjsPlonkReductionContext,
+            PodSnarkjsPlonkReductionInput, Version, plonk_reduction_shape,
+            snarkjs_plonk_multi_vk_shape,
+        },
         solana_clock::Clock,
         solana_epoch_rewards::EpochRewards,
         solana_epoch_schedule::EpochSchedule,
@@ -3392,7 +3553,7 @@ mod tests {
             error::EbpfError,
             memory_region::{MemoryMapping, MemoryRegion},
             program::SBPFVersion,
-            vm::Config,
+            vm::{Config, ContextObject},
         },
         solana_sdk_ids::{
             bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, native_loader, sysvar,
@@ -8594,6 +8755,48 @@ mod tests {
     }
 
     #[test]
+    fn test_alt_bn128_batch_and_research_registries_are_isolated() {
+        const PRODUCTION: [&[u8]; 7] = [
+            b"sol_alt_bn128_g1_msm",
+            b"sol_alt_bn128_pairing_check",
+            b"sol_alt_bn128_pairing_map",
+            b"sol_alt_bn128_fr_lincomb",
+            b"sol_alt_bn128_fr_batch_invert",
+            b"sol_alt_bn128_snarkjs_plonk_batch_reduce",
+            b"sol_alt_bn128_snarkjs_plonk_multi_vk_batch_reduce",
+        ];
+        const RESEARCH: &[u8] = b"sol_alt_bn128_plonk_batch_reduce";
+
+        let compute_budget = SVMTransactionExecutionBudget::default();
+        let mut feature_set = SVMFeatureSet::all_enabled();
+        feature_set.enable_alt_bn128_batch_syscalls = true;
+        feature_set.enable_alt_bn128_plonk_research_syscall = false;
+        let environment =
+            create_program_runtime_environment(&feature_set, &compute_budget, false, false)
+                .unwrap();
+        let registry = environment.get_function_registry();
+        assert!(
+            PRODUCTION
+                .iter()
+                .all(|name| registry.lookup_by_name(name).is_some())
+        );
+        assert!(registry.lookup_by_name(RESEARCH).is_none());
+
+        feature_set.enable_alt_bn128_batch_syscalls = false;
+        feature_set.enable_alt_bn128_plonk_research_syscall = true;
+        let environment =
+            create_program_runtime_environment(&feature_set, &compute_budget, false, false)
+                .unwrap();
+        let registry = environment.get_function_registry();
+        assert!(
+            PRODUCTION
+                .iter()
+                .all(|name| registry.lookup_by_name(name).is_none())
+        );
+        assert!(registry.lookup_by_name(RESEARCH).is_some());
+    }
+
+    #[test]
     fn test_syscall_sha512() {
         let config = Config::default();
         prepare_mockup!(invoke_context, program_id, bpf_loader_deprecated::id());
@@ -8722,6 +8925,589 @@ mod tests {
                     .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
                     .saturating_mul(num_pairs),
             )
+    }
+
+    fn plonk_scalar_cost(
+        invoke_context: &InvokeContext,
+        num_proofs: u64,
+        num_public_inputs: u64,
+    ) -> u64 {
+        let cost = invoke_context.get_execution_cost();
+        cost.alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                cost.alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(num_proofs),
+            )
+            .saturating_add(
+                cost.alt_bn128_plonk_batch_reduce_per_lagrange_cost
+                    .saturating_mul(num_proofs)
+                    .saturating_mul(num_public_inputs.max(1)),
+            )
+    }
+
+    fn snarkjs_plonk_cost(
+        invoke_context: &InvokeContext,
+        num_proofs: u64,
+        num_public_inputs: u64,
+    ) -> u64 {
+        plonk_scalar_cost(invoke_context, num_proofs, num_public_inputs).saturating_add(
+            498u64.saturating_add(
+                num_proofs.saturating_mul(
+                    1719u64.saturating_add(32u64.saturating_mul(num_public_inputs)),
+                ),
+            ),
+        )
+    }
+
+    fn snarkjs_plonk_multi_vk_cost(
+        invoke_context: &InvokeContext,
+        num_contexts: u64,
+        num_proofs: u64,
+        num_public_inputs: u64,
+    ) -> u64 {
+        let cost = invoke_context.get_execution_cost();
+        cost.alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                cost.alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(num_proofs),
+            )
+            .saturating_add(
+                cost.alt_bn128_plonk_batch_reduce_per_lagrange_cost
+                    .saturating_mul(num_public_inputs.saturating_add(num_proofs)),
+            )
+            .saturating_add(200)
+            .saturating_add(800u64.saturating_mul(num_contexts))
+            .saturating_add(1719u64.saturating_mul(num_proofs))
+            .saturating_add(32u64.saturating_mul(num_public_inputs))
+    }
+
+    fn plonk_context() -> PodPlonkReductionContext {
+        PodPlonkReductionContext {
+            domain_size_be: 8u64.to_be_bytes(),
+            num_public_inputs_be: 1u32.to_be_bytes(),
+            reserved: [0u8; 4],
+            omega: PodScalar::from(
+                &Fr::get_root_of_unity(8).expect("the BN254 scalar field supports size eight"),
+            ),
+            k1: PodScalar::from(&Fr::from(2u64)),
+            k2: PodScalar::from(&Fr::from(3u64)),
+        }
+    }
+
+    fn plonk_input(seed: u64) -> PodPlonkReductionInput {
+        let value = |index: usize, base: u64| {
+            seed.saturating_add(u64::try_from(index).unwrap_or(u64::MAX))
+                .saturating_add(base)
+        };
+        PodPlonkReductionInput {
+            challenge_digests: core::array::from_fn(|index| {
+                PodScalar::from(&Fr::from(value(index, 2))).0
+            }),
+            evaluations: core::array::from_fn(|index| PodScalar::from(&Fr::from(value(index, 11)))),
+            rho: PodScalar::from(&Fr::from(seed.saturating_add(1))),
+        }
+    }
+
+    fn snarkjs_plonk_context(seed: u8) -> PodSnarkjsPlonkReductionContext {
+        PodSnarkjsPlonkReductionContext {
+            domain_size_be: 8u64.to_be_bytes(),
+            num_public_inputs_be: 1u32.to_be_bytes(),
+            reserved: [0u8; 4],
+            omega: PodScalar::from(
+                &Fr::get_root_of_unity(8).expect("the BN254 scalar field supports size eight"),
+            ),
+            k1: PodScalar::from(&Fr::from(2u64)),
+            k2: PodScalar::from(&Fr::from(3u64)),
+            transcript_vk_points: core::array::from_fn(|index| {
+                let mut bytes = [0u8; 64];
+                bytes[31] = seed;
+                bytes[63] = u8::try_from(index).unwrap_or(u8::MAX).saturating_add(1);
+                PodG1Point(bytes)
+            }),
+            x_2: {
+                let mut bytes = [0u8; 128];
+                bytes[31] = seed;
+                bytes[127] = 42;
+                PodG2Point(bytes)
+            },
+        }
+    }
+
+    fn snarkjs_plonk_input(seed: u8) -> PodSnarkjsPlonkReductionInput {
+        PodSnarkjsPlonkReductionInput {
+            transcript_points: core::array::from_fn(|index| {
+                let mut bytes = [0u8; 64];
+                bytes[31] = seed;
+                bytes[63] = u8::try_from(index).unwrap_or(u8::MAX).saturating_add(1);
+                PodG1Point(bytes)
+            }),
+            evaluations: core::array::from_fn(|index| {
+                let value = u64::from(seed)
+                    .saturating_add(u64::try_from(index).unwrap_or(u64::MAX))
+                    .saturating_add(11);
+                PodScalar::from(&Fr::from(value))
+            }),
+        }
+    }
+
+    fn multi_vk_context(seed: u8) -> PodSnarkjsPlonkMultiVkContext {
+        PodSnarkjsPlonkMultiVkContext {
+            context_index_be: 0u32.to_be_bytes(),
+            reserved: [0u8; 4],
+            application_context: [seed; 32],
+            reduction: snarkjs_plonk_context(seed),
+            g2_gen: {
+                let mut bytes = [0u8; 128];
+                bytes[0] = seed;
+                bytes[127] = 1;
+                PodG2Point(bytes)
+            },
+        }
+    }
+
+    fn multi_vk_input(seed: u8) -> PodSnarkjsPlonkMultiVkInput {
+        PodSnarkjsPlonkMultiVkInput {
+            proof_index_be: 0u32.to_be_bytes(),
+            context_index_be: 0u32.to_be_bytes(),
+            proof: snarkjs_plonk_input(seed),
+        }
+    }
+
+    #[test]
+    fn test_bn254_declared_slice_bounds() {
+        assert_eq!(checked_slice_count::<u64>(0, 4, EmptyInput::Allow), Some(0));
+        assert_eq!(checked_slice_count::<u64>(0, 4, EmptyInput::Reject), None);
+        assert_eq!(
+            checked_slice_count::<u64>(4, 4, EmptyInput::Reject),
+            Some(4)
+        );
+        assert_eq!(checked_slice_count::<u64>(5, 4, EmptyInput::Reject), None);
+        assert_eq!(
+            checked_slice_count::<u64>(u64::MAX, usize::MAX, EmptyInput::Allow),
+            None
+        );
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_plonk_reducers_write_exact_aliased_outputs() {
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        let context = plonk_context();
+        let inputs = [plonk_input(7)];
+        let public_inputs = [PodScalar::from(&Fr::from(101u64))];
+        let expected = solana_bn254_batch_syscall::alt_bn128_plonk_batch_reduce(
+            Version::V0,
+            &context,
+            &inputs,
+            &public_inputs,
+        )
+        .unwrap();
+        let context_buffer = bytemuck::bytes_of(&context).to_vec();
+        let mut input_buffer: Vec<u8> = bytemuck::cast_slice(&inputs).to_vec();
+        let public_buffer: Vec<u8> = bytemuck::cast_slice(&public_inputs).to_vec();
+        let expected_buffer: Vec<u8> = bytemuck::cast_slice(&expected).to_vec();
+        if input_buffer.len() < expected_buffer.len() {
+            input_buffer.resize(expected_buffer.len(), 0);
+        }
+        let context_va = 0x100000000;
+        let input_va = 0x200000000;
+        let public_va = 0x300000000;
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const context_buffer[..], context_va),
+                    MemoryRegion::new(&raw mut input_buffer[..], input_va),
+                    MemoryRegion::new(&raw const public_buffer[..], public_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        let shape = plonk_reduction_shape(1, 1).unwrap();
+        let cost = plonk_scalar_cost(&invoke_context, 1, 1);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        assert_eq!(
+            SyscallAltBn128PlonkBatchReduce::rust(
+                &mut invoke_context,
+                shape,
+                context_va,
+                input_va,
+                public_va,
+                input_va,
+            )
+            .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(&input_buffer[..expected_buffer.len()], expected_buffer);
+        assert_eq!(invoke_context.get_remaining(), 0);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(cost.saturating_sub(1));
+        assert_matches!(
+            SyscallAltBn128PlonkBatchReduce::rust(
+                &mut invoke_context,
+                shape,
+                context_va,
+                input_va,
+                public_va,
+                input_va,
+            ),
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap()
+                == &InstructionError::ComputationalBudgetExceeded
+        );
+
+        let context = snarkjs_plonk_context(7);
+        let inputs = [snarkjs_plonk_input(11)];
+        let public_inputs = [PodScalar::from(&Fr::from(103u64))];
+        let expected = solana_bn254_batch_syscall::alt_bn128_snarkjs_plonk_batch_reduce(
+            Version::V0,
+            &context,
+            &inputs,
+            &public_inputs,
+        )
+        .unwrap();
+        let context_buffer = bytemuck::bytes_of(&context).to_vec();
+        let mut input_buffer: Vec<u8> = bytemuck::cast_slice(&inputs).to_vec();
+        let public_buffer: Vec<u8> = bytemuck::cast_slice(&public_inputs).to_vec();
+        let expected_buffer: Vec<u8> = bytemuck::cast_slice(&expected).to_vec();
+        if input_buffer.len() < expected_buffer.len() {
+            input_buffer.resize(expected_buffer.len(), 0);
+        }
+        let context_va = 0x400000000;
+        let input_va = 0x500000000;
+        let public_va = 0x600000000;
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const context_buffer[..], context_va),
+                    MemoryRegion::new(&raw mut input_buffer[..], input_va),
+                    MemoryRegion::new(&raw const public_buffer[..], public_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        let cost = snarkjs_plonk_cost(&invoke_context, 1, 1);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        assert_eq!(
+            SyscallAltBn128SnarkjsPlonkBatchReduce::rust(
+                &mut invoke_context,
+                shape,
+                context_va,
+                input_va,
+                public_va,
+                input_va,
+            )
+            .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(&input_buffer[..expected_buffer.len()], expected_buffer);
+        assert_eq!(invoke_context.get_remaining(), 0);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(cost.saturating_sub(1));
+        assert_matches!(
+            SyscallAltBn128SnarkjsPlonkBatchReduce::rust(
+                &mut invoke_context,
+                shape,
+                context_va,
+                input_va,
+                public_va,
+                input_va,
+            ),
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap()
+                == &InstructionError::ComputationalBudgetExceeded
+        );
+
+        let contexts = [multi_vk_context(9)];
+        let inputs = [multi_vk_input(13)];
+        let public_inputs = [PodScalar::from(&Fr::from(107u64))];
+        let expected = solana_bn254_batch_syscall::alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
+            Version::V0,
+            &contexts,
+            &inputs,
+            &public_inputs,
+        )
+        .unwrap();
+        let context_buffer: Vec<u8> = bytemuck::cast_slice(&contexts).to_vec();
+        let mut input_buffer: Vec<u8> = bytemuck::cast_slice(&inputs).to_vec();
+        let public_buffer: Vec<u8> = bytemuck::cast_slice(&public_inputs).to_vec();
+        let expected_buffer: Vec<u8> = bytemuck::cast_slice(&expected).to_vec();
+        if input_buffer.len() < expected_buffer.len() {
+            input_buffer.resize(expected_buffer.len(), 0);
+        }
+        let context_va = 0x700000000;
+        let input_va = 0x800000000;
+        let public_va = 0x900000000;
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const context_buffer[..], context_va),
+                    MemoryRegion::new(&raw mut input_buffer[..], input_va),
+                    MemoryRegion::new(&raw const public_buffer[..], public_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        let shape = snarkjs_plonk_multi_vk_shape(1, 1, 1).unwrap();
+        let cost = snarkjs_plonk_multi_vk_cost(&invoke_context, 1, 1, 1);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        assert_eq!(
+            SyscallAltBn128SnarkjsPlonkMultiVkBatchReduce::rust(
+                &mut invoke_context,
+                shape,
+                context_va,
+                input_va,
+                public_va,
+                input_va,
+            )
+            .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(&input_buffer[..expected_buffer.len()], expected_buffer);
+        assert_eq!(invoke_context.get_remaining(), 0);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(cost.saturating_sub(1));
+        assert_matches!(
+            SyscallAltBn128SnarkjsPlonkMultiVkBatchReduce::rust(
+                &mut invoke_context,
+                shape,
+                context_va,
+                input_va,
+                public_va,
+                input_va,
+            ),
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap()
+                == &InstructionError::ComputationalBudgetExceeded
+        );
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_plonk_reducers_reject_declared_caps() {
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        let num_proofs = u64::try_from(PLONK_REDUCE_MAX_PROOFS.saturating_add(1)).unwrap();
+        let shape = (1u64 << 32) | num_proofs;
+        let cost = plonk_scalar_cost(&invoke_context, num_proofs, 1);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        assert_eq!(
+            SyscallAltBn128PlonkBatchReduce::rust(&mut invoke_context, shape, 0, 0, 0, 0).unwrap(),
+            1
+        );
+        assert_eq!(invoke_context.get_remaining(), 0);
+
+        let cost = snarkjs_plonk_cost(&invoke_context, num_proofs, 1);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        assert_eq!(
+            SyscallAltBn128SnarkjsPlonkBatchReduce::rust(&mut invoke_context, shape, 0, 0, 0, 0,)
+                .unwrap(),
+            1
+        );
+        assert_eq!(invoke_context.get_remaining(), 0);
+
+        let shape = (1u64 << 48) | (1u64 << 24) | num_proofs;
+        let cost = snarkjs_plonk_multi_vk_cost(&invoke_context, 1, num_proofs, 1);
+        invoke_context.compute_meter.mock_set_remaining(cost);
+        assert_eq!(
+            SyscallAltBn128SnarkjsPlonkMultiVkBatchReduce::rust(
+                &mut invoke_context,
+                shape,
+                0,
+                0,
+                0,
+                0,
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(invoke_context.get_remaining(), 0);
+    }
+
+    #[test]
+    fn test_bn254_pairing_map_research_charges() {
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        for (pairs, expected) in [
+            (1, 26_582),
+            (2, 35_918),
+            (3, 45_254),
+            (4, 54_590),
+            (8, 91_934),
+            (16, 166_622),
+        ] {
+            assert_eq!(pairing_check_cost(&invoke_context, pairs), expected);
+        }
+    }
+
+    #[test]
+    fn test_bn254_batch_outputs_can_alias_inputs() {
+        use solana_bn254_batch_syscall::{PodGtElement, PodPairingResult};
+
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        let generator = bn254_hex(BN254_G1_GENERATOR_BE);
+        let mut points = [generator.clone(), generator.clone()].concat();
+        let mut scalars = [0u8; 64];
+        scalars[31] = 2;
+        scalars[63] = 3;
+        let mut mul_input = generator;
+        mul_input.extend_from_slice(&{
+            let mut scalar = [0u8; 32];
+            scalar[31] = 5;
+            scalar
+        });
+        let expected = solana_bn254::prelude::alt_bn128_g1_multiplication_be(&mul_input).unwrap();
+        let points_va = 0x100000000;
+        let scalars_va = 0x200000000;
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw mut points[..], points_va),
+                    MemoryRegion::new(&raw mut scalars[..], scalars_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(msm_cost(&invoke_context, 2));
+        assert_eq!(
+            SyscallAltBn128G1Msm::rust(
+                &mut invoke_context,
+                2,
+                points_va,
+                scalars_va,
+                points_va,
+                0,
+            )
+            .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(&points[..64], expected);
+
+        let mut pairs = bn254_hex(BN254_VALID_PAIRS);
+        let pairs_va = 0x300000000;
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![MemoryRegion::new(&raw mut pairs[..], pairs_va)],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(&invoke_context, 2));
+        assert_eq!(
+            SyscallAltBn128PairingCheck::rust(&mut invoke_context, 2, pairs_va, pairs_va, 0, 0,)
+                .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(&pairs[..32], &PodPairingResult::from_verdict(true).0);
+
+        let mut pairs = bn254_hex(BN254_VALID_PAIRS);
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![MemoryRegion::new(&raw mut pairs[..], pairs_va)],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(&invoke_context, 2));
+        assert_eq!(
+            SyscallAltBn128PairingMap::rust(&mut invoke_context, 2, pairs_va, pairs_va, 0, 0,)
+                .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(pairs, PodGtElement::identity().0);
+
+        let mut left = [0u8; 64];
+        left[31] = 2;
+        left[63] = 3;
+        let mut right = [0u8; 64];
+        right[31] = 5;
+        right[63] = 7;
+        let left_va = 0x400000000;
+        let right_va = 0x500000000;
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw mut left[..], left_va),
+                    MemoryRegion::new(&raw mut right[..], right_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(fr_lincomb_cost(&invoke_context, 2));
+        assert_eq!(
+            SyscallAltBn128FrLincomb::rust(&mut invoke_context, 2, left_va, right_va, left_va, 0,)
+                .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(left[31], 31);
+
+        let mut values = [0u8; 64];
+        values[31] = 1;
+        values[63] = 2;
+        let values_va = 0x600000000;
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![MemoryRegion::new(&raw mut values[..], values_va)],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(fr_batch_invert_cost(&invoke_context, 2));
+        assert_eq!(
+            SyscallAltBn128FrBatchInvert::rust(&mut invoke_context, 2, values_va, values_va, 0, 0,)
+                .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(values[31], 1);
+        assert_ne!(&values[32..], &[0u8; 32]);
     }
 
     #[test]

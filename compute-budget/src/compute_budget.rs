@@ -145,17 +145,29 @@ pub struct ComputeBudget {
     pub bls12_381_one_pair_cost: u64,
     /// Incremental number of compute units consumed per pair in a bls12_381 pairing.
     pub bls12_381_additional_pair_cost: u64,
+    /// Fixed CU charge for a BN254 G1 MSM.
     pub alt_bn128_g1_msm_base_cost: u64,
+    /// CU charge per declared BN254 G1 MSM point.
     pub alt_bn128_g1_msm_per_point_cost: u64,
+    /// Fixed CU charge for a BN254 pairing product.
     pub alt_bn128_pairing_check_base_cost: u64,
+    /// CU charge per declared BN254 pairing input.
     pub alt_bn128_pairing_check_per_pair_cost: u64,
+    /// CU charge for each BN254 G2 subgroup check.
     pub alt_bn128_g2_subgroup_check_cost: u64,
+    /// Fixed CU charge for a BN254 scalar inner product.
     pub alt_bn128_fr_lincomb_base_cost: u64,
+    /// CU charge per declared scalar inner-product term.
     pub alt_bn128_fr_lincomb_per_term_cost: u64,
+    /// Fixed CU charge for BN254 scalar batch inversion.
     pub alt_bn128_fr_batch_invert_base_cost: u64,
+    /// CU charge per declared scalar inversion input.
     pub alt_bn128_fr_batch_invert_per_term_cost: u64,
+    /// Fixed CU charge for BN254 PLONK scalar reduction.
     pub alt_bn128_plonk_batch_reduce_base_cost: u64,
+    /// CU charge per declared PLONK proof.
     pub alt_bn128_plonk_batch_reduce_per_proof_cost: u64,
+    /// CU charge per declared PLONK Lagrange slot.
     pub alt_bn128_plonk_batch_reduce_per_lagrange_cost: u64,
 }
 

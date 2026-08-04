@@ -90,6 +90,7 @@ pub struct FeatureSnapshot {
     pub define_ltds_fee_only_semantics: bool,
     pub validate_chained_block_id_2: bool,
     pub enable_alt_bn128_batch_syscalls: bool,
+    pub enable_alt_bn128_plonk_research_syscall: bool,
 }
 
 impl From<&AHashMap<Pubkey, u64>> for FeatureSnapshot {
@@ -208,6 +209,9 @@ impl From<&AHashMap<Pubkey, u64>> for FeatureSnapshot {
             define_ltds_fee_only_semantics: is_active(&define_ltds_fee_only_semantics::ID),
             validate_chained_block_id_2: is_active(&validate_chained_block_id_2::ID),
             enable_alt_bn128_batch_syscalls: is_active(&enable_alt_bn128_batch_syscalls::ID),
+            enable_alt_bn128_plonk_research_syscall: is_active(
+                &enable_alt_bn128_plonk_research_syscall::ID,
+            ),
         }
     }
 }
@@ -375,6 +379,8 @@ impl FeatureSet {
             relax_post_exec_min_balance_check: snapshot.relax_post_exec_min_balance_check,
             define_ltds_fee_only_semantics: snapshot.define_ltds_fee_only_semantics,
             enable_alt_bn128_batch_syscalls: snapshot.enable_alt_bn128_batch_syscalls,
+            enable_alt_bn128_plonk_research_syscall: snapshot
+                .enable_alt_bn128_plonk_research_syscall,
         }
     }
 }
@@ -1562,6 +1568,11 @@ pub mod enable_alt_bn128_batch_syscalls {
     solana_pubkey::declare_id!("3b6tZJzjf2J7pHNhojgSxpQ4dvTGCxiz9kwLbvRDURzo");
 }
 
+// Placeholder pubkey: sha256("enable_alt_bn128_plonk_research_syscall_v1") base58.
+pub mod enable_alt_bn128_plonk_research_syscall {
+    solana_pubkey::declare_id!("6BKBaX6GTHn9K8bdSFnmQeCaGDH6xCehRcGKCYYSHy8f");
+}
+
 pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::new(|| {
     [
         (secp256k1_program_enabled::id(), "secp256k1 program"),
@@ -2626,7 +2637,11 @@ pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::n
         ),
         (
             enable_alt_bn128_batch_syscalls::id(),
-            "SIMD-TBD: alt_bn128 G1 MSM and boolean pairing-check syscalls",
+            "SIMD-TBD: BN254 batch verification syscalls",
+        ),
+        (
+            enable_alt_bn128_plonk_research_syscall::id(),
+            "Research only BN254 caller-challenge PLONK reducer",
         ),
         /*************** ADD NEW FEATURES HERE ***************/
         /***** ADD NEW FEATURE BOOL TO `FeatureSnapshot` *****/

@@ -1,14 +1,10 @@
-// Prices the two alt_bn128 batch syscalls. CU = criterion 95%-CI upper bound /
-// 33 ns per CU; the fitted constants land in `execution_budget.rs`. MSM sweeps
-// one size per log2 bucket so the discount table sees the whole Pippenger
-// curve; the pairing check sweeps small n for the base + per_pair fit; the G2
-// subgroup check is timed standalone so its surcharge stays a separate constant.
-#![allow(clippy::arithmetic_side_effects)]
+// Fit CU prices from the upper 95 percent confidence bound at 33 ns per CU.
+// The G2 subgroup check stays separate because the runtime charges it once per point.
 
 use {
     ark_bn254::{Fr, G1Projective, G2Affine, G2Projective},
     ark_ec::{AffineRepr, CurveGroup},
-    ark_ff::{FftField, Field, UniformRand},
+    ark_ff::{FftField, Field, UniformRand, Zero},
     ark_serialize::{CanonicalSerialize, Compress},
     ark_std::rand::{SeedableRng, rngs::StdRng},
     criterion::{BenchmarkId, Criterion, criterion_group, criterion_main},
@@ -20,6 +16,14 @@ use {
 };
 
 const SEED: u64 = 0xa17b428;
+
+fn advance(index: usize, len: usize) -> usize {
+    if index == len.saturating_sub(1) {
+        0
+    } else {
+        index.saturating_add(1)
+    }
+}
 
 fn rng() -> StdRng {
     StdRng::seed_from_u64(SEED)
@@ -62,8 +66,6 @@ struct MsmPool {
     scalars: Vec<Vec<u8>>,
 }
 
-// `pool_size` MSM inputs of `n` points: n * 64 BE G1 bytes and n * 32 BE
-// scalar bytes each, the wire format of `sol_alt_bn128_g1_msm`.
 fn random_msm_be(pool_size: usize, n: usize) -> MsmPool {
     let mut r = rng();
     let mut pool = MsmPool {
@@ -71,8 +73,8 @@ fn random_msm_be(pool_size: usize, n: usize) -> MsmPool {
         scalars: Vec::with_capacity(pool_size),
     };
     for _ in 0..pool_size {
-        let mut points = Vec::with_capacity(n * 64);
-        let mut scalars = Vec::with_capacity(n * 32);
+        let mut points = Vec::with_capacity(n.saturating_mul(64));
+        let mut scalars = Vec::with_capacity(n.saturating_mul(32));
         for _ in 0..n {
             points.extend_from_slice(&reverse_chunks(&g1_le(G1Projective::rand(&mut r)), 32));
             scalars.extend_from_slice(&reverse_chunks(&fr_le(Fr::rand(&mut r)), 32));
@@ -83,13 +85,7 @@ fn random_msm_be(pool_size: usize, n: usize) -> MsmPool {
     pool
 }
 
-// `pool_size` BE pairing inputs of `n` real pairs (n * 192 bytes) whose
-// product is the GT identity for n >= 2: pair i is ([a_i]P, [s_i]Q) with the
-// last a_n chosen so sum a_i s_i = 0. Every G2 is a DISTINCT multiple of Q,
-// which is the worst case the price must cover: a backend may fold pairs
-// sharing one G2 encoding by bilinearity, and shared-Q fixtures would let
-// that optimization masquerade as a near-zero per-pair cost. n == 1 is one
-// random pair (verdict false, same work).
+// Each G2 encoding is distinct so shared-key folding cannot hide pairing work.
 fn random_pairing_check_be(pool_size: usize, n: usize) -> Vec<Vec<u8>> {
     let mut r = rng();
     let mut pool = Vec::with_capacity(pool_size);
@@ -97,24 +93,34 @@ fn random_pairing_check_be(pool_size: usize, n: usize) -> Vec<Vec<u8>> {
         let p = G1Projective::rand(&mut r);
         let q = G2Projective::rand(&mut r);
         let mut acc = Fr::from(0u64);
-        let mut bytes = Vec::with_capacity(n * 192);
+        let mut bytes = Vec::with_capacity(n.saturating_mul(192));
         for i in 0..n {
-            let s = Fr::rand(&mut r);
-            let a = if n >= 2 && i == n - 1 {
-                // closes sum a_i s_i = 0; s is invertible with probability
-                // 1 - 1/q, and rand never returns zero in practice
-                -acc * s.inverse().expect("random s is nonzero")
+            let s = random_nonzero_fr(&mut r);
+            let a = if n >= 2 && i == n.saturating_sub(1) {
+                core::ops::Mul::mul(
+                    core::ops::Neg::neg(acc),
+                    s.inverse().expect("random_nonzero_fr excludes zero"),
+                )
             } else {
                 let a = Fr::rand(&mut r);
-                acc += a * s;
+                core::ops::AddAssign::add_assign(&mut acc, core::ops::Mul::mul(a, s));
                 a
             };
-            bytes.extend_from_slice(&reverse_chunks(&g1_le(p * a), 32));
-            bytes.extend_from_slice(&reverse_chunks(&g2_le(q * s), 64));
+            bytes.extend_from_slice(&reverse_chunks(&g1_le(core::ops::Mul::mul(p, a)), 32));
+            bytes.extend_from_slice(&reverse_chunks(&g2_le(core::ops::Mul::mul(q, s)), 64));
         }
         pool.push(bytes);
     }
     pool
+}
+
+fn random_nonzero_fr(rng: &mut StdRng) -> Fr {
+    loop {
+        let value = Fr::rand(rng);
+        if !value.is_zero() {
+            return value;
+        }
+    }
 }
 
 fn random_g2_affine(pool_size: usize) -> Vec<G2Affine> {
@@ -124,12 +130,10 @@ fn random_g2_affine(pool_size: usize) -> Vec<G2Affine> {
         .collect()
 }
 
-// `pool_size` arrays of `n` BE scalars each. All draws share one rng stream, so
-// a and b arrays for lincomb are distinct.
 fn random_fr_be(rng: &mut StdRng, pool_size: usize, n: usize) -> Vec<Vec<u8>> {
     (0..pool_size)
         .map(|_| {
-            let mut v = Vec::with_capacity(n * 32);
+            let mut v = Vec::with_capacity(n.saturating_mul(32));
             for _ in 0..n {
                 v.extend_from_slice(&reverse_chunks(&fr_le(Fr::rand(rng)), 32));
             }
@@ -165,7 +169,7 @@ fn bench_fr_lincomb(c: &mut Criterion) {
                     bytemuck::cast_slice(&b[i]),
                 )
                 .unwrap();
-                i = (i + 1) % POOL;
+                i = advance(i, POOL);
                 r
             })
         });
@@ -191,7 +195,7 @@ fn bench_fr_batch_invert(c: &mut Criterion) {
             bencher.iter(|| {
                 let r =
                     alt_bn128_fr_batch_invert(Version::V0, bytemuck::cast_slice(&a[i])).unwrap();
-                i = (i + 1) % POOL;
+                i = advance(i, POOL);
                 r
             })
         });
@@ -254,7 +258,7 @@ fn bench_plonk_batch_reduce(c: &mut Criterion) {
                     &public_pool[i],
                 )
                 .unwrap();
-                i = (i + 1) % POOL;
+                i = advance(i, POOL);
                 out
             })
         });
@@ -263,13 +267,16 @@ fn bench_plonk_batch_reduce(c: &mut Criterion) {
 }
 
 fn bench_g1_msm(c: &mut Criterion) {
-    // 12 sizes, one per log2 bucket over the 1..=2048 cap
+    // One size in each price bucket checks the complete MSM discount table.
     const NS: &[usize] = &[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 
     let mut group = c.benchmark_group("BN254 G1 MSM");
     group.sample_size(20);
     for &n in NS {
-        let pool_size = (512 / n).clamp(4, 64);
+        let pool_size = 512usize
+            .checked_div(n)
+            .expect("benchmark sizes are nonzero")
+            .clamp(4, 64);
         let pool = random_msm_be(pool_size, n);
         for (points, scalars) in pool.points.iter().zip(pool.scalars.iter()) {
             alt_bn128_g1_msm(
@@ -288,7 +295,7 @@ fn bench_g1_msm(c: &mut Criterion) {
                     bytemuck::cast_slice(&pool.scalars[i]),
                 )
                 .unwrap();
-                i = (i + 1) % pool_size;
+                i = advance(i, pool_size);
                 r
             })
         });
@@ -313,7 +320,7 @@ fn bench_pairing_check(c: &mut Criterion) {
             b.iter(|| {
                 let r =
                     alt_bn128_pairing_check(Version::V0, bytemuck::cast_slice(&pool[i])).unwrap();
-                i = (i + 1) % POOL;
+                i = advance(i, POOL);
                 r
             })
         });
@@ -340,9 +347,8 @@ fn bench_pairing_map(c: &mut Criterion) {
         let mut i = 0usize;
         group.bench_with_input(BenchmarkId::new("BE", n), &n, |b, _| {
             b.iter(|| {
-                let r =
-                    alt_bn128_pairing_map(Version::V0, bytemuck::cast_slice(&pool[i])).unwrap();
-                i = (i + 1) % POOL;
+                let r = alt_bn128_pairing_map(Version::V0, bytemuck::cast_slice(&pool[i])).unwrap();
+                i = advance(i, POOL);
                 r
             })
         });
@@ -350,7 +356,6 @@ fn bench_pairing_map(c: &mut Criterion) {
     group.finish();
 }
 
-// prices the standalone `alt_bn128_g2_subgroup_check_cost` component
 fn bench_g2_subgroup_check(c: &mut Criterion) {
     const POOL: usize = 1024;
 
@@ -363,7 +368,7 @@ fn bench_g2_subgroup_check(c: &mut Criterion) {
     group.bench_function("point", |b| {
         b.iter(|| {
             let r = points[i].is_in_correct_subgroup_assuming_on_curve();
-            i = (i + 1) % POOL;
+            i = advance(i, POOL);
             r
         })
     });
