@@ -142,7 +142,7 @@ fn msm_backends_match() {
 #[test]
 fn pairing_backends_match() {
     let mut rng = rng();
-    for n in [2usize, 3, 8, 16, 17, 31, 32, 33, 256] {
+    for n in [2usize, 3, 8, 16, 17, 18, 31, 32, 33, 256] {
         let bytes = telescoping_pairs(&mut rng, n);
         let pairs = bytemuck::cast_slice(&bytes);
         assert_same(
@@ -264,7 +264,7 @@ fn mcl_backend_matches_the_reference_backend() {
     }
 
     let mut rng = rng();
-    for n in [2usize, 3, 8, 16] {
+    for n in [2usize, 3, 8, 16, 18] {
         let bytes = telescoping_pairs(&mut rng, n);
         let pairs = bytemuck::cast_slice(&bytes);
         assert_same(

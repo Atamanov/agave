@@ -15,10 +15,15 @@ use {
             snarkjs_plonk_multi_vk_output_count, snarkjs_plonk_multi_vk_shape,
         },
         pod::{
-            PodG1G2Pair, PodG1Point, PodGtElement, PodPairingResult, PodPlonkReductionContext,
-            PodPlonkReductionInput, PodScalar, PodSnarkjsPlonkMultiVkContext,
-            PodSnarkjsPlonkMultiVkInput, PodSnarkjsPlonkReductionContext,
-            PodSnarkjsPlonkReductionInput,
+            PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair, PodGtElement, PodPairingResult,
+            PodPlonkReductionContext, PodPlonkReductionInput, PodScalar,
+            PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput,
+            PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput, PodTrustedGtExponent,
+        },
+        registry_abi::{
+            REGISTRY_MAX_G2_ENTRIES, REGISTRY_MAX_GT_ENTRIES, REGISTRY_MAX_REGISTERED_PAIRS,
+            pack_gt_multiexp_shape, pack_registered_pairing_shape, pack_registry_init_shape,
+            registry_account_len,
         },
         validation::{AltBn128BatchError, validate_equal_lengths},
     },
@@ -29,6 +34,9 @@ use {
 define_syscall!(fn sol_alt_bn128_g1_msm(num_points: u64, points_addr: *const u8, scalars_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_pairing_check(num_pairs: u64, pairs_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_pairing_map(num_pairs: u64, pairs_addr: *const u8, result_addr: *mut u8) -> u64);
+define_syscall!(fn sol_alt_bn128_vk_registry_init(packed_shape: u64, g2_sources_addr: *const u8, gt_sources_addr: *const u8, keyset_digest_addr: *const u8, registry_data_addr: *mut u8) -> u64);
+define_syscall!(fn sol_alt_bn128_pairing_check_registered(packed_shape: u64, full_addr: *const u8, registered_addr: *const u8, result_addr: *mut u8) -> u64);
+define_syscall!(fn sol_alt_bn128_trusted_gt_multiexp(packed_shape: u64, operands_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_fr_lincomb(num_elems: u64, a_addr: *const u8, b_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_fr_batch_invert(num_elems: u64, a_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_plonk_batch_reduce(shape: u64, context_addr: *const u8, inputs_addr: *const u8, public_inputs_addr: *const u8, result_addr: *mut u8) -> u64);
@@ -81,6 +89,121 @@ pub fn alt_bn128_pairing_map(
             pairs.as_ptr().cast(),
             result.0.as_mut_ptr(),
         )
+    };
+    check(code)?;
+    Ok(result)
+}
+
+/// Initialize a current-program-owned registry PDA through its writable
+/// account-data slice. The runtime validates the exact account index, owner,
+/// PDA address, zero-filled length, keyset digest, source points, and targets.
+pub fn alt_bn128_vk_registry_init(
+    _version: Version,
+    account_index: u16,
+    g2_sources: &[crate::PodG2Point],
+    gt_sources: &[PodG1G2Pair],
+    keyset_digest: &[u8; 32],
+    registry_data: &mut [u8],
+) -> Result<(), AltBn128BatchError> {
+    if g2_sources.len().saturating_add(gt_sources.len()) == 0 {
+        return Err(AltBn128BatchError::ZeroInput);
+    }
+    if g2_sources.len() > REGISTRY_MAX_G2_ENTRIES || gt_sources.len() > REGISTRY_MAX_GT_ENTRIES {
+        return Err(AltBn128BatchError::CapExceeded);
+    }
+    if registry_data.len() != registry_account_len(g2_sources.len(), gt_sources.len()) {
+        return Err(AltBn128BatchError::LengthMismatch);
+    }
+    let shape = pack_registry_init_shape(
+        g2_sources.len() as u16,
+        gt_sources.len() as u16,
+        account_index,
+    );
+    // Solana's VM rejects the Rust empty-slice sentinel address (0x1) even
+    // when the ABI count is zero. Keep the count authoritative while passing
+    // an in-frame, mapped fallback pointer for either optional source list.
+    let g2_sources_addr = if g2_sources.is_empty() {
+        registry_data.as_ptr()
+    } else {
+        g2_sources.as_ptr().cast()
+    };
+    let gt_sources_addr = if gt_sources.is_empty() {
+        registry_data.as_ptr()
+    } else {
+        gt_sources.as_ptr().cast()
+    };
+    let code = unsafe {
+        sol_alt_bn128_vk_registry_init(
+            shape,
+            g2_sources_addr,
+            gt_sources_addr,
+            keyset_digest.as_ptr(),
+            registry_data.as_mut_ptr(),
+        )
+    };
+    check(code)
+}
+
+/// Pair ordinary terms with authenticated registry G2 IDs.
+pub fn alt_bn128_pairing_check_registered(
+    _version: Version,
+    account_index: u16,
+    full: &[PodG1G2Pair],
+    registered: &[PodG1RegisteredG2Pair],
+) -> Result<bool, AltBn128BatchError> {
+    let total = full
+        .len()
+        .checked_add(registered.len())
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    if total == 0 {
+        return Err(AltBn128BatchError::ZeroInput);
+    }
+    if total > REGISTRY_MAX_REGISTERED_PAIRS || registered.len() > REGISTRY_MAX_G2_ENTRIES {
+        return Err(AltBn128BatchError::CapExceeded);
+    }
+    let shape =
+        pack_registered_pairing_shape(full.len() as u16, registered.len() as u16, account_index);
+    let mut result = PodPairingResult([0u8; 32]);
+    let fallback = result.0.as_ptr();
+    let full_addr = if full.is_empty() {
+        fallback
+    } else {
+        full.as_ptr().cast()
+    };
+    let registered_addr = if registered.is_empty() {
+        fallback
+    } else {
+        registered.as_ptr().cast()
+    };
+    let code = unsafe {
+        sol_alt_bn128_pairing_check_registered(
+            shape,
+            full_addr,
+            registered_addr,
+            result.0.as_mut_ptr(),
+        )
+    };
+    check(code)?;
+    Ok(result.verdict())
+}
+
+/// Resolve authenticated post-final-exponentiation targets by registry ID and
+/// apply their canonical Fr exponents.
+pub fn alt_bn128_trusted_gt_multiexp(
+    _version: Version,
+    account_index: u16,
+    operands: &[PodTrustedGtExponent],
+) -> Result<PodGtElement, AltBn128BatchError> {
+    if operands.is_empty() {
+        return Err(AltBn128BatchError::ZeroInput);
+    }
+    if operands.len() > REGISTRY_MAX_GT_ENTRIES {
+        return Err(AltBn128BatchError::CapExceeded);
+    }
+    let shape = pack_gt_multiexp_shape(operands.len() as u16, account_index);
+    let mut result = PodGtElement([0u8; crate::encoding::FQ12_BYTES]);
+    let code = unsafe {
+        sol_alt_bn128_trusted_gt_multiexp(shape, operands.as_ptr().cast(), result.0.as_mut_ptr())
     };
     check(code)?;
     Ok(result)

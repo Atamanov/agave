@@ -174,6 +174,23 @@ pub struct PodG1G2Pair {
     pub g2: PodG2Point,
 }
 
+/// One hot-path pairing operand whose G2 value is resolved by opaque ID from
+/// an authenticated immutable registry account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodG1RegisteredG2Pair {
+    pub g1: PodG1Point,
+    pub g2_id: [u8; 32],
+}
+
+/// One authenticated registry GT target plus its canonical Fr exponent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodTrustedGtExponent {
+    pub target_id: [u8; 32],
+    pub exponent: PodScalar,
+}
+
 /// The 32-byte pairing verdict word, byte-identical to the group-op pairing
 /// output: big-endian 1 iff the product is the identity, all zeros otherwise.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
@@ -288,6 +305,8 @@ mod tests {
         assert_eq!(size_of::<PodG2Point>(), G2_BYTES);
         assert_eq!(size_of::<PodScalar>(), SCALAR_BYTES);
         assert_eq!(size_of::<PodG1G2Pair>(), PAIR_BYTES);
+        assert_eq!(size_of::<PodG1RegisteredG2Pair>(), G1_BYTES + 32);
+        assert_eq!(size_of::<PodTrustedGtExponent>(), 64);
         assert_eq!(size_of::<PodPairingResult>(), 32);
         assert_eq!(size_of::<PodGtElement>(), FQ12_BYTES);
         assert_eq!(size_of::<PodPlonkReductionContext>(), 112);
@@ -297,6 +316,8 @@ mod tests {
         assert_eq!(size_of::<PodSnarkjsPlonkMultiVkContext>(), 920);
         assert_eq!(size_of::<PodSnarkjsPlonkMultiVkInput>(), 776);
         assert_eq!(align_of::<PodG1G2Pair>(), 1);
+        assert_eq!(align_of::<PodG1RegisteredG2Pair>(), 1);
+        assert_eq!(align_of::<PodTrustedGtExponent>(), 1);
         assert_eq!(align_of::<PodPlonkReductionContext>(), 1);
         assert_eq!(align_of::<PodPlonkReductionInput>(), 1);
         assert_eq!(align_of::<PodSnarkjsPlonkReductionContext>(), 1);

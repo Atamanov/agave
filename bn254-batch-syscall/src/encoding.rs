@@ -18,7 +18,9 @@ pub const FQ12_BYTES: usize = 12 * 32;
 
 pub const MSM_MAX_POINTS: usize = 2048;
 pub const PAIRING_MAX_PAIRS: usize = 256;
-pub const PAIRING_MAP_MAX_PAIRS: usize = 16;
+/// The post-final-exponentiation map admits the largest supported same-VK
+/// Groth16 batch: sixteen proof pairs plus the folded gamma and delta terms.
+pub const PAIRING_MAP_MAX_PAIRS: usize = 18;
 pub const FR_MAX_ELEMS: usize = 2048;
 
 // The synthetic PLONK reducer accepts verifier-derived challenges. The

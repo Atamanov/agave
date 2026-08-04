@@ -18,10 +18,16 @@ pub use crate::{
         unpack_snarkjs_plonk_multi_vk_shape,
     },
     pod::{
-        PodG1G2Pair, PodG1Point, PodG2Point, PodGtElement, PodPairingResult,
+        PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair, PodG2Point, PodGtElement, PodPairingResult,
         PodPlonkReductionContext, PodPlonkReductionInput, PodScalar, PodSnarkjsPlonkMultiVkContext,
         PodSnarkjsPlonkMultiVkInput, PodSnarkjsPlonkReductionContext,
-        PodSnarkjsPlonkReductionInput,
+        PodSnarkjsPlonkReductionInput, PodTrustedGtExponent,
+    },
+    registry_abi::{
+        REGISTRY_ABI_VERSION, REGISTRY_G2_ENTRY_BYTES, REGISTRY_GT_ENTRY_BYTES,
+        REGISTRY_HEADER_BYTES, REGISTRY_MAX_G2_ENTRIES, REGISTRY_MAX_GT_ENTRIES,
+        REGISTRY_MAX_REGISTERED_PAIRS, REGISTRY_PREPARED_G2_BYTES, pack_gt_multiexp_shape,
+        pack_registered_pairing_shape, pack_registry_init_shape, registry_account_len,
     },
     validation::AltBn128BatchError,
 };
@@ -30,19 +36,242 @@ pub use crate::{
 #[cfg(target_os = "solana")]
 pub use crate::syscalls::{
     alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
-    alt_bn128_pairing_map, alt_bn128_plonk_batch_reduce, alt_bn128_snarkjs_plonk_batch_reduce,
-    alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
+    alt_bn128_pairing_check_registered, alt_bn128_pairing_map, alt_bn128_plonk_batch_reduce,
+    alt_bn128_snarkjs_plonk_batch_reduce, alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
+    alt_bn128_trusted_gt_multiexp, alt_bn128_vk_registry_init,
 };
 #[cfg(not(target_os = "solana"))]
 pub use crate::{
-    backend::{
-        alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
-        alt_bn128_pairing_map,
-    },
+    backend::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
     plonk::alt_bn128_plonk_batch_reduce,
     snarkjs_plonk::alt_bn128_snarkjs_plonk_batch_reduce,
     snarkjs_plonk_multi_vk::alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
 };
+
+#[cfg(all(
+    not(target_os = "solana"),
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+pub use crate::backend::{
+    RegisteredG2, RegisteredG2Pair, TrustedGt, registered_g2_from_authenticated_bytes,
+    trusted_gt_from_authenticated_bytes, trusted_gt_from_pair, trusted_gt_to_bytes,
+};
+
+#[cfg(not(target_os = "solana"))]
+pub use crate::backend::{FinalExponentiationProbe, FinalExponentiationResult, G2SubgroupProbe};
+
+#[cfg(all(
+    not(target_os = "solana"),
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+pub const PREPARED_G2_BYTES: usize = helios_bn254::PREPARED_G2_BYTES;
+
+#[cfg(not(target_os = "solana"))]
+pub fn alt_bn128_g1_msm(
+    version: Version,
+    points: &[PodG1Point],
+    scalars: &[PodScalar],
+) -> Result<PodG1Point, AltBn128BatchError> {
+    let result = backend::alt_bn128_g1_msm(version, points, scalars);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        research_observer::record_msm(points.len());
+    }
+    result
+}
+
+#[cfg(not(target_os = "solana"))]
+pub fn alt_bn128_pairing_check(
+    version: Version,
+    pairs: &[PodG1G2Pair],
+) -> Result<bool, AltBn128BatchError> {
+    let result = backend::alt_bn128_pairing_check(version, pairs);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        let nonidentity = research_observer::nonidentity_pairs(pairs);
+        research_observer::record_pairing_check(pairs.len(), nonidentity);
+        #[cfg(all(
+            any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+            not(feature = "backend-b1-arkworks"),
+            not(feature = "backend-b2-arkworks-optimized"),
+            not(feature = "backend-b3-mcl")
+        ))]
+        if helios_bn254::selects_ifma_batch8(nonidentity) {
+            research_observer::record_ifma_batch8_dispatch();
+        }
+    }
+    result
+}
+
+#[cfg(not(target_os = "solana"))]
+pub fn alt_bn128_pairing_map(
+    version: Version,
+    pairs: &[PodG1G2Pair],
+) -> Result<PodGtElement, AltBn128BatchError> {
+    let result = backend::alt_bn128_pairing_map(version, pairs);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        let nonidentity = research_observer::nonidentity_pairs(pairs);
+        research_observer::record_pairing_map(pairs.len(), nonidentity);
+        #[cfg(all(
+            any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+            not(feature = "backend-b1-arkworks"),
+            not(feature = "backend-b2-arkworks-optimized"),
+            not(feature = "backend-b3-mcl")
+        ))]
+        if helios_bn254::selects_ifma_batch8(nonidentity) {
+            research_observer::record_ifma_batch8_dispatch();
+        }
+    }
+    result
+}
+
+#[cfg(all(
+    not(target_os = "solana"),
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+pub fn pairing_check_registered(
+    full: &[PodG1G2Pair],
+    registered: &[RegisteredG2Pair],
+) -> Result<bool, AltBn128BatchError> {
+    let result = backend::pairing_check_registered(full, registered);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        let nonidentity = research_observer::nonidentity_pairs(full).saturating_add(
+            registered
+                .iter()
+                .filter(|pair| pair.g1.0.iter().any(|byte| *byte != 0))
+                .count(),
+        );
+        research_observer::record_registered(full.len(), registered.len(), nonidentity);
+        if helios_bn254::selects_ifma_batch8(nonidentity) {
+            research_observer::record_ifma_mixed_batch8_dispatch();
+        }
+    }
+    result
+}
+
+#[cfg(all(
+    not(target_os = "solana"),
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+pub fn validate_registered_g2(source: &PodG2Point) -> Result<RegisteredG2, AltBn128BatchError> {
+    let result = backend::validate_registered_g2(source);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        research_observer::record_registry_g2_preparation();
+    }
+    result
+}
+
+#[cfg(all(
+    not(target_os = "solana"),
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+pub fn trusted_gt_multiexp(
+    targets: &[TrustedGt],
+    exponents: &[PodScalar],
+) -> Result<PodGtElement, AltBn128BatchError> {
+    let result = backend::trusted_gt_multiexp(targets, exponents);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        research_observer::record_gt_multiexp(exponents);
+    }
+    result
+}
+
+#[cfg(not(target_os = "solana"))]
+pub fn probe_g2_subgroup(source: &PodG2Point) -> Result<bool, AltBn128BatchError> {
+    let probe = prepare_g2_subgroup_probe(source)?;
+    run_g2_subgroup_probe(&probe)
+}
+
+/// Decodes and checks the curve equation outside the measured subgroup predicate.
+#[cfg(not(target_os = "solana"))]
+pub fn prepare_g2_subgroup_probe(
+    source: &PodG2Point,
+) -> Result<G2SubgroupProbe, AltBn128BatchError> {
+    backend::prepare_g2_subgroup_probe(source)
+}
+
+/// Runs only the selected backend's subgroup-membership predicate.
+#[cfg(not(target_os = "solana"))]
+pub fn run_g2_subgroup_probe(probe: &G2SubgroupProbe) -> Result<bool, AltBn128BatchError> {
+    let result = backend::run_g2_subgroup_probe(probe);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        research_observer::record_subgroup_probe();
+    }
+    result
+}
+
+#[cfg(not(target_os = "solana"))]
+pub fn prepare_final_exponentiation_probe(
+    pairs: &[PodG1G2Pair],
+) -> Result<FinalExponentiationProbe, AltBn128BatchError> {
+    backend::prepare_final_exponentiation_probe(pairs)
+}
+
+#[cfg(not(target_os = "solana"))]
+pub fn run_final_exponentiation_probe(
+    probe: &FinalExponentiationProbe,
+) -> Result<FinalExponentiationResult, AltBn128BatchError> {
+    let result = backend::run_final_exponentiation_probe(probe);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        research_observer::record_final_exp_probe();
+    }
+    result
+}
+
+/// Encodes a final-exponentiation result outside the measured operation.
+#[cfg(not(target_os = "solana"))]
+pub fn encode_final_exponentiation_result(
+    result: &FinalExponentiationResult,
+) -> Result<PodGtElement, AltBn128BatchError> {
+    backend::encode_final_exponentiation_result(result)
+}
+
+/// Compile-time attestation for the linked B5 AVX-512 IFMA artifact.
+#[cfg(all(
+    not(target_os = "solana"),
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+pub const fn selected_backend_compiled_with_avx512_ifma() -> bool {
+    helios_bn254::AVX512_IFMA_COMPILED
+}
+
+/// Compile-time attestation is false for every non-Helios backend.
+#[cfg(all(
+    not(target_os = "solana"),
+    not(all(
+        any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+        not(feature = "backend-b1-arkworks"),
+        not(feature = "backend-b2-arkworks-optimized"),
+        not(feature = "backend-b3-mcl")
+    ))
+))]
+pub const fn selected_backend_compiled_with_avx512_ifma() -> bool {
+    false
+}
 
 #[cfg(not(target_os = "solana"))]
 pub(crate) mod backend;
@@ -93,6 +322,9 @@ pub(crate) mod pairing;
 #[cfg(not(target_os = "solana"))]
 pub(crate) mod plonk;
 pub(crate) mod pod;
+pub(crate) mod registry_abi;
+#[cfg(all(not(target_os = "solana"), feature = "research-observer"))]
+pub mod research_observer;
 #[cfg(not(target_os = "solana"))]
 pub(crate) mod snarkjs_plonk;
 #[cfg(not(target_os = "solana"))]

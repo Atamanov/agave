@@ -25,10 +25,10 @@ use {
 };
 
 /// Keccak256 over every labeled result.
-const GOLDEN: &str = "4e79c8dee77a76caf85ef7643566b81e35a19e2d4a1fc045e9bf10cd59954695";
+const GOLDEN: &str = "d73e0430bfd3ee5910b5597926fce89273c6593011ce723550da3ce5bf96f48d";
 
 /// A skipped battery section changes this count.
-const CASE_COUNT: usize = 723;
+const CASE_COUNT: usize = 725;
 
 #[test]
 fn test_wire_fingerprint_matches_golden() {
@@ -552,7 +552,7 @@ fn pairing_battery(fp: &mut Fingerprint, r: &mut StdRng) {
 }
 
 fn pairing_map_battery(fp: &mut Fingerprint, r: &mut StdRng) {
-    for n in [1usize, 2, 3, 7, 8, 9, 16] {
+    for n in [1usize, 2, 3, 7, 8, 9, 16, 18] {
         let input = pairing_input(r, n);
         fp.absorb(&format!("pair_map{n}"), pairing_map(&input.valid));
         fp.absorb(&format!("pair_map_flipped{n}"), pairing_map(&input.flipped));
@@ -563,8 +563,14 @@ fn pairing_map_battery(fp: &mut Fingerprint, r: &mut StdRng) {
         g2: PodG2Point([0u8; G2_BYTES]),
     };
     fp.absorb("pair_map_empty", pairing_map(&[]));
-    fp.absorb("pair_map_cap", pairing_map(&[infinity; 16]));
-    fp.absorb("pair_map_cap1", pairing_map(&[infinity; 17]));
+    fp.absorb(
+        "pair_map_cap",
+        pairing_map(&[infinity; solana_bn254_batch_syscall::PAIRING_MAP_MAX_PAIRS]),
+    );
+    fp.absorb(
+        "pair_map_cap1",
+        pairing_map(&[infinity; solana_bn254_batch_syscall::PAIRING_MAP_MAX_PAIRS + 1]),
+    );
 
     let p = G1Projective::rand(r);
     let q = G2Projective::rand(r).into_affine();
@@ -607,7 +613,7 @@ fn pairing_map_battery(fp: &mut Fingerprint, r: &mut StdRng) {
         }]),
     );
 
-    let mut over_cap = vec![infinity; 17];
+    let mut over_cap = vec![infinity; solana_bn254_batch_syscall::PAIRING_MAP_MAX_PAIRS + 1];
     over_cap[0].g2.0[..32].copy_from_slice(&fq_modulus_be());
     fp.absorb("pair_map_cap1_bad_head", pairing_map(&over_cap));
 }

@@ -3,7 +3,7 @@ use {
     crate::{
         Version,
         encoding::{PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS, parse_g2},
-        pod::{PodG1G2Pair, PodGtElement},
+        pod::{PodG1G2Pair, PodG2Point, PodGtElement},
         validation::AltBn128BatchError,
     },
     ark_bn254::{Bn254, Fq12, G1Affine, G2Affine},
@@ -18,6 +18,92 @@ use {
 
 type EllCoeff = ark_ec::bn::g2::EllCoeff<ark_bn254::Config>;
 type PreparedG2 = G2Prepared<ark_bn254::Config>;
+
+#[derive(Clone, Debug)]
+pub struct FinalExponentiationProbe {
+    miller: Fq12,
+}
+
+#[derive(Clone, Debug)]
+pub struct FinalExponentiationResult {
+    value: Fq12,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct G2SubgroupProbe {
+    point: G2Affine,
+}
+
+pub fn prepare_g2_subgroup_probe(
+    source: &PodG2Point,
+) -> Result<G2SubgroupProbe, AltBn128BatchError> {
+    let point = parse_g2(&source.0)?;
+    if !point.is_zero() && !point.is_on_curve() {
+        return Err(AltBn128BatchError::NotOnCurve);
+    }
+    if point.is_zero() {
+        return Ok(G2SubgroupProbe { point });
+    }
+    Ok(G2SubgroupProbe { point })
+}
+
+pub fn run_g2_subgroup_probe(probe: &G2SubgroupProbe) -> Result<bool, AltBn128BatchError> {
+    if probe.point.is_zero() {
+        return Ok(true);
+    }
+    endo::is_in_subgroup_x_psi_batch(&[probe.point])?
+        .into_iter()
+        .next()
+        .ok_or(AltBn128BatchError::BackendInvariant)
+}
+
+pub fn prepare_final_exponentiation_probe(
+    pairs: &[PodG1G2Pair],
+) -> Result<FinalExponentiationProbe, AltBn128BatchError> {
+    if pairs.is_empty() {
+        return Err(AltBn128BatchError::ZeroInput);
+    }
+    if pairs.len() > PAIRING_MAX_PAIRS {
+        return Err(AltBn128BatchError::CapExceeded);
+    }
+    let mut live = Vec::with_capacity(pairs.len());
+    let mut candidates = Vec::with_capacity(pairs.len());
+    for pair in pairs {
+        let (g1, g2) = parse_pair_on_curve(pair)?;
+        if !g2.is_zero() {
+            candidates.push(g2);
+        }
+        if !g1.is_zero() && !g2.is_zero() {
+            live.push((g1, g2));
+        }
+    }
+    if endo::is_in_subgroup_x_psi_batch(&candidates)?
+        .into_iter()
+        .any(|member| !member)
+    {
+        return Err(AltBn128BatchError::NotInSubgroup);
+    }
+    let miller = if live.is_empty() {
+        Fq12::one()
+    } else {
+        multi_miller_chunked(&live)?
+    };
+    Ok(FinalExponentiationProbe { miller })
+}
+
+pub fn run_final_exponentiation_probe(
+    probe: &FinalExponentiationProbe,
+) -> Result<FinalExponentiationResult, AltBn128BatchError> {
+    Bn254::final_exponentiation(MillerLoopOutput(probe.miller))
+        .map(|target| FinalExponentiationResult { value: target.0 })
+        .ok_or(AltBn128BatchError::BackendInvariant)
+}
+
+pub fn encode_final_exponentiation_result(
+    result: &FinalExponentiationResult,
+) -> Result<PodGtElement, AltBn128BatchError> {
+    Ok(PodGtElement::from(&result.value))
+}
 
 // Arkworks produces this fixed count for each non-infinity BN254 G2 point.
 const ELL_COEFFS_PER_PREPARED_G2: usize = 87;

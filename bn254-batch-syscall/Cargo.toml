@@ -18,6 +18,7 @@ features = ["agave-unstable-api", "backend-b1-arkworks"]
 # B1 remains the fallback when a workspace dependency disables default features.
 default = ["backend-b1-arkworks"]
 agave-unstable-api = []
+research-observer = []
 backend-b1-arkworks = []
 backend-b2-arkworks-optimized = []
 backend-b3-mcl = ["dep:solana-bn254-mcl-sys"]

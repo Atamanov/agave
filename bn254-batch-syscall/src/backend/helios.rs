@@ -6,11 +6,46 @@ use {
     },
     core::mem::{align_of, offset_of, size_of},
     helios_bn254::{
-        InputError as HeliosInputError, PodG1G2Pair as HeliosPair, PodG1Point as HeliosG1Point,
-        PodG2Point as HeliosG2Point, PodGt as HeliosGt, PodPairingResult as HeliosPairingResult,
-        PodScalar as HeliosScalar, Version as HeliosVersion,
+        FinalExponentiationProbe as HeliosFinalExponentiationProbe,
+        FinalExponentiationResult as HeliosFinalExponentiationResult,
+        G2SubgroupProbe as HeliosG2SubgroupProbe, InputError as HeliosInputError,
+        PodG1G2Pair as HeliosPair, PodG1Point as HeliosG1Point, PodG2Point as HeliosG2Point,
+        PodGt as HeliosGt, PodPairingResult as HeliosPairingResult, PodScalar as HeliosScalar,
+        RegisteredG2 as HeliosRegisteredG2, RegisteredG2Pair as HeliosRegisteredG2Pair,
+        TrustedGt as HeliosTrustedGt, Version as HeliosVersion,
     },
 };
+
+#[derive(Clone, Debug)]
+pub struct RegisteredG2(HeliosRegisteredG2);
+
+#[derive(Clone, Debug)]
+pub struct RegisteredG2Pair {
+    pub g1: PodG1Point,
+    pub g2: RegisteredG2,
+}
+
+#[derive(Clone, Debug)]
+pub struct TrustedGt(HeliosTrustedGt);
+
+#[derive(Clone, Debug)]
+pub struct FinalExponentiationProbe(HeliosFinalExponentiationProbe);
+
+#[derive(Clone, Debug)]
+pub struct FinalExponentiationResult(HeliosFinalExponentiationResult);
+
+#[derive(Clone, Copy, Debug)]
+pub struct G2SubgroupProbe(HeliosG2SubgroupProbe);
+
+impl RegisteredG2 {
+    pub fn to_bytes(&self) -> PodG2Point {
+        PodG2Point(self.0.to_bytes().0)
+    }
+
+    pub fn prepared_bytes(&self) -> Vec<u8> {
+        self.0.prepared_bytes()
+    }
+}
 
 pub fn alt_bn128_g1_msm(
     version: Version,
@@ -76,6 +111,124 @@ pub fn alt_bn128_fr_batch_invert(
                 .collect()
         })
         .map_err(map_error)
+}
+
+pub fn validate_registered_g2(source: &PodG2Point) -> Result<RegisteredG2, AltBn128BatchError> {
+    HeliosRegisteredG2::validate_for_registry(&HeliosG2Point(source.0))
+        .map(RegisteredG2)
+        .map_err(map_error)
+}
+
+/// Recreate a registered G2 only after the runtime authenticated its account.
+///
+/// # Safety
+///
+/// See [`helios_bn254::RegisteredG2::from_authenticated_registry_bytes`].
+pub unsafe fn registered_g2_from_authenticated_bytes(
+    source: &PodG2Point,
+    prepared: &[u8],
+) -> Result<RegisteredG2, AltBn128BatchError> {
+    // SAFETY: forwarded unchanged to the caller-visible authentication contract.
+    unsafe {
+        HeliosRegisteredG2::from_authenticated_registry_bytes(&HeliosG2Point(source.0), prepared)
+    }
+    .map(RegisteredG2)
+    .map_err(map_error)
+}
+
+pub fn pairing_check_registered(
+    full: &[PodG1G2Pair],
+    registered: &[RegisteredG2Pair],
+) -> Result<bool, AltBn128BatchError> {
+    let full = bytemuck::try_cast_slice::<_, HeliosPair>(full)
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?;
+    let registered: Vec<_> = registered
+        .iter()
+        .map(|pair| HeliosRegisteredG2Pair {
+            g1: HeliosG1Point(pair.g1.0),
+            g2: pair.g2.0.clone(),
+        })
+        .collect();
+    helios_bn254::pairing_product_registered(full, &registered).map_err(map_error)
+}
+
+pub fn trusted_gt_from_pair(pair: &PodG1G2Pair) -> Result<TrustedGt, AltBn128BatchError> {
+    HeliosTrustedGt::from_pair(&HeliosPair {
+        g1: HeliosG1Point(pair.g1.0),
+        g2: HeliosG2Point(pair.g2.0),
+    })
+    .map(TrustedGt)
+    .map_err(map_error)
+}
+
+/// Recreate a trusted GT only after the runtime authenticated its account.
+///
+/// # Safety
+///
+/// See [`helios_bn254::TrustedGt::from_authenticated_registry_bytes`].
+pub unsafe fn trusted_gt_from_authenticated_bytes(
+    source: &PodGtElement,
+) -> Result<TrustedGt, AltBn128BatchError> {
+    // SAFETY: forwarded unchanged to the caller-visible authentication contract.
+    unsafe { HeliosTrustedGt::from_authenticated_registry_bytes(&HeliosGt(source.0)) }
+        .map(TrustedGt)
+        .map_err(map_error)
+}
+
+pub fn trusted_gt_to_bytes(target: &TrustedGt) -> PodGtElement {
+    PodGtElement(target.0.to_bytes().0)
+}
+
+pub fn trusted_gt_multiexp(
+    targets: &[TrustedGt],
+    exponents: &[PodScalar],
+) -> Result<PodGtElement, AltBn128BatchError> {
+    let targets: Vec<_> = targets.iter().map(|target| target.0.clone()).collect();
+    let exponents: Vec<_> = exponents
+        .iter()
+        .map(|exponent| HeliosScalar(exponent.0))
+        .collect();
+    helios_bn254::trusted_gt_multiexp(&targets, &exponents)
+        .map(|target| PodGtElement(target.0))
+        .map_err(map_error)
+}
+
+pub fn prepare_g2_subgroup_probe(
+    source: &PodG2Point,
+) -> Result<G2SubgroupProbe, AltBn128BatchError> {
+    helios_bn254::prepare_g2_subgroup_probe(&HeliosG2Point(source.0))
+        .map(G2SubgroupProbe)
+        .map_err(map_error)
+}
+
+pub fn run_g2_subgroup_probe(probe: &G2SubgroupProbe) -> Result<bool, AltBn128BatchError> {
+    Ok(helios_bn254::run_g2_subgroup_probe(&probe.0))
+}
+
+pub fn prepare_final_exponentiation_probe(
+    pairs: &[PodG1G2Pair],
+) -> Result<FinalExponentiationProbe, AltBn128BatchError> {
+    let pairs = bytemuck::try_cast_slice::<_, HeliosPair>(pairs)
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?;
+    helios_bn254::prepare_final_exponentiation_probe(pairs)
+        .map(FinalExponentiationProbe)
+        .map_err(map_error)
+}
+
+pub fn run_final_exponentiation_probe(
+    probe: &FinalExponentiationProbe,
+) -> Result<FinalExponentiationResult, AltBn128BatchError> {
+    Ok(FinalExponentiationResult(
+        helios_bn254::run_final_exponentiation_probe(&probe.0),
+    ))
+}
+
+pub fn encode_final_exponentiation_result(
+    result: &FinalExponentiationResult,
+) -> Result<PodGtElement, AltBn128BatchError> {
+    Ok(PodGtElement(
+        helios_bn254::encode_final_exponentiation_result(&result.0).0,
+    ))
 }
 
 const fn helios_version(version: Version) -> HeliosVersion {

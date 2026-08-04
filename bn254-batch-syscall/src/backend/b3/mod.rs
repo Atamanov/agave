@@ -7,7 +7,12 @@ use {crate::validation::AltBn128BatchError, solana_bn254_mcl_sys::api::MclError}
 pub use {
     fr::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
     msm::alt_bn128_g1_msm,
-    pairing::{alt_bn128_pairing_check, alt_bn128_pairing_map},
+    pairing::{
+        FinalExponentiationProbe, FinalExponentiationResult, G2SubgroupProbe,
+        alt_bn128_pairing_check, alt_bn128_pairing_map, encode_final_exponentiation_result,
+        prepare_final_exponentiation_probe, prepare_g2_subgroup_probe,
+        run_final_exponentiation_probe, run_g2_subgroup_probe,
+    },
 };
 
 fn map_mcl_error(error: MclError) -> AltBn128BatchError {

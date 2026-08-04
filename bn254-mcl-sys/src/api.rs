@@ -227,16 +227,37 @@ pub fn g2_is_zero(point: &MclG2OnCurve) -> Result<bool, MclError> {
 }
 
 pub fn g2_into_subgroup(point: MclG2OnCurve) -> Result<MclG2Subgroup, MclError> {
-    ensure_init()?;
-    // SAFETY: MclG2OnCurve proves the precondition for mclBnG2_isValidOrder.
-    let result = unsafe { mcl_bn_g2_is_valid_order(&point.0) };
-    if !check_boolean("mclBnG2_isValidOrder", result)? {
+    if !g2_is_valid_order(&point)? {
         return Err(MclError::NotInSubgroup);
     }
     Ok(MclG2Subgroup(point.0))
 }
 
+/// Evaluate only MCL's subgroup-order predicate for an on-curve G2 point.
+pub fn g2_is_valid_order(point: &MclG2OnCurve) -> Result<bool, MclError> {
+    ensure_init()?;
+    // SAFETY: MclG2OnCurve proves the precondition for mclBnG2_isValidOrder.
+    let result = unsafe { mcl_bn_g2_is_valid_order(&point.0) };
+    check_boolean("mclBnG2_isValidOrder", result)
+}
+
 pub fn pairing_product(
+    g1_points: &[MclG1],
+    g2_points: &[MclG2Subgroup],
+) -> Result<MclGt, MclError> {
+    ensure_init()?;
+    if g1_points.len() != g2_points.len() {
+        return Err(MclError::LengthMismatch);
+    }
+    if g1_points.is_empty() {
+        return Err(MclError::EmptyInput);
+    }
+    let miller_output = miller_loop_vec(g1_points, g2_points)?;
+    final_exp(&miller_output)
+}
+
+/// Execute only MCL's vector Miller loop.
+pub fn miller_loop_vec(
     g1_points: &[MclG1],
     g2_points: &[MclG2Subgroup],
 ) -> Result<MclGt, MclError> {
@@ -257,9 +278,15 @@ pub fn pairing_product(
             g1_points.len(),
         )
     };
+    Ok(miller_output)
+}
+
+/// Execute only MCL's BN254 final exponentiation.
+pub fn final_exp(miller_output: &MclGt) -> Result<MclGt, MclError> {
+    ensure_init()?;
     let mut output = zero_fp12();
     // SAFETY: miller_output is initialized by MCL and output is distinct.
-    unsafe { mcl_bn_final_exp(&mut output, &miller_output) };
+    unsafe { mcl_bn_final_exp(&mut output, miller_output) };
     Ok(output)
 }
 
