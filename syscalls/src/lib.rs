@@ -2800,8 +2800,49 @@ declare_builtin_function!(
     }
 );
 
-const ALT_BN128_G1_MSM_DISCOUNT_PER_THOUSAND: [u64; 12] =
-    [1000, 636, 449, 320, 246, 199, 166, 131, 113, 98, 85, 79];
+/// The B5 IFMA MSM is linear in point count over the whole measured range, so
+/// no bucket takes a discount. The sublinear curve this table once held belongs
+/// to B1 Pippenger and would undercharge every batch shape under B5.
+const ALT_BN128_G1_MSM_DISCOUNT_PER_THOUSAND: [u64; 12] = [1000; 12];
+
+/// Pairs per 8-wide IFMA lane.
+const ALT_BN128_PAIRING_LANE_WIDTH: u64 = 8;
+
+/// Charges a pairing by lane count, not pair count.
+///
+/// `full_pairs` carry their G2 subgroup check. `registered_pairs` come from an
+/// authenticated registry and skip it. Both still run the Miller loop, so both
+/// occupy lanes. Grouping the two together before splitting into lanes matches
+/// the kernel, which does not care where a pair came from.
+fn alt_bn128_pairing_cost(
+    execution_cost: &SVMTransactionExecutionCost,
+    full_pairs: u64,
+    registered_pairs: u64,
+) -> u64 {
+    let pairs = full_pairs.saturating_add(registered_pairs);
+    let lanes = pairs.saturating_div(ALT_BN128_PAIRING_LANE_WIDTH);
+    let remainder = pairs.saturating_sub(lanes.saturating_mul(ALT_BN128_PAIRING_LANE_WIDTH));
+    // Lane and per-pair prices are all-in: both were fitted to calls whose
+    // every pair carried its subgroup check. A registered pair is therefore a
+    // credit against that price, not the absence of a separate charge.
+    execution_cost
+        .alt_bn128_pairing_check_base_cost
+        .saturating_add(
+            execution_cost
+                .alt_bn128_pairing_check_lane_cost
+                .saturating_mul(lanes),
+        )
+        .saturating_add(
+            execution_cost
+                .alt_bn128_pairing_check_per_pair_cost
+                .saturating_mul(remainder),
+        )
+        .saturating_sub(
+            execution_cost
+                .alt_bn128_g2_subgroup_check_cost
+                .saturating_mul(registered_pairs),
+        )
+}
 
 #[derive(Clone, Copy)]
 enum EmptyInput {
@@ -2938,14 +2979,7 @@ declare_builtin_function!(
 
         let check_aligned = invoke_context.get_check_aligned();
         let execution_cost = invoke_context.get_execution_cost();
-        let cost = execution_cost
-            .alt_bn128_pairing_check_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_pairing_check_per_pair_cost
-                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
-                    .saturating_mul(num_pairs),
-            );
+        let cost = alt_bn128_pairing_cost(execution_cost, num_pairs, 0);
         invoke_context.compute_meter.consume_checked(cost)?;
 
         if checked_slice_count::<PodG1G2Pair>(
@@ -3004,14 +3038,7 @@ declare_builtin_function!(
         let check_aligned = invoke_context.get_check_aligned();
         let execution_cost = invoke_context.get_execution_cost();
         // The research map uses the pairing-check schedule until fleet calibration.
-        let cost = execution_cost
-            .alt_bn128_pairing_check_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_pairing_check_per_pair_cost
-                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
-                    .saturating_mul(num_pairs),
-            );
+        let cost = alt_bn128_pairing_cost(execution_cost, num_pairs, 0);
         invoke_context.compute_meter.consume_checked(cost)?;
 
         if checked_slice_count::<PodG1G2Pair>(
@@ -3086,18 +3113,14 @@ declare_builtin_function!(
             return Ok(1);
         }
         let execution_cost = invoke_context.get_execution_cost();
+        // Registration prepares each G2 once and derives each GT target from a
+        // pairing, so it pays full-pair price for both. It is setup, amortized
+        // over every later verify against the registry.
         let g2_cost = execution_cost
             .alt_bn128_pairing_check_per_pair_cost
             .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
             .saturating_mul(shape.g2_count.into());
-        let gt_cost = execution_cost
-            .alt_bn128_pairing_check_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_pairing_check_per_pair_cost
-                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
-                    .saturating_mul(shape.gt_count.into()),
-            );
+        let gt_cost = alt_bn128_pairing_cost(execution_cost, shape.gt_count.into(), 0);
         invoke_context
             .compute_meter
             .consume_checked(g2_cost.saturating_add(gt_cost))?;
@@ -3229,18 +3252,11 @@ declare_builtin_function!(
             return Ok(1);
         }
         let execution_cost = invoke_context.get_execution_cost();
-        let cost = execution_cost
-            .alt_bn128_pairing_check_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_pairing_check_per_pair_cost
-                    .saturating_mul(total as u64),
-            )
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_g2_subgroup_check_cost
-                    .saturating_mul(shape.full_count.into()),
-            );
+        let cost = alt_bn128_pairing_cost(
+            execution_cost,
+            shape.full_count.into(),
+            shape.registered_count.into(),
+        );
         invoke_context.compute_meter.consume_checked(cost)?;
         let check_aligned = invoke_context.get_check_aligned();
         let (full, registered) = {
@@ -3337,10 +3353,10 @@ declare_builtin_function!(
         }
         let execution_cost = invoke_context.get_execution_cost();
         let cost = execution_cost
-            .alt_bn128_pairing_check_base_cost
+            .alt_bn128_gt_multiexp_base_cost
             .saturating_add(
                 execution_cost
-                    .alt_bn128_pairing_check_per_pair_cost
+                    .alt_bn128_gt_multiexp_per_target_cost
                     .saturating_mul(target_count.into()),
             );
         invoke_context.compute_meter.consume_checked(cost)?;

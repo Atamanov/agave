@@ -153,6 +153,9 @@ pub struct ComputeBudget {
     pub alt_bn128_pairing_check_base_cost: u64,
     /// CU charge per declared BN254 pairing input.
     pub alt_bn128_pairing_check_per_pair_cost: u64,
+    pub alt_bn128_pairing_check_lane_cost: u64,
+    pub alt_bn128_gt_multiexp_base_cost: u64,
+    pub alt_bn128_gt_multiexp_per_target_cost: u64,
     /// CU charge for each BN254 G2 subgroup check.
     pub alt_bn128_g2_subgroup_check_cost: u64,
     /// Fixed CU charge for a BN254 scalar inner product.
@@ -257,6 +260,9 @@ impl ComputeBudget {
             alt_bn128_g1_msm_per_point_cost: cost.alt_bn128_g1_msm_per_point_cost,
             alt_bn128_pairing_check_base_cost: cost.alt_bn128_pairing_check_base_cost,
             alt_bn128_pairing_check_per_pair_cost: cost.alt_bn128_pairing_check_per_pair_cost,
+            alt_bn128_pairing_check_lane_cost: cost.alt_bn128_pairing_check_lane_cost,
+            alt_bn128_gt_multiexp_base_cost: cost.alt_bn128_gt_multiexp_base_cost,
+            alt_bn128_gt_multiexp_per_target_cost: cost.alt_bn128_gt_multiexp_per_target_cost,
             alt_bn128_g2_subgroup_check_cost: cost.alt_bn128_g2_subgroup_check_cost,
             alt_bn128_fr_lincomb_base_cost: cost.alt_bn128_fr_lincomb_base_cost,
             alt_bn128_fr_lincomb_per_term_cost: cost.alt_bn128_fr_lincomb_per_term_cost,
@@ -340,6 +346,9 @@ impl ComputeBudget {
             alt_bn128_g1_msm_per_point_cost: self.alt_bn128_g1_msm_per_point_cost,
             alt_bn128_pairing_check_base_cost: self.alt_bn128_pairing_check_base_cost,
             alt_bn128_pairing_check_per_pair_cost: self.alt_bn128_pairing_check_per_pair_cost,
+            alt_bn128_pairing_check_lane_cost: self.alt_bn128_pairing_check_lane_cost,
+            alt_bn128_gt_multiexp_base_cost: self.alt_bn128_gt_multiexp_base_cost,
+            alt_bn128_gt_multiexp_per_target_cost: self.alt_bn128_gt_multiexp_per_target_cost,
             alt_bn128_g2_subgroup_check_cost: self.alt_bn128_g2_subgroup_check_cost,
             alt_bn128_fr_lincomb_base_cost: self.alt_bn128_fr_lincomb_base_cost,
             alt_bn128_fr_lincomb_per_term_cost: self.alt_bn128_fr_lincomb_per_term_cost,

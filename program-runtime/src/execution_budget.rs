@@ -210,8 +210,13 @@ pub struct SVMTransactionExecutionCost {
     pub alt_bn128_pairing_check_base_cost: u64,
     /// Per-pair compute units for an alt_bn128 pairing check: parse,
     /// validation minus the subgroup check, G2 preparation, and the miller
-    /// loop share.
+    /// loop share. Charged only for pairs outside a full 8-wide lane.
     pub alt_bn128_pairing_check_per_pair_cost: u64,
+    /// Compute units for one full group of eight pairs. The 8-wide IFMA kernel
+    /// takes any eight pairs together, so eight pairs cost less than six and
+    /// price follows lane count, not pair count. Charged instead of, not on top
+    /// of, the eight per-pair costs it replaces.
+    pub alt_bn128_pairing_check_lane_cost: u64,
     /// Compute units for one alt_bn128 G2 subgroup membership check, priced
     /// separately so the surcharge stays auditable and reusable by any future
     /// G2-input syscall.
@@ -231,6 +236,21 @@ pub struct SVMTransactionExecutionCost {
     pub alt_bn128_plonk_batch_reduce_per_proof_cost: u64,
     /// Per-Lagrange-slot compute units (proofs times max(public inputs, 1)).
     pub alt_bn128_plonk_batch_reduce_per_lagrange_cost: u64,
+    /// Base compute units for a multiexponentiation over authenticated GT
+    /// targets.
+    ///
+    /// PROVISIONAL: no x86 measurement exists for this operation. See
+    /// `alt_bn128_gt_multiexp_per_target_cost`.
+    pub alt_bn128_gt_multiexp_base_cost: u64,
+    /// Per-target compute units for an authenticated GT multiexponentiation.
+    ///
+    /// PROVISIONAL, and deliberately far above the only data we have: an arm64
+    /// p50 calibration of 9.1k / 19.0k / 34.3k CU at 1 / 2 / 3 targets. Holding
+    /// the overcharge until an x86 IFMA capture replaces it keeps the schedule
+    /// safe, but it inflates every cell that folds distinct verifying-key
+    /// targets. `provisional_gt_multiexp_schedule` pins these two values so the
+    /// substitution cannot be forgotten.
+    pub alt_bn128_gt_multiexp_per_target_cost: u64,
 }
 
 impl Default for SVMTransactionExecutionCost {
@@ -290,11 +310,15 @@ impl Default for SVMTransactionExecutionCost {
             // This research schedule applies to the B1 source measured on one Zen 4 host.
             // Backend selection does not activate a different tariff. Activation requires
             // validator-fleet calibration for the exact source and build profile.
-            alt_bn128_g1_msm_base_cost: 100,
-            alt_bn128_g1_msm_per_point_cost: 3_322,
-            alt_bn128_pairing_check_base_cost: 17_246,
-            alt_bn128_pairing_check_per_pair_cost: 5_741,
-            alt_bn128_g2_subgroup_check_cost: 3_595,
+            // B5 (Helius AVX-512 IFMA) schedule, fitted to the Threadripper
+            // 9970X capture. Derivation and the measured curve:
+            // research/bn254-decision-table-v2-20260804/B5-CHARGE-SCHEDULE.md
+            alt_bn128_g1_msm_base_cost: 461,
+            alt_bn128_g1_msm_per_point_cost: 296,
+            alt_bn128_pairing_check_base_cost: 4_641,
+            alt_bn128_pairing_check_per_pair_cost: 4_188,
+            alt_bn128_pairing_check_lane_cost: 20_338,
+            alt_bn128_g2_subgroup_check_cost: 1_612,
             // The scalar charges use the same B1 host data and 33 ns per CU.
             alt_bn128_fr_lincomb_base_cost: 100,
             alt_bn128_fr_lincomb_per_term_cost: 2,
@@ -307,6 +331,8 @@ impl Default for SVMTransactionExecutionCost {
             alt_bn128_plonk_batch_reduce_base_cost: 200,
             alt_bn128_plonk_batch_reduce_per_proof_cost: 41,
             alt_bn128_plonk_batch_reduce_per_lagrange_cost: 6,
+            alt_bn128_gt_multiexp_base_cost: 50_000,
+            alt_bn128_gt_multiexp_per_target_cost: 20_000,
         }
     }
 }
