@@ -1,0 +1,37 @@
+[package]
+name = "solana-bn254-decision-litesvm"
+description = "LiteSVM installer and strict observers for the BN254 decision campaign"
+version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[features]
+default = ["backend-b4-helios"]
+backend-b4-helios = [
+    "solana-bn254-batch-syscall/backend-b4-helios",
+    "solana-syscalls/backend-b4-helios",
+]
+backend-b5-helios-ifma = [
+    "solana-bn254-batch-syscall/backend-b5-helios-ifma",
+    "solana-syscalls/backend-b5-helios-ifma",
+]
+
+[dependencies]
+bytemuck = { workspace = true }
+litesvm = { version = "0.12", features = ["register-tracing"] }
+serde = { workspace = true }
+solana-bn254-batch-syscall = { workspace = true, features = ["research-observer"] }
+# LiteSVM 0.12's runtime ABI. This intentionally coexists with Agave's local
+# 4.1 runtime dependency used by the pure registry module.
+solana-program-runtime = "3.1"
+solana-pubkey-v4 = { package = "solana-pubkey", version = "4.2" }
+solana-syscalls = { workspace = true, features = ["research-observer"] }
+solana-transaction = "3.1"
+solana-transaction-context = "3.1"
+
+[lints]
+workspace = true

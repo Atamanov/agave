@@ -13,6 +13,7 @@ members = [
     "bls-cert-verify",
     "bn254-batch-syscall",
     "bn254-decision-bench",
+    "bn254-decision-litesvm",
     "bn254-groth16-batch",
     "bn254-mcl-sys",
     "bn254-mixed-batch",
