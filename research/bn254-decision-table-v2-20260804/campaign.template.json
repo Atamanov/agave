@@ -1,0 +1,60 @@
+{
+  "schema": "helios.bn254-decision-table-v3.campaign.v1",
+  "campaign_id": "bn254-decision-table-v3-REPLACE",
+  "mode": "final",
+  "fixture_manifest": "fixture-manifest.real-20260805.json",
+  "expected_counts": "expected-counts.v1.json",
+  "tariff_source": {
+    "kind": "fresh",
+    "tariff_id": "bn254-exact-shape-REPLACE",
+    "samples": 20,
+    "ns_per_cu": 33.0,
+    "source_revision": "a2dadc3fc25a02e260b82ff5afd6649ff9a3594a",
+    "captured_at_utc": "2026-08-05T00:00:00Z",
+    "jobs": [
+      {
+        "pricing_id": "stock_current",
+        "backend_feature": "backend-b1-arkworks",
+        "profile": "stock_current"
+      },
+      {
+        "pricing_id": "b1",
+        "backend_feature": "backend-b1-arkworks",
+        "profile": "batch"
+      },
+      {
+        "pricing_id": "b2",
+        "backend_feature": "backend-b2-arkworks-optimized",
+        "profile": "batch"
+      },
+      {
+        "pricing_id": "b3",
+        "backend_feature": "backend-b3-mcl",
+        "profile": "batch"
+      },
+      {
+        "pricing_id": "b4",
+        "backend_feature": "backend-b4-helios",
+        "profile": "batch"
+      },
+      {
+        "pricing_id": "b5",
+        "backend_feature": "backend-b5-helios-ifma",
+        "profile": "batch"
+      },
+      {
+        "pricing_id": "current_fp12",
+        "backend_feature": "backend-b1-arkworks",
+        "profile": "batch"
+      },
+      {
+        "pricing_id": "batch_fp12_b5",
+        "backend_feature": "backend-b5-helios-ifma",
+        "profile": "batch"
+      }
+    ]
+  },
+  "executor": {
+    "kind": "in_tree_lite_svm"
+  }
+}

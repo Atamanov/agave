@@ -1,0 +1,59 @@
+{
+  "schema": "helios.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4",
+  "stage": "full",
+  "n_inner_proofs": 2,
+  "distinct_inner_vks": true,
+  "inner_source": "exact authenticated Zolana production-prover Groth16 tuples",
+  "inner_shape_ccs_only": true,
+  "source_manifest_sha256": "df35081dcc762c81f81b90b91af9849a9815bf3772bf8139b9aa92c0ad055a0c",
+  "source_row_sha256": "51e5585ca8ac1dd547380b016f3e49f8e8cad60fed596faefd762a5af5ded577",
+  "statement_sha256": "e94945d663a6fa53e92aee4b10b1b9aaca20689d0f0991393b07bc8a9f90a41c",
+  "statement_commitment_fr_be": "27b80c0adee079ad07e9d7710aac58362950c77b2823cef42b7fe63adf90a418",
+  "proof_vk_indices": [
+    0,
+    1
+  ],
+  "ordered_vk_sha256s": [
+    "b9782473c2dc9b105dc1a469dcd85d9aced61ab3279190fe1377abb2b3ffb7f9",
+    "be962d98d0c06c4f9acf0badcefb9ac24ec101b779d4dd4d143032556543a152"
+  ],
+  "ordered_proof_sha256s": [
+    "6fdcef7799aaab06d70735340a6b4fc2cf3d80263a4384b60580c7097cb917db",
+    "db753ae3a3fccde42fe9abb3d850c0c10426090daf92f166176f59459f07bb34"
+  ],
+  "ordered_public_input_sha256s": [
+    "2cff497c22a2697b466e6633a082801903bd375fb7c4a2c27eaa7a00bb9acf5f",
+    "055d3575c83b807550f2e2f924129b53c52ca30997fdd7d7b6b8e9e1b69ab1f6"
+  ],
+  "ordered_public_input_byte_lengths": [
+    32,
+    32
+  ],
+  "shared_srs_sha256": null,
+  "inner_instance_set_sha256": "30b1b96c0e91f89307f9bea3a889a20342e4cd72cf292b0000cbb9d16a3fc762",
+  "application_public_inputs_sha256": "bc4e65fca54c14096e50039ab2295939e654d591ebc00283a57b59a5b5d0f0dd",
+  "outer_vk_sha256": "2a6fda1a4be28af88044e181e59c4ea0cc23ba5f1e35c0958baaa504174ee416",
+  "outer_ccs_sha256": "691a8dcb5b2007d4ef2bae737b9d293adc07c1201be106265018aeacf753f872",
+  "outer_constraints": 1468813,
+  "outer_public_variables_including_one_wire": 4,
+  "outer_proof_zolana_wire_bytes": 384,
+  "exact_inner_proof_equality_constrained": true,
+  "all_inner_proofs_host_verified": true,
+  "outer_proof_host_verified": true,
+  "bad_public_input_rejected": true,
+  "bad_statement_commitment_rejected": true,
+  "reordered_public_inputs_rejected": true,
+  "changed_inner_vk_rejected": true,
+  "changed_inner_proof_rejected": true,
+  "measurement_ready": true,
+  "activation_ready": false,
+  "single_party_setup": true,
+  "fixture_entropy_mode": "crypto/rand.Reader (OS CSPRNG)",
+  "secure_os_random_export": true,
+  "entropy_audit_scope": "all entropy returned to gnark outer Groth16 Setup and Prove; only byte count and one-way SHA-256 commitment retained; imported inner proofs use no setup or proof entropy",
+  "entropy_bytes": 384,
+  "entropy_commitment_sha256": "4d984b52ef698d5ab3de59cbd034a5388dcf2e51b14373d8b85c6417705957d2",
+  "publicly_derivable_toxic_waste": false,
+  "deterministic_bench_toxic_waste": false,
+  "proving_key_persisted": false
+}

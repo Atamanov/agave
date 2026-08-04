@@ -1,0 +1,1080 @@
+{
+  "schema": "helios.bn254-decision-table-v3.expected-counts.v1",
+  "contract_id": "bn254-corrected-six-columns-counts-20260805",
+  "cells": [
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "current",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 4,
+            "full_pairs": 4,
+            "registered_pairs": 0,
+            "calls": 5
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 5,
+        "g2_subgroup_checks": 20
+      }
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "batch_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 8,
+            "full_pairs": 8,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 5,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 8
+      }
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "registry_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 8,
+            "full_pairs": 5,
+            "registered_pairs": 3,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 5,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 5
+      }
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "recursion_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 9,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "current_fp12",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 3,
+            "full_pairs": 3,
+            "registered_pairs": 0,
+            "calls": 5
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 5,
+        "g2_subgroup_checks": 15
+      }
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "batch_fp12_b5",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 7,
+            "full_pairs": 7,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 5,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 7
+      }
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "current",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 4,
+            "full_pairs": 4,
+            "registered_pairs": 0,
+            "calls": 2
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 2,
+        "g2_subgroup_checks": 8
+      }
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "batch_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 8,
+            "full_pairs": 8,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 8
+      }
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "registry_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 8,
+            "full_pairs": 2,
+            "registered_pairs": 6,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      }
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "recursion_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 6,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "current_fp12",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 3,
+            "full_pairs": 3,
+            "registered_pairs": 0,
+            "calls": 2
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 2,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "batch_fp12_b5",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [
+          {
+            "targets": 2,
+            "nontrivial_exponents": 1,
+            "calls": 1
+          }
+        ],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "current",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 4,
+            "full_pairs": 4,
+            "registered_pairs": 0,
+            "calls": 3
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 3,
+        "g2_subgroup_checks": 12
+      }
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "batch_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 12,
+            "full_pairs": 12,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 12
+      }
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "registry_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 12,
+            "full_pairs": 3,
+            "registered_pairs": 9,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 3
+      }
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "recursion_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 7,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "current_fp12",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 3,
+            "full_pairs": 3,
+            "registered_pairs": 0,
+            "calls": 3
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 3,
+        "g2_subgroup_checks": 9
+      }
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "batch_fp12_b5",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 9,
+            "full_pairs": 9,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [
+          {
+            "targets": 3,
+            "nontrivial_exponents": 2,
+            "calls": 1
+          }
+        ],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 9
+      }
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "current",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 2
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 2,
+        "g2_subgroup_checks": 4
+      }
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "batch_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 4,
+            "calls": 1
+          },
+          {
+            "points": 36,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      }
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "registry_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 0,
+            "registered_pairs": 2,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 4,
+            "calls": 1
+          },
+          {
+            "points": 36,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 0
+      }
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "recursion_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 7,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "current_fp12",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 2
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 2,
+        "g2_subgroup_checks": 4
+      }
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "batch_fp12_b5",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 4,
+            "calls": 1
+          },
+          {
+            "points": 36,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      }
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "current",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 3
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 3,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "batch_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 6,
+            "calls": 1
+          },
+          {
+            "points": 54,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      }
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "registry_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 0,
+            "registered_pairs": 2,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 6,
+            "calls": 1
+          },
+          {
+            "points": 54,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 0
+      }
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "recursion_b5",
+      "trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 10,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "current_fp12",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 3
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 3,
+        "g2_subgroup_checks": 6
+      }
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "batch_fp12_b5",
+      "trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 6,
+            "calls": 1
+          },
+          {
+            "points": 54,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      }
+    }
+  ]
+}

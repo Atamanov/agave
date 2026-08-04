@@ -1,0 +1,540 @@
+{
+  "schema": "helios.bn254-decision-table-v3.fixture-manifest.v1",
+  "fixture_set_id": "zolana-real-groth16-plus-canonical-plonk-v3-20260805",
+  "artifact_root": "fixtures-v3",
+  "provenance": {
+    "source_manifest_path": "fixtures-v3/manifest.json",
+    "source_manifest_sha256": "df35081dcc762c81f81b90b91af9849a9815bf3772bf8139b9aa92c0ad055a0c",
+    "zolana_revision": "07190e4791257e928f3c6969542591835e52e919"
+  },
+  "rows": [
+    {
+      "row_id": "groth16_n5_same_vk",
+      "fixture_id": "G5-real-five-unique-same-vk",
+      "source_record_ids": [
+        "g5-transfer-confidential-2-3-1",
+        "g5-transfer-confidential-2-3-2",
+        "g5-transfer-confidential-2-3-3",
+        "g5-transfer-confidential-2-3-4",
+        "g5-transfer-confidential-2-3-5"
+      ],
+      "classification": "five fresh real Zolana confidential-transfer Groth16 proofs with unique statements and one locked verifying key",
+      "files": [
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-1/proof.bin",
+          "sha256": "f091b69e76fad8ea01b25a7ab808775a0ecc1e9c9520524f340e6e074cedb738",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-1/proof.json",
+          "sha256": "45b8a1c4aa08c649b01211b129111f3b53acbd18748e5bb197b1aa44515ce277",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-1/public_inputs.bin",
+          "sha256": "62ea935dcece0e7ea11bcba09910b87ad9aebb080d69d4e682cfff8480c958b6",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-1/public_inputs.json",
+          "sha256": "de347244d9f967d090934543a029e6e9ee1d445df64dea6dd8df7164d770f112",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-1/verifying_key.bin",
+          "sha256": "7b499b2b7d5da77d9f55ecba9df70bfdf3fe9a9515a2bf56f03be02ebcbbec3c",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-1/verifying_key.json",
+          "sha256": "1db5b3309cae73d3b0d902dbc11380fee45837095bddba16e0573776d96d4d9a",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-2/proof.bin",
+          "sha256": "b49875816a30232df27f35eacb3dd52b72712c17428167af37edc3c7790d2456",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-2/proof.json",
+          "sha256": "3fe76e316847cb9e98a4e127240ab5422796886b9db731c2be20a004cdd88089",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-2/public_inputs.bin",
+          "sha256": "dee9829187ee497ede8320e2e7f6b007dc53c1516ed3dbeb902ac68eb67b6760",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-2/public_inputs.json",
+          "sha256": "98af0cc6f5120a1a82736bf2bf8f8e3cd4702df113ebc1b3bba37ca19797bbd0",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-2/verifying_key.bin",
+          "sha256": "7b499b2b7d5da77d9f55ecba9df70bfdf3fe9a9515a2bf56f03be02ebcbbec3c",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-2/verifying_key.json",
+          "sha256": "1db5b3309cae73d3b0d902dbc11380fee45837095bddba16e0573776d96d4d9a",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-3/proof.bin",
+          "sha256": "9dd91dc89ae1d2579043c71191406cac7da01aed3207087c851184c6fbce2e8e",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-3/proof.json",
+          "sha256": "646b0332cd25987bc24c94ce2f45f935217e40119e0f678f4c406ed3fc3be461",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-3/public_inputs.bin",
+          "sha256": "a17465d195395fa73ac0bded5fac860293a28af3a2229521612a1f65ddb06803",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-3/public_inputs.json",
+          "sha256": "55b88c41679bb7d835a3357d7f132585909fcbb7d0da41b3590b29221f04370f",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-3/verifying_key.bin",
+          "sha256": "7b499b2b7d5da77d9f55ecba9df70bfdf3fe9a9515a2bf56f03be02ebcbbec3c",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-3/verifying_key.json",
+          "sha256": "1db5b3309cae73d3b0d902dbc11380fee45837095bddba16e0573776d96d4d9a",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-4/proof.bin",
+          "sha256": "da6434205e783fb5804dea3fda27dba8c1e03544c15fff1be2b4d0aaf8a80d40",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-4/proof.json",
+          "sha256": "3627e0d9872cf410d94afe929585f9f6c00f530079d7533b7c336c8512993a85",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-4/public_inputs.bin",
+          "sha256": "246c13e2ddfe7065ab454948405b075e45f9feb4f74a7371e5c8e2b928763b96",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-4/public_inputs.json",
+          "sha256": "b6980419fa483fca0cc7618c987d75bb0b6d30997af4c8558c333792e18af290",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-4/verifying_key.bin",
+          "sha256": "7b499b2b7d5da77d9f55ecba9df70bfdf3fe9a9515a2bf56f03be02ebcbbec3c",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-4/verifying_key.json",
+          "sha256": "1db5b3309cae73d3b0d902dbc11380fee45837095bddba16e0573776d96d4d9a",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-5/proof.bin",
+          "sha256": "95a1a0dc65c9a3d49c81fe62a59379a3cecb49d31d5ad8a7775c04e4b2fc9494",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-5/proof.json",
+          "sha256": "984b674019067edf2a1abe96f8665211647795d9bc6fd92f440a307e57241259",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-5/public_inputs.bin",
+          "sha256": "d582c24f97783c40fd773e3a512ece24b7167e6867effb8601346fea5faa727e",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-5/public_inputs.json",
+          "sha256": "74dcffa13e0e98fc56baefd70b76e8b7489f996814433d2328b4f72e342d81c8",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-5/verifying_key.bin",
+          "sha256": "7b499b2b7d5da77d9f55ecba9df70bfdf3fe9a9515a2bf56f03be02ebcbbec3c",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g5-transfer-confidential-2-3-5/verifying_key.json",
+          "sha256": "1db5b3309cae73d3b0d902dbc11380fee45837095bddba16e0573776d96d4d9a",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "rows/G5.bin",
+          "sha256": "cc6de5ad6f9e70e4c2448ec0c23f9575f61dd17d9aa6c05dc834d2b6c380dfbf",
+          "size_bytes": 2343,
+          "origin": "canonical combined Zolana Groth16 campaign row"
+        }
+      ]
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "fixture_id": "G2-real-two-distinct-vk",
+      "source_record_ids": [
+        "g2-transfer-confidential-1-1",
+        "g2-transfer-confidential-2-2"
+      ],
+      "classification": "two fresh real Zolana confidential-transfer Groth16 proofs with distinct locked verifying keys",
+      "files": [
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/proof.bin",
+          "sha256": "24f508079e93048d64b5023f44e28720542b2d7f2921e65467141d147bf52466",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/proof.json",
+          "sha256": "1666f292373bd8fd008ef6c02cbd05d31ff01d5155c5670f1907ceb64e6d6450",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/public_inputs.bin",
+          "sha256": "2cff497c22a2697b466e6633a082801903bd375fb7c4a2c27eaa7a00bb9acf5f",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/public_inputs.json",
+          "sha256": "848d396010545ef7b3bd88d44dfbc240861be73600caea17a5120435ff76ea23",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/verifying_key.bin",
+          "sha256": "d9b7a0875d241da3480d91859255d97b59801540be61c8833fae627b89bed989",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/verifying_key.json",
+          "sha256": "bda6570114e4b3227d86221629a775afd44e3ed622ab87d6373a1e308641e9da",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/proof.bin",
+          "sha256": "8c05c9e629481dc5141afe5e06f4f4bffc5e56353e8a9bc7f74734cc749981a6",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/proof.json",
+          "sha256": "626ee6a2975ec09f57d4ac5869dda8d1c4b757c6ef7228e39c608cedbc4818c0",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/public_inputs.bin",
+          "sha256": "055d3575c83b807550f2e2f924129b53c52ca30997fdd7d7b6b8e9e1b69ab1f6",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/public_inputs.json",
+          "sha256": "a433ac6e126b14669cd22816218a95fdf7f34d8ed092e32432571172d003387b",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/verifying_key.bin",
+          "sha256": "cf37aa1b52db9823b110fd33735d7aa1bc5756d13cbb882348e2e64ac56d5642",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/verifying_key.json",
+          "sha256": "8cb7b94a9f121e38546a6523ea480207081e381d7e5d9dc7e398d4651d7fede9",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "rows/G2.bin",
+          "sha256": "51e5585ca8ac1dd547380b016f3e49f8e8cad60fed596faefd762a5af5ded577",
+          "size_bytes": 1860,
+          "origin": "canonical combined Zolana Groth16 campaign row"
+        }
+      ]
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "fixture_id": "G3-real-three-distinct-vk",
+      "source_record_ids": [
+        "g2-transfer-confidential-1-1",
+        "g2-transfer-confidential-2-2",
+        "g3-transfer-confidential-2-3"
+      ],
+      "classification": "three fresh real Zolana confidential-transfer Groth16 proofs with distinct locked verifying keys",
+      "files": [
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/proof.bin",
+          "sha256": "24f508079e93048d64b5023f44e28720542b2d7f2921e65467141d147bf52466",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/proof.json",
+          "sha256": "1666f292373bd8fd008ef6c02cbd05d31ff01d5155c5670f1907ceb64e6d6450",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/public_inputs.bin",
+          "sha256": "2cff497c22a2697b466e6633a082801903bd375fb7c4a2c27eaa7a00bb9acf5f",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/public_inputs.json",
+          "sha256": "848d396010545ef7b3bd88d44dfbc240861be73600caea17a5120435ff76ea23",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/verifying_key.bin",
+          "sha256": "d9b7a0875d241da3480d91859255d97b59801540be61c8833fae627b89bed989",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-1-1/verifying_key.json",
+          "sha256": "bda6570114e4b3227d86221629a775afd44e3ed622ab87d6373a1e308641e9da",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/proof.bin",
+          "sha256": "8c05c9e629481dc5141afe5e06f4f4bffc5e56353e8a9bc7f74734cc749981a6",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/proof.json",
+          "sha256": "626ee6a2975ec09f57d4ac5869dda8d1c4b757c6ef7228e39c608cedbc4818c0",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/public_inputs.bin",
+          "sha256": "055d3575c83b807550f2e2f924129b53c52ca30997fdd7d7b6b8e9e1b69ab1f6",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/public_inputs.json",
+          "sha256": "a433ac6e126b14669cd22816218a95fdf7f34d8ed092e32432571172d003387b",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/verifying_key.bin",
+          "sha256": "cf37aa1b52db9823b110fd33735d7aa1bc5756d13cbb882348e2e64ac56d5642",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g2-transfer-confidential-2-2/verifying_key.json",
+          "sha256": "8cb7b94a9f121e38546a6523ea480207081e381d7e5d9dc7e398d4651d7fede9",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g3-transfer-confidential-2-3/proof.bin",
+          "sha256": "8168a6f51d68efe34a70c34d076dd7186110564b1fc7129e7d26efb5aeee029e",
+          "size_bytes": 256,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g3-transfer-confidential-2-3/proof.json",
+          "sha256": "8eb197893a4ea89e4421e74662622a9a17f6a688b9de55a5cbb8bfa1de30f2e8",
+          "size_bytes": 612,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g3-transfer-confidential-2-3/public_inputs.bin",
+          "sha256": "70eca45ac126ddf51c3dc3d875f328f4274aba48189b84506018f169c325f6c8",
+          "size_bytes": 32,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g3-transfer-confidential-2-3/public_inputs.json",
+          "sha256": "dcb7d7ae20dda94ab7dba5c359d99f993b5bb533e16c95a56cb3fabc283b21d8",
+          "size_bytes": 140,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g3-transfer-confidential-2-3/verifying_key.bin",
+          "sha256": "7b499b2b7d5da77d9f55ecba9df70bfdf3fe9a9515a2bf56f03be02ebcbbec3c",
+          "size_bytes": 584,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "groth16/g3-transfer-confidential-2-3/verifying_key.json",
+          "sha256": "1db5b3309cae73d3b0d902dbc11380fee45837095bddba16e0573776d96d4d9a",
+          "size_bytes": 1387,
+          "origin": "fresh Zolana production prover flow"
+        },
+        {
+          "path": "rows/G3.bin",
+          "sha256": "79d55ae5e3fbeaec1db68330554724e4ae3c9f42185029d53476f14799a649a1",
+          "size_bytes": 2789,
+          "origin": "canonical combined Zolana Groth16 campaign row"
+        }
+      ]
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "fixture_id": "plonk-mul1-mul2-canonical-test-exceptions",
+      "source_record_ids": [
+        "mul1",
+        "mul2"
+      ],
+      "classification": "committed canonical PLONK test exceptions; not freshly generated Zolana transfer proofs",
+      "files": [
+        {
+          "path": "plonk-test-exceptions/mul1/proof.json",
+          "sha256": "e83bf34c9ee7d9c150a69d28b9cf37ce17a534c04ac8413e8e617e8142116670",
+          "size_bytes": 2247,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul1/public.json",
+          "sha256": "16e83046941abbbe3196719fedd9cac00ce22a33e7c593cea3910c1bb25d9ac1",
+          "size_bytes": 10,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul1/verification_key.json",
+          "sha256": "28c03da271eb07571213fc9847dacb07843dfe4ed6901e4517fb57dd263694b5",
+          "size_bytes": 1739,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul2/proof.json",
+          "sha256": "910d8ca382f845ed6137128572a27c2249a6299759999e2eaab4befdb087e9d3",
+          "size_bytes": 2251,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul2/public.json",
+          "sha256": "b37e80d45f207decb1dd683675d1ed8186dd9b1a9db4028cbff63c96c2fd972d",
+          "size_bytes": 17,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul2/verification_key.json",
+          "sha256": "3deeb70be57ccb3b370bbc0bf43a19990fcbc9d965afeadfcab4b0fda2e224a6",
+          "size_bytes": 1738,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        }
+      ]
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "fixture_id": "plonk-mul1-mul2-mul3-canonical-test-exceptions",
+      "source_record_ids": [
+        "mul1",
+        "mul2",
+        "mul3"
+      ],
+      "classification": "committed canonical PLONK test exceptions; not freshly generated Zolana transfer proofs",
+      "files": [
+        {
+          "path": "plonk-test-exceptions/mul1/proof.json",
+          "sha256": "e83bf34c9ee7d9c150a69d28b9cf37ce17a534c04ac8413e8e617e8142116670",
+          "size_bytes": 2247,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul1/public.json",
+          "sha256": "16e83046941abbbe3196719fedd9cac00ce22a33e7c593cea3910c1bb25d9ac1",
+          "size_bytes": 10,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul1/verification_key.json",
+          "sha256": "28c03da271eb07571213fc9847dacb07843dfe4ed6901e4517fb57dd263694b5",
+          "size_bytes": 1739,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul2/proof.json",
+          "sha256": "910d8ca382f845ed6137128572a27c2249a6299759999e2eaab4befdb087e9d3",
+          "size_bytes": 2251,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul2/public.json",
+          "sha256": "b37e80d45f207decb1dd683675d1ed8186dd9b1a9db4028cbff63c96c2fd972d",
+          "size_bytes": 17,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul2/verification_key.json",
+          "sha256": "3deeb70be57ccb3b370bbc0bf43a19990fcbc9d965afeadfcab4b0fda2e224a6",
+          "size_bytes": 1738,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul3/proof.json",
+          "sha256": "0f62952f0144f62be1c26d4a0ea56a2ff63430eb67e94cc956586206535aed55",
+          "size_bytes": 2250,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul3/public.json",
+          "sha256": "8348e0afaed33f7d5d4258af4535a9bc8ce44ee8b4eb7ead909b958fce366b35",
+          "size_bytes": 26,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        },
+        {
+          "path": "plonk-test-exceptions/mul3/verification_key.json",
+          "sha256": "cf5443a8d764dedacd2a3bc22d1ac9c0ab2425d10da849112ed0663ea0d1269d",
+          "size_bytes": 1740,
+          "origin": "byte-exact committed canonical PLONK test exception"
+        }
+      ]
+    }
+  ]
+}
