@@ -2,14 +2,9 @@ use {
     crate::{verify::Proof, vk::ValidatedVerifyingKey},
     ark_bn254::Fr,
     ark_ff::One,
+    core::ops::{Add, MulAssign},
     solana_keccak_hasher::hashv,
 };
-
-/// Keccak over ordered chunks. Equivalent to sequential `Hasher` updates and
-/// works on SBF (where `solana_keccak_hasher::Hasher` is not available).
-fn keccak_parts(parts: &[&[u8]]) -> [u8; 32] {
-    hashv(parts).to_bytes()
-}
 
 /// How the per-equation randomizers derive from the seed. `Independent` gives
 /// a per-equation batch soundness error of 2^-128 with no dependence on the
@@ -18,17 +13,6 @@ fn keccak_parts(parts: &[&[u8]]) -> [u8; 32] {
 pub enum RandomizerMode {
     Independent,
     Powers,
-}
-
-impl RandomizerMode {
-    // versioned ASCII constant carrying the protocol name, the transcript
-    // version, and the randomizer mode; distinct per scheme and deployment
-    pub(crate) fn domain_tag(self) -> &'static [u8] {
-        match self {
-            RandomizerMode::Independent => b"solana-bn254-groth16-batch:v1:independent",
-            RandomizerMode::Powers => b"solana-bn254-groth16-batch:v1:powers",
-        }
-    }
 }
 
 /// The Fiat-Shamir seed over the frozen batch: everything the verdict depends
@@ -49,7 +33,11 @@ pub fn derive_seed(
     debug_assert!(vks.len() <= usize::from(u16::MAX));
     let vk_count = (vks.len() as u16).to_be_bytes();
     let proof_count = (proofs.len() as u64).to_be_bytes();
-    let mut parts: Vec<&[u8]> = Vec::with_capacity(4 + vks.len() + proofs.len() * 8);
+    let capacity = vks
+        .len()
+        .saturating_add(proofs.len().saturating_mul(8))
+        .saturating_add(4);
+    let mut parts: Vec<&[u8]> = Vec::with_capacity(capacity);
     parts.push(mode.domain_tag());
     parts.push(&vk_count);
     for vk in vks {
@@ -90,7 +78,7 @@ pub fn derive_randomizers(seed: &[u8; 32], num_equations: u64, mode: RandomizerM
         let digest = keccak_parts(&[seed, &k_be]);
         let mut lo = [0u8; 16];
         lo.copy_from_slice(&digest[16..]);
-        Fr::from(u128::from_be_bytes(lo)) + Fr::one()
+        Fr::from(u128::from_be_bytes(lo)).add(Fr::one())
     };
     match mode {
         RandomizerMode::Independent => (1..=num_equations).map(draw).collect(),
@@ -99,12 +87,27 @@ pub fn derive_randomizers(seed: &[u8; 32], num_equations: u64, mode: RandomizerM
             let mut power = Fr::one();
             (0..num_equations)
                 .map(|_| {
-                    power *= r;
+                    power.mul_assign(r);
                     power
                 })
                 .collect()
         }
     }
+}
+
+impl RandomizerMode {
+    // The domain separates each mode, protocol, and transcript version.
+    pub(crate) fn domain_tag(self) -> &'static [u8] {
+        match self {
+            RandomizerMode::Independent => b"solana-bn254-groth16-batch:v1:independent",
+            RandomizerMode::Powers => b"solana-bn254-groth16-batch:v1:powers",
+        }
+    }
+}
+
+/// Hash ordered chunks on native and SBF targets.
+fn keccak_parts(parts: &[&[u8]]) -> [u8; 32] {
+    hashv(parts).to_bytes()
 }
 
 #[cfg(test)]
@@ -113,6 +116,7 @@ mod tests {
         super::*,
         crate::test_utils::{make_proof, make_vk, rng},
         ark_ff::{BigInteger, PrimeField, UniformRand, Zero},
+        core::ops::{Mul, Sub},
     };
 
     fn setup() -> (Vec<ValidatedVerifyingKey>, Vec<Proof>) {
@@ -225,9 +229,9 @@ mod tests {
         assert_eq!(randomizers.len(), 3);
         for (i, r) in randomizers.iter().enumerate() {
             assert!(!r.is_zero());
-            let k = (i + 1) as u64;
+            let k = u64::try_from(i.checked_add(1).unwrap()).unwrap();
             let digest = hashv(&[&seed, &k.to_be_bytes()]).to_bytes();
-            let minus_one = (*r - Fr::one()).into_bigint().to_bytes_be();
+            let minus_one = r.sub(&Fr::one()).into_bigint().to_bytes_be();
             assert_eq!(&minus_one[16..], &digest[16..], "k = {k}");
             assert_eq!(&minus_one[..16], &[0u8; 16], "high bytes must be zero");
         }
@@ -239,9 +243,12 @@ mod tests {
         let seed = derive_seed(RandomizerMode::Powers, &vks, &proofs);
         let randomizers = derive_randomizers(&seed, 4, RandomizerMode::Powers);
         let r = randomizers[0];
-        assert_eq!(randomizers[1], r * r);
-        assert_eq!(randomizers[2], r * r * r);
-        assert_eq!(randomizers[3], r * r * r * r);
+        let r2 = r.mul(r);
+        let r3 = r2.mul(r);
+        let r4 = r3.mul(r);
+        assert_eq!(randomizers[1], r2);
+        assert_eq!(randomizers[2], r3);
+        assert_eq!(randomizers[3], r4);
     }
 
     #[test]

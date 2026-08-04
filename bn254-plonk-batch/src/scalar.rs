@@ -1,10 +1,12 @@
 //! Fr <-> wire-byte conversions that run on every target. The pod parse
 //! helpers (`PodScalar::to_fr`, the `From` impls) are host-only.
 
+#[cfg(test)]
+use solana_bn254_batch_syscall::PodG2Point;
 use {
     ark_bn254::Fr,
     ark_ff::PrimeField,
-    solana_bn254_batch_syscall::{G1_BYTES, PodG1Point, PodG2Point, PodScalar, SCALAR_BYTES},
+    solana_bn254_batch_syscall::{G1_BYTES, PodG1Point, PodScalar, SCALAR_BYTES},
 };
 
 /// [1] G1 in wire bytes: x = 1, y = 2, big-endian.
@@ -17,6 +19,7 @@ pub(crate) const G1_GENERATOR: PodG1Point = {
 
 /// Canonical EIP-197 BN254 `[1]_2`, encoded as
 /// `x.c1 || x.c0 || y.c1 || y.c0`.
+#[cfg(test)]
 pub(crate) const G2_GENERATOR: PodG2Point = PodG2Point([
     0x19, 0x8e, 0x93, 0x93, 0x92, 0x0d, 0x48, 0x3a, 0x72, 0x60, 0xbf, 0xb7, 0x31, 0xfb, 0x5d, 0x25,
     0xf1, 0xaa, 0x49, 0x33, 0x35, 0xa9, 0xe7, 0x12, 0x97, 0xe4, 0x85, 0xb7, 0xae, 0xf3, 0x12, 0xc2,
@@ -31,10 +34,9 @@ pub(crate) const G2_GENERATOR: PodG2Point = PodG2Point([
 /// Parse a canonical big-endian scalar; `None` for a value >= r.
 pub(crate) fn fr_from_be(scalar: &PodScalar) -> Option<Fr> {
     let mut limbs = [0u64; 4];
-    for (i, limb) in limbs.iter_mut().enumerate() {
-        let start = SCALAR_BYTES - 8 * (i + 1);
+    for (limb, bytes) in limbs.iter_mut().zip(scalar.0.rchunks_exact(8)) {
         let mut chunk = [0u8; 8];
-        chunk.copy_from_slice(&scalar.0[start..start + 8]);
+        chunk.copy_from_slice(bytes);
         *limb = u64::from_be_bytes(chunk);
     }
     Fr::from_bigint(<Fr as PrimeField>::BigInt::new(limbs))
@@ -45,9 +47,8 @@ pub(crate) fn fr_from_be(scalar: &PodScalar) -> Option<Fr> {
 pub(crate) fn fr_to_pod(scalar: &Fr) -> PodScalar {
     let limbs = scalar.into_bigint().0;
     let mut out = [0u8; SCALAR_BYTES];
-    for (i, limb) in limbs.iter().enumerate() {
-        let start = SCALAR_BYTES - 8 * (i + 1);
-        out[start..start + 8].copy_from_slice(&limb.to_be_bytes());
+    for (limb, bytes) in limbs.iter().zip(out.rchunks_exact_mut(8)) {
+        bytes.copy_from_slice(&limb.to_be_bytes());
     }
     PodScalar(out)
 }

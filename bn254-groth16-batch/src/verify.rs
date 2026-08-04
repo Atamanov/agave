@@ -6,6 +6,7 @@ use {
     },
     ark_bn254::Fr,
     ark_ff::{BigInteger, PrimeField},
+    core::ops::{AddAssign, Mul, Neg},
     solana_bn254_batch_syscall::{
         G1_BYTES, G2_BYTES, PAIRING_MAX_PAIRS, PodG1G2Pair, PodG1Point, PodG2Point, PodScalar,
         alt_bn128_g1_msm, alt_bn128_pairing_check,
@@ -57,12 +58,6 @@ pub fn groth16_batch_verify(
     )?)
 }
 
-// a proof point must never be infinity; the syscall would silently skip it as
-// the identity factor
-fn is_infinity_g1(point: &PodG1Point) -> bool {
-    point.0 == [0u8; G1_BYTES]
-}
-
 /// One verification equation per proof plus one more for a committed proof's
 /// Pedersen proof of knowledge; the randomizer stream is indexed by equation.
 pub fn equation_count(proofs: &[Proof]) -> u64 {
@@ -102,7 +97,9 @@ pub fn validate_batch_shape(
             .ok_or(Groth16BatchError::UnknownVerifyingKey)?;
         if !key_seen[key_index] {
             key_seen[key_index] = true;
-            pair_count += if vk.key().pedersen.is_some() { 5 } else { 3 };
+            pair_count = pair_count
+                .checked_add(if vk.key().pedersen.is_some() { 5 } else { 3 })
+                .ok_or(Groth16BatchError::TooManyPairs)?;
             if pair_count > PAIRING_MAX_PAIRS {
                 return Err(Groth16BatchError::TooManyPairs);
             }
@@ -206,24 +203,31 @@ pub fn fold_pairs_prevalidated(
         let r_sum: Fr = key_proofs.iter().map(|(_, r, _)| *r).sum();
 
         // e(-[sum r_i] alpha, beta)
-        push_pair(msm(&[key.alpha_g1], &[-r_sum])?, key.beta_g2);
+        push_pair(msm(&[key.alpha_g1], &[r_sum.neg()])?, key.beta_g2);
 
         // e(-sum_i [r_i] L_i, gamma) with L_i = IC_0 + sum_j x_ij IC_j
         // (+ com_i on the committed rail), all folded into one MSM
         let mut gamma_points: Vec<PodG1Point> = vec![key.ic[0]];
-        let mut gamma_scalars: Vec<Fr> = vec![-r_sum];
+        let mut gamma_scalars: Vec<Fr> = vec![r_sum.neg()];
         for (j, ic) in key.ic.iter().enumerate().skip(1) {
             let mut coefficient = Fr::from(0u64);
+            let input_index = j
+                .checked_sub(1)
+                .ok_or(Groth16BatchError::InputCountMismatch)?;
             for (proof, r, _) in &key_proofs {
-                coefficient += *r * fr_from_be(&proof.public_inputs[j - 1])?;
+                let input = proof
+                    .public_inputs
+                    .get(input_index)
+                    .ok_or(Groth16BatchError::InputCountMismatch)?;
+                coefficient.add_assign(r.mul(&fr_from_be(input)?));
             }
             gamma_points.push(*ic);
-            gamma_scalars.push(-coefficient);
+            gamma_scalars.push(coefficient.neg());
         }
         for (proof, r, _) in &key_proofs {
             if let Some(commitment) = &proof.commitment {
                 gamma_points.push(commitment.com);
-                gamma_scalars.push(-*r);
+                gamma_scalars.push(r.neg());
             }
         }
         push_pair(msm(&gamma_points, &gamma_scalars)?, key.gamma_g2);
@@ -233,7 +237,7 @@ pub fn fold_pairs_prevalidated(
         let mut delta_scalars: Vec<Fr> = Vec::new();
         for (proof, r, _) in &key_proofs {
             delta_points.push(proof.c);
-            delta_scalars.push(-*r);
+            delta_scalars.push(r.neg());
         }
         push_pair(msm(&delta_points, &delta_scalars)?, key.delta_g2);
 
@@ -254,13 +258,18 @@ pub fn fold_pairs_prevalidated(
                 com_points.push(commitment.com);
                 com_scalars.push(s);
                 pok_points.push(commitment.pok);
-                pok_scalars.push(-s);
+                pok_scalars.push(s.neg());
             }
             push_pair(msm(&com_points, &com_scalars)?, pedersen.g2);
             push_pair(msm(&pok_points, &pok_scalars)?, pedersen.sigma_g2);
         }
     }
     Ok(pairs)
+}
+
+// The syscall skips infinity points as identity factors. Proof points cannot be infinity.
+fn is_infinity_g1(point: &PodG1Point) -> bool {
+    point.0 == [0u8; G1_BYTES]
 }
 
 fn msm(points: &[PodG1Point], scalars: &[Fr]) -> Result<PodG1Point, Groth16BatchError> {
@@ -282,10 +291,9 @@ fn fr_from_be(scalar: &PodScalar) -> Result<Fr, Groth16BatchError> {
     // Parse big-endian Fr without host-only PodScalar::to_fr (SBF-safe).
     use ark_ff::PrimeField;
     let mut limbs = [0u64; 4];
-    for (i, limb) in limbs.iter_mut().enumerate() {
-        let start = 32 - 8 * (i + 1);
+    for (limb, bytes) in limbs.iter_mut().zip(scalar.0.rchunks_exact(8)) {
         let mut chunk = [0u8; 8];
-        chunk.copy_from_slice(&scalar.0[start..start + 8]);
+        chunk.copy_from_slice(bytes);
         *limb = u64::from_be_bytes(chunk);
     }
     let bi = <Fr as PrimeField>::BigInt::new(limbs);
@@ -307,6 +315,7 @@ mod tests {
         ark_ec::{CurveGroup, PrimeGroup, pairing::Pairing},
         ark_ff::{Field, One, PrimeField, UniformRand},
         ark_std::rand::rngs::StdRng,
+        core::ops::{Add, Mul, Neg, Sub},
         solana_bn254_batch_syscall::AltBn128BatchError,
     };
 
@@ -358,7 +367,7 @@ mod tests {
         let (_, vks, mut proofs) = vanilla_batch(&mut rng, 4);
         // perturb one C: individually invalid, and the batch must see it
         let c = parse_g1(&proofs[2].c);
-        proofs[2].c = g1_bytes(&(c + g1(Fr::one())).into_affine());
+        proofs[2].c = g1_bytes(&c.add(g1(Fr::one())).into_affine());
         assert_eq!(verify(&vks, &proofs), Ok(false));
     }
 
@@ -373,8 +382,8 @@ mod tests {
         let d = g1(Fr::rand(&mut rng));
         let c0 = parse_g1(&proofs[0].c);
         let c1 = parse_g1(&proofs[1].c);
-        proofs[0].c = g1_bytes(&(c0 + d).into_affine());
-        proofs[1].c = g1_bytes(&(c1 - d).into_affine());
+        proofs[0].c = g1_bytes(&c0.add(d).into_affine());
+        proofs[1].c = g1_bytes(&c1.sub(d).into_affine());
 
         let ones = vec![Fr::one(); 2];
         let pairs = fold_pairs(&vks, &proofs, &ones).unwrap();
@@ -405,10 +414,10 @@ mod tests {
         let seed = derive_seed(Independent, &vks, &proofs);
         let randomizers = derive_randomizers(&seed, 6, Independent);
         let pairs = fold_pairs(&vks, &proofs, &randomizers).unwrap();
-        assert_eq!(pairs.len(), 3 + 5);
+        assert_eq!(pairs.len(), 8);
 
         // ... and a committed proof draws two distinct randomizers
-        assert_eq!(randomizers.len(), 2 * proofs.len());
+        assert_eq!(randomizers.len(), proofs.len().checked_mul(2).unwrap());
         assert_ne!(randomizers[0], randomizers[1]);
     }
 
@@ -457,7 +466,7 @@ mod tests {
             Err(Groth16BatchError::InfinityInProofPosition)
         );
 
-        let over_cap = vec![proofs[0].clone(); PAIRING_MAX_PAIRS + 1];
+        let over_cap = vec![proofs[0].clone(); PAIRING_MAX_PAIRS.checked_add(1).unwrap()];
         let randomizers = vec![Fr::one(); over_cap.len()];
         assert_eq!(
             fold_pairs(&vks, &over_cap, &randomizers),
@@ -472,7 +481,7 @@ mod tests {
         let seed = derive_seed(Independent, &vks, &proofs);
         let randomizers = derive_randomizers(&seed, 4, Independent);
         let pairs = fold_pairs(&vks, &proofs, &randomizers).unwrap();
-        assert_eq!(pairs.len(), 4 + 3);
+        assert_eq!(pairs.len(), 7);
     }
 
     #[test]
@@ -493,12 +502,12 @@ mod tests {
         let seed = derive_seed(Independent, &vks, &proofs);
         let randomizers = derive_randomizers(&seed, 4, Independent);
         let pairs = fold_pairs(&vks, &proofs, &randomizers).unwrap();
-        assert_eq!(pairs.len(), 3 + 3 + 5);
+        assert_eq!(pairs.len(), 11);
 
         // one bad proof anywhere fails the mixed batch
         let mut bad = proofs.clone();
         let c = parse_g1(&bad[1].c);
-        bad[1].c = g1_bytes(&(c + g1(Fr::one())).into_affine());
+        bad[1].c = g1_bytes(&c.add(g1(Fr::one())).into_affine());
         assert_eq!(verify(&vks, &bad), Ok(false));
     }
 
@@ -509,7 +518,7 @@ mod tests {
         let mut rng = rng();
         let (_, vks, mut proofs) = vanilla_batch(&mut rng, 2);
         let c = parse_g1(&proofs[0].c);
-        proofs[0].c = g1_bytes(&(c + g1(Fr::one())).into_affine());
+        proofs[0].c = g1_bytes(&c.add(g1(Fr::one())).into_affine());
         proofs[1] = proofs[0].clone();
         assert_eq!(verify(&vks, &proofs), Ok(false));
     }
@@ -524,19 +533,19 @@ mod tests {
         let (key, vks, proofs) = vanilla_batch(&mut rng, 1);
         let proof = &proofs[0];
         let x = super::fr_from_be(&proof.public_inputs[0]).unwrap();
-        let l = key.ic[0] + x * key.ic[1];
+        let l = key.ic[0].add(x.mul(key.ic[1]));
         let direct = Bn254::multi_pairing(
             [
                 parse_g1(&proof.a),
-                (-G1Projective::from(g1(key.alpha))).into_affine(),
-                (-G1Projective::from(g1(l))).into_affine(),
-                (-G1Projective::from(parse_g1(&proof.c))).into_affine(),
+                G1Projective::from(g1(key.alpha)).neg().into_affine(),
+                G1Projective::from(g1(l)).neg().into_affine(),
+                G1Projective::from(parse_g1(&proof.c)).neg().into_affine(),
             ],
             [
                 parse_g2(&proof.b),
-                (G2Projective::generator() * key.beta).into_affine(),
-                (G2Projective::generator() * key.gamma).into_affine(),
-                (G2Projective::generator() * key.delta).into_affine(),
+                G2Projective::generator().mul(key.beta).into_affine(),
+                G2Projective::generator().mul(key.gamma).into_affine(),
+                G2Projective::generator().mul(key.delta).into_affine(),
             ],
         );
         assert!(direct.0.is_one(), "fixture must verify directly");
@@ -545,7 +554,7 @@ mod tests {
         // and a directly-invalid proof is a false batch of one
         let mut bad = proofs.clone();
         let c = parse_g1(&bad[0].c);
-        bad[0].c = g1_bytes(&(c + g1(Fr::one())).into_affine());
+        bad[0].c = g1_bytes(&c.add(g1(Fr::one())).into_affine());
         assert_eq!(verify(&vks, &bad), Ok(false));
     }
 
@@ -561,14 +570,21 @@ mod tests {
         let a = parse_g1(&proofs[0].a);
         let b = parse_g2(&proofs[0].b);
         let c = parse_g1(&proofs[0].c);
-        let delta_g2 = G2Projective::generator() * key.delta;
+        let delta_g2 = G2Projective::generator().mul(key.delta);
 
         let original = proofs[0].clone();
-        proofs[0].a = g1_bytes(&(G1Projective::from(a) * s).into_affine());
-        proofs[0].b =
-            g2_bytes(&(G2Projective::from(b) * s.inverse().unwrap() + delta_g2 * t).into_affine());
-        proofs[0].c =
-            g1_bytes(&(G1Projective::from(c) + G1Projective::from(a) * (s * t)).into_affine());
+        proofs[0].a = g1_bytes(&G1Projective::from(a).mul(s).into_affine());
+        proofs[0].b = g2_bytes(
+            &G2Projective::from(b)
+                .mul(s.inverse().unwrap())
+                .add(delta_g2.mul(t))
+                .into_affine(),
+        );
+        proofs[0].c = g1_bytes(
+            &G1Projective::from(c)
+                .add(G1Projective::from(a).mul(s.mul(t)))
+                .into_affine(),
+        );
         assert_ne!(
             proofs[0], original,
             "the malleated proof has distinct bytes"
@@ -602,7 +618,7 @@ mod tests {
         // key list longer than the u16 count/index can frame, rejected before
         // hashing so the count prefix never truncates
         let padded: Vec<ValidatedVerifyingKey> = std::iter::repeat_with(|| vks[0].clone())
-            .take(usize::from(u16::MAX) + 1)
+            .take(usize::from(u16::MAX).checked_add(1).unwrap())
             .collect();
         assert_eq!(
             verify(&padded, &proofs),

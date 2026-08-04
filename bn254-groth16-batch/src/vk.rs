@@ -113,7 +113,7 @@ fn digest(key: &VerifyingKey) -> [u8; 32] {
     // never serialize to one byte string
     let tag = [u8::from(key.pedersen.is_some())];
     let ic_len = (key.ic.len() as u16).to_be_bytes();
-    let mut parts: Vec<&[u8]> = Vec::with_capacity(6 + key.ic.len() + 2);
+    let mut parts: Vec<&[u8]> = Vec::with_capacity(key.ic.len().saturating_add(8));
     parts.push(&tag);
     parts.push(&key.alpha_g1.0);
     parts.push(&key.beta_g2.0);

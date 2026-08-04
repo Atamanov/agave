@@ -38,6 +38,12 @@ pub fn mixed_batch_verify(
     if !has_groth16 && batch.plonk_groups.is_empty() {
         return Err(MixedBatchError::EmptyBatch);
     }
+    if batch.groth16_vks.len() > usize::from(u16::MAX) {
+        return Err(groth16::Groth16BatchError::TooManyVerifyingKeys.into());
+    }
+    if batch.plonk_groups.len() > usize::from(u16::MAX) {
+        return Err(MixedBatchError::TooManyPairs);
+    }
 
     // shape and canonicality checks over every section before any hashing
     if has_groth16 {
@@ -65,18 +71,26 @@ pub fn mixed_batch_verify(
         .iter()
         .map(|group| plonk::derive_seed(mode.plonk(), group.vk, group.proofs))
         .collect();
-    let seed = crate::transcript::derive_seed(mode, &groth16_seed, &plonk_seeds);
+    let seed = crate::transcript::derive_seed(mode, &groth16_seed, &plonk_seeds)
+        .ok_or(MixedBatchError::TooManyPairs)?;
 
     let groth16_equations = groth16::equation_count(batch.groth16_proofs);
-    let plonk_equations: u64 = batch
-        .plonk_groups
-        .iter()
-        .map(|group| group.proofs.len() as u64)
-        .sum();
-    let randomizers =
-        crate::transcript::derive_randomizers(&seed, groth16_equations + plonk_equations, mode);
-    let (groth16_randomizers, plonk_randomizers) =
-        randomizers.split_at(groth16_equations as usize);
+    let plonk_equations = batch.plonk_groups.iter().try_fold(0u64, |count, group| {
+        let group_count =
+            u64::try_from(group.proofs.len()).map_err(|_| MixedBatchError::TooManyPairs)?;
+        count
+            .checked_add(group_count)
+            .ok_or(MixedBatchError::TooManyPairs)
+    })?;
+    let equation_count = groth16_equations
+        .checked_add(plonk_equations)
+        .ok_or(MixedBatchError::TooManyPairs)?;
+    let randomizers = crate::transcript::derive_randomizers(&seed, equation_count, mode);
+    let groth16_equations =
+        usize::try_from(groth16_equations).map_err(|_| MixedBatchError::TooManyPairs)?;
+    let (groth16_randomizers, plonk_randomizers) = randomizers
+        .split_at_checked(groth16_equations)
+        .ok_or(MixedBatchError::TooManyPairs)?;
 
     let mut pairs: Vec<PodG1G2Pair> = if has_groth16 {
         groth16::fold_pairs_prevalidated(
@@ -107,22 +121,21 @@ fn folded_pair_count(batch: &MixedBatch) -> usize {
         let index = usize::from(proof.vk_index);
         if !seen[index] {
             seen[index] = true;
-            count = count.saturating_add(
-                if batch.groth16_vks[index].key().pedersen.is_some() {
-                    5
-                } else {
-                    3
-                },
-            );
+            count = count.saturating_add(if batch.groth16_vks[index].key().pedersen.is_some() {
+                5
+            } else {
+                3
+            });
         }
     }
 
     let mut distinct_srs = Vec::new();
     for group in batch.plonk_groups {
         let key = group.vk.key();
-        if !distinct_srs.iter().any(|(g2_gen, g2_tau)| {
-            *g2_gen == &key.g2_gen && *g2_tau == &key.g2_tau
-        }) {
+        if !distinct_srs
+            .iter()
+            .any(|(g2_gen, g2_tau)| *g2_gen == &key.g2_gen && *g2_tau == &key.g2_tau)
+        {
             distinct_srs.push((&key.g2_gen, &key.g2_tau));
             count = count.saturating_add(2);
         }
@@ -144,7 +157,9 @@ fn fold_plonk_tail(
     let mut offset = 0usize;
     for group in groups {
         offsets.push(offset);
-        offset += group.proofs.len();
+        offset = offset
+            .checked_add(group.proofs.len())
+            .ok_or(MixedBatchError::TooManyPairs)?;
     }
 
     let mut clusters: Vec<(usize, Vec<usize>)> = Vec::new();
@@ -168,16 +183,17 @@ fn fold_plonk_tail(
                 proofs: groups[index].proofs,
             })
             .collect();
-        let cluster_randomizers: Vec<Fr> = members
-            .iter()
-            .flat_map(|&index| {
-                randomizers[offsets[index]..offsets[index] + groups[index].proofs.len()]
-                    .iter()
-                    .copied()
-            })
-            .collect();
-        let (p, negated_q) =
-            plonk::fold_msms_prevalidated(&fold_groups, &cluster_randomizers)?;
+        let mut cluster_randomizers = Vec::new();
+        for &index in members {
+            let end = offsets[index]
+                .checked_add(groups[index].proofs.len())
+                .ok_or(MixedBatchError::TooManyPairs)?;
+            let group_randomizers = randomizers
+                .get(offsets[index]..end)
+                .ok_or(plonk::PlonkBatchError::RandomizerCountMismatch)?;
+            cluster_randomizers.extend_from_slice(group_randomizers);
+        }
+        let (p, negated_q) = plonk::fold_msms_prevalidated(&fold_groups, &cluster_randomizers)?;
         let srs = groups[*first].vk.key();
         pairs.push(PodG1G2Pair {
             g1: p,
@@ -199,6 +215,7 @@ mod tests {
         ark_ec::{AffineRepr, CurveGroup},
         ark_ff::{Field, One, UniformRand},
         ark_std::rand::rngs::StdRng,
+        core::ops::{Add, Mul},
         groth16::test_utils as g16_fix,
         plonk::test_support as plonk_fix,
         solana_bn254_batch_syscall::PodG1Point,
@@ -256,7 +273,11 @@ mod tests {
     fn shift_g1(point: &PodG1Point, scalar: Fr) -> PodG1Point {
         let affine = point.to_affine().unwrap();
         let generator = G1Projective::from(G1Affine::generator());
-        PodG1Point::from(&(G1Projective::from(affine) + generator * scalar).into_affine())
+        PodG1Point::from(
+            &G1Projective::from(affine)
+                .add(generator.mul(scalar))
+                .into_affine(),
+        )
     }
 
     #[test]
@@ -336,7 +357,11 @@ mod tests {
         let mut fixture = make_fixture(&mut rng, 2, 2);
         fixture.g16_proofs[1].c = shift_g1(&fixture.g16_proofs[1].c, Fr::one());
         let mut groups = Vec::new();
-        assert_eq!(verify(&fixture.batch(&mut groups)), Ok(false), "groth16 side");
+        assert_eq!(
+            verify(&fixture.batch(&mut groups)),
+            Ok(false),
+            "groth16 side"
+        );
 
         let mut fixture = make_fixture(&mut rng, 2, 2);
         fixture.plonk_proofs[0].grand_product =
@@ -361,7 +386,8 @@ mod tests {
         g16_proof.c = shift_g1(&g16_proof.c, Fr::one());
 
         let (trapdoor, plonk_vk) = plonk_fix::make_vk(&mut rng);
-        let mut plonk_proof = plonk_fix::make_proof(&trapdoor, Fr::rand(&mut rng), Fr::rand(&mut rng));
+        let mut plonk_proof =
+            plonk_fix::make_proof(&trapdoor, Fr::rand(&mut rng), Fr::rand(&mut rng));
         let zeta = plonk_fix::derive_inner(&plonk_vk, &plonk_proof).zeta;
         let s = g16_key.delta * (trapdoor.tau - zeta).inverse().unwrap();
         plonk_proof.opening = shift_g1(&plonk_proof.opening, s);
@@ -477,11 +503,9 @@ mod tests {
     fn test_seed_binds_sections_and_framing() {
         let g16_seed = [1u8; 32];
         let group_seeds = [[2u8; 32], [3u8; 32]];
-        let baseline = crate::transcript::derive_seed(
-            RandomizerMode::Independent,
-            &g16_seed,
-            &group_seeds,
-        );
+        let baseline =
+            crate::transcript::derive_seed(RandomizerMode::Independent, &g16_seed, &group_seeds);
+        assert!(baseline.is_some());
 
         // each section digest
         let mut mutated = g16_seed;
@@ -514,6 +538,16 @@ mod tests {
                 &group_seeds[..1],
             )
         );
+        let excessive_group_count = usize::from(u16::MAX).checked_add(1).unwrap();
+        let excessive_group_seeds = vec![[0u8; 32]; excessive_group_count];
+        assert_eq!(
+            crate::transcript::derive_seed(
+                RandomizerMode::Independent,
+                &g16_seed,
+                &excessive_group_seeds,
+            ),
+            None
+        );
 
         // the domain tag: cross-mode replay is cross-context replay, and the
         // mixed tags are distinct from both section tags
@@ -527,7 +561,10 @@ mod tests {
         ] {
             let tag = core::str::from_utf8(tag).unwrap();
             assert!(tag.contains(":v1:"), "tag must carry a version: {tag}");
-            assert!(tag.contains("mixed"), "tag must name the joint layer: {tag}");
+            assert!(
+                tag.contains("mixed"),
+                "tag must name the joint layer: {tag}"
+            );
         }
     }
 
@@ -553,5 +590,28 @@ mod tests {
         let mut groups = Vec::new();
         let batch = fixture.batch(&mut groups);
         assert_eq!(verify(&batch), Err(MixedBatchError::TooManyPairs));
+    }
+
+    #[test]
+    fn test_empty_groth16_section_checks_key_count_framing() {
+        let mut rng = rng();
+        let fixture = make_fixture(&mut rng, 0, 1);
+        let key_count = usize::from(u16::MAX).checked_add(1).unwrap();
+        let groth16_vks = vec![fixture.g16_vks[0].clone(); key_count];
+        let plonk_groups = [PlonkGroup {
+            vk: &fixture.plonk_vk,
+            proofs: &fixture.plonk_proofs,
+        }];
+        let batch = MixedBatch {
+            groth16_vks: &groth16_vks,
+            groth16_proofs: &[],
+            plonk_groups: &plonk_groups,
+        };
+        assert_eq!(
+            verify(&batch),
+            Err(MixedBatchError::Groth16(
+                groth16::Groth16BatchError::TooManyVerifyingKeys,
+            ))
+        );
     }
 }

@@ -4,6 +4,7 @@ use {
     crate::{PlonkBatchError, scalar::fr_from_be},
     ark_bn254::Fr,
     ark_ff::{FftField, Field, One, Zero},
+    core::ops::Div,
     solana_bn254_batch_syscall::{PodG1Point, PodG2Point, PodScalar},
     solana_keccak_hasher::hashv,
 };
@@ -121,13 +122,16 @@ impl VerifyingKey {
         // shifts is exactly k1^n != 1, k2^n != 1, and (k2 / k1)^n != 1. This
         // subsumes k1 != 1, k2 != 1, and k1 != k2.
         let one = Fr::one();
-        if k1.pow([n]) == one || k2.pow([n]) == one || (k2 / k1).pow([n]) == one {
+        if k1.pow([n]) == one || k2.pow([n]) == one || k2.div(k1).pow([n]) == one {
             return Err(invalid("coset shifts must give disjoint wire cosets"));
         }
 
         let omega = Fr::get_root_of_unity(n).ok_or(invalid("domain_size has no root of unity"))?;
         // self-check the derivation: omega must have order exactly n
-        if omega.pow([n]) != one || omega.pow([n / 2]) == one {
+        let half_n = n
+            .checked_div(2)
+            .ok_or(invalid("domain_size must be nonzero"))?;
+        if omega.pow([n]) != one || omega.pow([half_n]) == one {
             return Err(invalid("derived omega does not have order domain_size"));
         }
 

@@ -1,10 +1,9 @@
 #![cfg(feature = "agave-unstable-api")]
-#![allow(clippy::arithmetic_side_effects)]
 
 //! Reference batched KZG PLONK verifier over the alt_bn128 batch syscalls.
 //!
 //! Reference for on-chain programs: the inner and outer transcript derivations
-//! in [`transcript`], the per-proof reduction in [`reduce`], the batch folding
+//! in [`transcript`], the per-proof reduction, the batch folding
 //! in [`verify`], and the verifying-key validation in [`vk`] together define
 //! the batch layer. A batch of n proofs under one verifying
 //! key reduces to per-proof inner transcripts, outer randomizers over the
@@ -26,6 +25,7 @@ pub use crate::{
 use solana_bn254_batch_syscall::AltBn128BatchError;
 
 pub(crate) mod proof;
+#[cfg(test)]
 pub(crate) mod reduce;
 pub(crate) mod scalar;
 pub(crate) mod transcript;

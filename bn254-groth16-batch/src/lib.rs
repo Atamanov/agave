@@ -1,5 +1,4 @@
 #![cfg(feature = "agave-unstable-api")]
-#![allow(clippy::arithmetic_side_effects)]
 
 //! Reference batched Groth16 verifier over the alt_bn128 batch syscalls.
 //!
@@ -65,8 +64,20 @@ pub mod test_utils {
         ark_ec::{AffineRepr, CurveGroup, PrimeGroup},
         ark_ff::{BigInteger, Field, PrimeField, UniformRand, Zero},
         ark_std::rand::{SeedableRng, rngs::StdRng},
+        core::ops::{AddAssign, Mul, Sub},
         solana_bn254_batch_syscall::{PodG1Point, PodG2Point, PodScalar},
     };
+
+    /// Trapdoor scalars for synthetic fixtures. Tests use them to solve the
+    /// verification equation without a circuit compiler.
+    pub struct TrapdoorKey {
+        pub alpha: Fr,
+        pub beta: Fr,
+        pub gamma: Fr,
+        pub delta: Fr,
+        pub ic: Vec<Fr>,
+        pub sigma: Option<Fr>,
+    }
 
     pub fn rng() -> StdRng {
         StdRng::seed_from_u64(0x6702716)
@@ -99,11 +110,11 @@ pub mod test_utils {
     }
 
     pub fn g1(scalar: Fr) -> G1Affine {
-        (G1Projective::generator() * scalar).into_affine()
+        G1Projective::generator().mul(scalar).into_affine()
     }
 
     pub fn g2(scalar: Fr) -> G2Affine {
-        (G2Projective::generator() * scalar).into_affine()
+        G2Projective::generator().mul(scalar).into_affine()
     }
 
     pub fn non_subgroup_g2() -> G2Affine {
@@ -117,18 +128,6 @@ pub mod test_utils {
             }
         }
         unreachable!("BN254 twist has non-subgroup points with small x");
-    }
-
-    /// Trapdoor scalars behind a synthetic verifying key: with them, valid
-    /// proofs are solvable directly from the verification equation, so no
-    /// circuit compiler is needed to build fixtures.
-    pub struct TrapdoorKey {
-        pub alpha: Fr,
-        pub beta: Fr,
-        pub gamma: Fr,
-        pub delta: Fr,
-        pub ic: Vec<Fr>,
-        pub sigma: Option<Fr>,
     }
 
     pub fn make_vk(
@@ -162,25 +161,29 @@ pub mod test_utils {
     /// included on the committed rail), e(A,B) = e(alpha,beta) e(L,gamma)
     /// e(C,delta) holds iff c = (ab - alpha beta - l gamma) / delta.
     pub fn make_proof(rng: &mut StdRng, key: &TrapdoorKey, vk_index: u16, inputs: &[Fr]) -> Proof {
-        assert_eq!(inputs.len() + 1, key.ic.len());
+        assert_eq!(inputs.len().checked_add(1).unwrap(), key.ic.len());
         let a = Fr::rand(rng);
         let b = Fr::rand(rng);
         let mut l = key.ic[0];
         for (x, ic) in inputs.iter().zip(key.ic.iter().skip(1)) {
-            l += *x * ic;
+            l.add_assign(x.mul(ic));
         }
         let commitment = key.sigma.map(|sigma| {
             let t = Fr::rand(rng);
-            l += t;
+            l.add_assign(t);
             (
                 t,
                 ProofCommitment {
                     com: g1_bytes(&g1(t)),
-                    pok: g1_bytes(&g1(t * sigma.inverse().unwrap())),
+                    pok: g1_bytes(&g1(t.mul(sigma.inverse().unwrap()))),
                 },
             )
         });
-        let c = (a * b - key.alpha * key.beta - l * key.gamma) * key.delta.inverse().unwrap();
+        let c = a
+            .mul(b)
+            .sub(key.alpha.mul(key.beta))
+            .sub(l.mul(key.gamma))
+            .mul(key.delta.inverse().unwrap());
         Proof {
             vk_index,
             a: g1_bytes(&g1(a)),

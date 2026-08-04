@@ -1,6 +1,5 @@
 use {
-    ark_bn254::Fr,
-    solana_bn254_groth16_batch as groth16, solana_bn254_plonk_batch as plonk,
+    ark_bn254::Fr, solana_bn254_groth16_batch as groth16, solana_bn254_plonk_batch as plonk,
     solana_keccak_hasher::hashv,
 };
 
@@ -42,20 +41,21 @@ impl RandomizerMode {
 /// batch (keys, counts, proof bytes, statements) under its scheme tag, so
 /// absorbing the digests binds everything the verdict depends on, with the
 /// section boundary fixed by position.
+/// Returns `None` if the group count does not fit the protocol `u16` field.
 pub(crate) fn derive_seed(
     mode: RandomizerMode,
     groth16_seed: &[u8; 32],
     plonk_group_seeds: &[[u8; 32]],
-) -> [u8; 32] {
-    let group_count = (plonk_group_seeds.len() as u16).to_be_bytes();
-    let mut parts: Vec<&[u8]> = Vec::with_capacity(3 + plonk_group_seeds.len());
+) -> Option<[u8; 32]> {
+    let group_count = u16::try_from(plonk_group_seeds.len()).ok()?.to_be_bytes();
+    let mut parts: Vec<&[u8]> = Vec::with_capacity(plonk_group_seeds.len().saturating_add(3));
     parts.push(mode.domain_tag());
     parts.push(groth16_seed);
     parts.push(&group_count);
     for seed in plonk_group_seeds {
         parts.push(seed);
     }
-    hashv(&parts).to_bytes()
+    Some(hashv(&parts).to_bytes())
 }
 
 /// One stream over every verification equation: Groth16 equations first in
@@ -67,6 +67,6 @@ pub(crate) fn derive_randomizers(
     num_equations: u64,
     mode: RandomizerMode,
 ) -> Vec<Fr> {
-    // byte-identical derivation; reuse the groth16 implementation
+    // Mixed and Groth16 use the same randomizer draw construction.
     groth16::derive_randomizers(seed, num_equations, mode.groth16())
 }

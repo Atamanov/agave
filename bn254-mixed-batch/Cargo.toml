@@ -11,15 +11,47 @@ edition = { workspace = true }
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+no-default-features = true
+features = ["agave-unstable-api", "backend-b1-arkworks"]
 
 [features]
-agave-unstable-api = []
+default = ["backend-b1-arkworks"]
+agave-unstable-api = [
+    "solana-bn254-batch-syscall/agave-unstable-api",
+    "solana-bn254-groth16-batch/agave-unstable-api",
+    "solana-bn254-plonk-batch/agave-unstable-api",
+]
+backend-b1-arkworks = [
+    "solana-bn254-batch-syscall/backend-b1-arkworks",
+    "solana-bn254-groth16-batch/backend-b1-arkworks",
+    "solana-bn254-plonk-batch/backend-b1-arkworks",
+]
+backend-b2-arkworks-optimized = [
+    "solana-bn254-batch-syscall/backend-b2-arkworks-optimized",
+    "solana-bn254-groth16-batch/backend-b2-arkworks-optimized",
+    "solana-bn254-plonk-batch/backend-b2-arkworks-optimized",
+]
+backend-b3-mcl = [
+    "solana-bn254-batch-syscall/backend-b3-mcl",
+    "solana-bn254-groth16-batch/backend-b3-mcl",
+    "solana-bn254-plonk-batch/backend-b3-mcl",
+]
+backend-b4-helios = [
+    "solana-bn254-batch-syscall/backend-b4-helios",
+    "solana-bn254-groth16-batch/backend-b4-helios",
+    "solana-bn254-plonk-batch/backend-b4-helios",
+]
+backend-b5-helios-ifma = [
+    "solana-bn254-batch-syscall/backend-b5-helios-ifma",
+    "solana-bn254-groth16-batch/backend-b5-helios-ifma",
+    "solana-bn254-plonk-batch/backend-b5-helios-ifma",
+]
 
 [dependencies]
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
 solana-bn254-batch-syscall = { workspace = true }
-solana-bn254-groth16-batch = { workspace = true }
-solana-bn254-plonk-batch = { workspace = true }
+solana-bn254-groth16-batch = { workspace = true, default-features = false }
+solana-bn254-plonk-batch = { workspace = true, default-features = false }
 solana-keccak-hasher = { workspace = true, features = ["sha3"] }
 thiserror = { workspace = true }
 

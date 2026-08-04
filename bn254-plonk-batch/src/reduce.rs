@@ -22,6 +22,7 @@ use {
     },
     ark_bn254::Fr,
     ark_ff::{Field, One, Zero},
+    core::ops::{Add, Mul, Neg, Sub},
     solana_bn254_batch_syscall::{PodScalar, alt_bn128_fr_lincomb},
 };
 
@@ -68,7 +69,7 @@ pub(crate) struct ReducedProof {
 /// code proves totality, not typicality, so the case is a deterministic
 /// reject before any division.
 pub(crate) fn vanishing_eval(domain_size: u64, zeta: Fr) -> Result<Fr, PlonkBatchError> {
-    let vanishing = zeta.pow([domain_size]) - Fr::one();
+    let vanishing = zeta.pow([domain_size]).sub(Fr::one());
     if vanishing.is_zero() {
         return Err(PlonkBatchError::ZetaInEvaluationDomain);
     }
@@ -89,19 +90,30 @@ pub(crate) fn lagrange_denominators(vk: &ValidatedVerifyingKey, zeta: Fr, count:
     let mut root = Fr::one();
     (0..count)
         .map(|_| {
-            let denominator = n * (zeta - root);
-            root *= vk.omega();
+            let denominator = mul(n, sub(zeta, root));
+            root = mul(root, vk.omega());
             denominator
         })
         .collect()
 }
 
-// inline(never): an inlined Montgomery multiply is ~1.4k SBF instructions;
-// reduce's straight-line chain of ~40 keeps each one a call so the function
-// stays inside the +-32k-instruction branch range and the 4KiB stack
+// Each inlined Montgomery multiplication adds approximately 1,400 SBF instructions.
+// This call boundary keeps `reduce` within the branch range and stack limit.
 #[inline(never)]
 fn mul(a: Fr, b: Fr) -> Fr {
-    a * b
+    a.mul(b)
+}
+
+fn add(a: Fr, b: Fr) -> Fr {
+    a.add(b)
+}
+
+fn sub(a: Fr, b: Fr) -> Fr {
+    a.sub(b)
+}
+
+fn neg(value: Fr) -> Fr {
+    value.neg()
 }
 
 /// Verifier rounds 6-12 as coefficients. `denominator_inverses` are
@@ -145,7 +157,7 @@ pub(crate) fn reduce(
             &proof.public_inputs,
             &lagrange_pods,
         )?;
-        -fr_from_be(&combined).ok_or(PlonkBatchError::NonCanonicalScalar)?
+        neg(fr_from_be(&combined).ok_or(PlonkBatchError::NonCanonicalScalar)?)
     };
 
     let evaluations = &proof.evaluations;
@@ -158,34 +170,40 @@ pub(crate) fn reduce(
     let zw_ev = fr_from_be(&evaluations.z_omega).ok_or_else(non_canonical)?;
 
     let alpha_sq = mul(alpha, alpha);
-    let perm_a = a_ev + mul(beta, s1_ev) + gamma;
-    let perm_b = b_ev + mul(beta, s2_ev) + gamma;
+    let perm_a = add(add(a_ev, mul(beta, s1_ev)), gamma);
+    let perm_b = add(add(b_ev, mul(beta, s2_ev)), gamma);
 
     // round 8: r0 = PI(zeta) - L_1(zeta) alpha^2
     //               - alpha (a + beta s1 + gamma)(b + beta s2 + gamma)(c + gamma) z_omega
-    let r0 = pi
-        - mul(l1, alpha_sq)
-        - mul(
-            mul(mul(mul(alpha, perm_a), perm_b), c_ev + gamma),
+    let r0 = sub(
+        sub(pi, mul(l1, alpha_sq)),
+        mul(
+            mul(mul(mul(alpha, perm_a), perm_b), add(c_ev, gamma)),
             zw_ev,
-        );
+        ),
+    );
 
     // round 9: coefficients of the linearized commitment D; the +u on [z]
     // and the u z_omega in E fold the shifted opening into the same check
     let beta_zeta = mul(beta, zeta);
-    let z = mul(
-        mul(
-            mul(alpha, a_ev + beta_zeta + gamma),
-            b_ev + mul(vk.k1(), beta_zeta) + gamma,
+    let z = add(
+        add(
+            mul(
+                mul(
+                    mul(alpha, add(add(a_ev, beta_zeta), gamma)),
+                    add(add(b_ev, mul(vk.k1(), beta_zeta)), gamma),
+                ),
+                add(add(c_ev, mul(vk.k2(), beta_zeta)), gamma),
+            ),
+            mul(l1, alpha_sq),
         ),
-        c_ev + mul(vk.k2(), beta_zeta) + gamma,
-    ) + mul(l1, alpha_sq)
-        + u;
-    let s_sigma3 = -mul(mul(mul(alpha, beta), zw_ev), mul(perm_a, perm_b));
-    let zeta_n = vanishing + Fr::one();
-    let t_lo = -vanishing;
-    let t_mid = -mul(vanishing, zeta_n);
-    let t_hi = -mul(vanishing, mul(zeta_n, zeta_n));
+        u,
+    );
+    let s_sigma3 = neg(mul(mul(mul(alpha, beta), zw_ev), mul(perm_a, perm_b)));
+    let zeta_n = add(vanishing, Fr::one());
+    let t_lo = neg(vanishing);
+    let t_mid = neg(mul(vanishing, zeta_n));
+    let t_hi = neg(mul(vanishing, mul(zeta_n, zeta_n)));
 
     // round 10: F adds v powers on the wire and permutation commitments
     let v2 = mul(v, v);
@@ -195,13 +213,17 @@ pub(crate) fn reduce(
 
     // round 11: E collects the expected openings on the generator; Q = ... - E,
     // so the generator coefficient is minus the E scalar
-    let e_scalar = -r0
-        + mul(v, a_ev)
-        + mul(v2, b_ev)
-        + mul(v3, c_ev)
-        + mul(v4, s1_ev)
-        + mul(v5, s2_ev)
-        + mul(u, zw_ev);
+    let e_scalar = [
+        neg(r0),
+        mul(v, a_ev),
+        mul(v2, b_ev),
+        mul(v3, c_ev),
+        mul(v4, s1_ev),
+        mul(v5, s2_ev),
+        mul(u, zw_ev),
+    ]
+    .into_iter()
+    .fold(Fr::zero(), add);
 
     Ok(ReducedProof {
         vk_coeffs: VkCoeffs {
@@ -223,7 +245,7 @@ pub(crate) fn reduce(
         c: v3,
         w_zeta_q: zeta,
         w_zeta_omega_q: mul(mul(u, zeta), vk.omega()),
-        generator: -e_scalar,
+        generator: neg(e_scalar),
         w_zeta_p: Fr::one(),
         w_zeta_omega_p: u,
     })
@@ -245,7 +267,7 @@ mod tests {
         let mut rng = rng();
         let (_, vk) = make_vk(&mut rng);
         let omega = vk.omega();
-        for power in [0u64, 1, 5, DOMAIN_SIZE - 1] {
+        for power in [0u64, 1, 5, DOMAIN_SIZE.checked_sub(1).unwrap()] {
             assert_eq!(
                 vanishing_eval(DOMAIN_SIZE, omega.pow([power])),
                 Err(PlonkBatchError::ZetaInEvaluationDomain),
@@ -270,11 +292,15 @@ mod tests {
         let mut sum = Fr::zero();
         let mut root = Fr::one();
         for (i, denominator) in denominators.iter().enumerate() {
-            let direct =
-                root * vanishing * (Fr::from(DOMAIN_SIZE) * (zeta - root)).inverse().unwrap();
-            assert_eq!(*denominator * direct, root * vanishing, "i = {i}");
-            sum += direct;
-            root *= vk.omega();
+            let direct = mul(
+                mul(root, vanishing),
+                mul(Fr::from(DOMAIN_SIZE), sub(zeta, root))
+                    .inverse()
+                    .unwrap(),
+            );
+            assert_eq!(mul(*denominator, direct), mul(root, vanishing), "i = {i}");
+            sum = add(sum, direct);
+            root = mul(root, vk.omega());
         }
         assert!(sum.is_one(), "Lagrange basis must sum to one");
     }

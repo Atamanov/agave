@@ -1,5 +1,4 @@
 #![cfg(feature = "agave-unstable-api")]
-#![allow(clippy::arithmetic_side_effects)]
 
 //! Reference mixed Groth16 + PLONK batch verifier over the alt_bn128 batch
 //! syscalls.
