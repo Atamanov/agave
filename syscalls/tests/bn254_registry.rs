@@ -1,6 +1,6 @@
 #![cfg(all(
     feature = "agave-unstable-api",
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -311,7 +311,7 @@ fn hot_registered_pairing_observer_proves_no_subgroup_or_line_preparation() {
     );
 }
 
-#[cfg(all(feature = "research-observer", feature = "backend-b5-helios-ifma"))]
+#[cfg(all(feature = "research-observer", feature = "backend-b5-helius-ifma"))]
 #[test]
 fn mixed_five_plus_three_registry_call_attests_ifma_dispatch() {
     use solana_bn254_batch_syscall::research_observer;

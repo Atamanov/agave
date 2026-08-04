@@ -10,10 +10,10 @@ edition = { workspace = true }
 publish = false
 
 [features]
-# A backend must be selected: the registry surface it needs is gated on Helios.
-default = ["backend-b4-helios"]
-backend-b4-helios = ["solana-bn254-decision-litesvm/backend-b4-helios"]
-backend-b5-helios-ifma = ["solana-bn254-decision-litesvm/backend-b5-helios-ifma"]
+# A backend must be selected: the registry surface it needs is gated on Helius.
+default = ["backend-b4-helius"]
+backend-b4-helius = ["solana-bn254-decision-litesvm/backend-b4-helius"]
+backend-b5-helius-ifma = ["solana-bn254-decision-litesvm/backend-b5-helius-ifma"]
 
 [dependencies]
 hex = { workspace = true }

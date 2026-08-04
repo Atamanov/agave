@@ -155,7 +155,7 @@ fn complete_tariff() -> ExactShapeTariff {
         tariff_id: "unit-test-exact-shapes".to_owned(),
         coverage: "exact_no_interpolation".to_owned(),
         b5_attestation: B5Attestation {
-            backend_id: "helios-b5".to_owned(),
+            backend_id: "helius-b5".to_owned(),
             architecture: "x86_64".to_owned(),
             cpu_model: "AMD Ryzen Threadripper PRO 9975WX".to_owned(),
             logical_cpu_count: 64,
@@ -425,8 +425,8 @@ fn campaign_template_requests_all_exact_fresh_pricing_jobs() {
         })
         .collect();
     assert_eq!(identities.len(), 8);
-    assert!(identities.contains(&("b5", "backend-b5-helios-ifma", "batch")));
-    assert!(identities.contains(&("batch_fp12_b5", "backend-b5-helios-ifma", "batch")));
+    assert!(identities.contains(&("b5", "backend-b5-helius-ifma", "batch")));
+    assert!(identities.contains(&("batch_fp12_b5", "backend-b5-helius-ifma", "batch")));
     assert!(identities.contains(&("current_fp12", "backend-b1-arkworks", "batch")));
 }
 

@@ -16,8 +16,8 @@ agave-unstable-api = []
 backend-b1-arkworks = ["solana-syscalls/backend-b1-arkworks"]
 backend-b2-arkworks-optimized = ["solana-syscalls/backend-b2-arkworks-optimized"]
 backend-b3-mcl = ["solana-syscalls/backend-b3-mcl"]
-backend-b4-helios = ["solana-syscalls/backend-b4-helios"]
-backend-b5-helios-ifma = ["solana-syscalls/backend-b5-helios-ifma"]
+backend-b4-helius = ["solana-syscalls/backend-b4-helius"]
+backend-b5-helius-ifma = ["solana-syscalls/backend-b5-helius-ifma"]
 
 [dependencies]
 agave-feature-set = { workspace = true }

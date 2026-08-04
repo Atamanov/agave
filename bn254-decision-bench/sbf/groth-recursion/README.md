@@ -23,19 +23,19 @@ cargo test --manifest-path bn254-decision-bench/sbf/groth-recursion/Cargo.toml \
 
 RUSTFLAGS='-C target-cpu=native' cargo test \
   --manifest-path bn254-decision-bench/sbf/groth-recursion/Cargo.toml \
-  --no-default-features --features backend-b5-helios-ifma,research-observer --lib
+  --no-default-features --features backend-b5-helius-ifma,research-observer --lib
 
 cargo build-sbf \
   --manifest-path bn254-decision-bench/sbf/groth-recursion/Cargo.toml \
-  --no-default-features --features bpf-entrypoint,backend-b5-helios-ifma
+  --no-default-features --features bpf-entrypoint,backend-b5-helius-ifma
 
 RUSTFLAGS='-C target-cpu=native' \
-  HELIOS_GROTH_RECURSION_SBF_PATH="$PWD/bn254-decision-bench/sbf/groth-recursion/target/deploy/bn254_decision_groth_recursion_guest.so" \
+  HELIUS_GROTH_RECURSION_SBF_PATH="$PWD/bn254-decision-bench/sbf/groth-recursion/target/deploy/bn254_decision_groth_recursion_guest.so" \
   cargo test --manifest-path bn254-decision-bench/sbf/groth-recursion/Cargo.toml \
-  --no-default-features --features backend-b5-helios-ifma,research-observer \
+  --no-default-features --features backend-b5-helius-ifma,research-observer \
   --test sbf -- --ignored --exact sbf_accepts_real_zolana_outer_proofs_and_rejects_mutations
 ```
 
 An independently copied identical compact bundle may be selected with
-`HELIOS_GROTH_RECURSION_FIXTURE_ROOT=/absolute/path`; the hardcoded seals still
+`HELIUS_GROTH_RECURSION_FIXTURE_ROOT=/absolute/path`; the hardcoded seals still
 have to match.

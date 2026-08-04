@@ -10,14 +10,14 @@ edition = { workspace = true }
 publish = false
 
 [features]
-default = ["backend-b4-helios"]
-backend-b4-helios = [
-    "solana-bn254-batch-syscall/backend-b4-helios",
-    "solana-syscalls/backend-b4-helios",
+default = ["backend-b4-helius"]
+backend-b4-helius = [
+    "solana-bn254-batch-syscall/backend-b4-helius",
+    "solana-syscalls/backend-b4-helius",
 ]
-backend-b5-helios-ifma = [
-    "solana-bn254-batch-syscall/backend-b5-helios-ifma",
-    "solana-syscalls/backend-b5-helios-ifma",
+backend-b5-helius-ifma = [
+    "solana-bn254-batch-syscall/backend-b5-helius-ifma",
+    "solana-syscalls/backend-b5-helius-ifma",
 ]
 
 [dependencies]

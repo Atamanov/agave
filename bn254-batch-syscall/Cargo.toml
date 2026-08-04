@@ -22,8 +22,8 @@ research-observer = []
 backend-b1-arkworks = []
 backend-b2-arkworks-optimized = []
 backend-b3-mcl = ["dep:solana-bn254-mcl-sys"]
-backend-b4-helios = ["dep:helios-bn254", "helios-bn254/std", "helios-bn254/deny-ifma"]
-backend-b5-helios-ifma = ["dep:helios-bn254", "helios-bn254/std", "helios-bn254/force-ifma"]
+backend-b4-helius = ["dep:helius-bn254", "helius-bn254/std", "helius-bn254/deny-ifma"]
+backend-b5-helius-ifma = ["dep:helius-bn254", "helius-bn254/std", "helius-bn254/force-ifma"]
 
 [dependencies]
 bytemuck = { workspace = true, features = ["min_const_generics"] }
@@ -34,7 +34,7 @@ thiserror = { workspace = true }
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
 ark-ec = { version = "0.5", default-features = false }
 ark-ff = { version = "0.5", default-features = false }
-helios-bn254 = { workspace = true, optional = true }
+helius-bn254 = { workspace = true, optional = true }
 solana-bn254-mcl-sys = { workspace = true, optional = true }
 solana-keccak-hasher = { workspace = true, features = ["sha3"] }
 

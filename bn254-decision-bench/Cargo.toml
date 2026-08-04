@@ -27,8 +27,8 @@ core-probe-observer = ["core-probe", "solana-bn254-batch-syscall/research-observ
 backend-b1-arkworks = ["core-probe", "solana-bn254-batch-syscall/backend-b1-arkworks", "solana-syscalls/backend-b1-arkworks"]
 backend-b2-arkworks-optimized = ["core-probe", "solana-bn254-batch-syscall/backend-b2-arkworks-optimized", "solana-syscalls/backend-b2-arkworks-optimized"]
 backend-b3-mcl = ["core-probe", "solana-bn254-batch-syscall/backend-b3-mcl", "solana-syscalls/backend-b3-mcl"]
-backend-b4-helios = ["core-probe", "solana-bn254-batch-syscall/backend-b4-helios", "solana-syscalls/backend-b4-helios"]
-backend-b5-helios-ifma = ["core-probe", "solana-bn254-batch-syscall/backend-b5-helios-ifma", "solana-syscalls/backend-b5-helios-ifma"]
+backend-b4-helius = ["core-probe", "solana-bn254-batch-syscall/backend-b4-helius", "solana-syscalls/backend-b4-helius"]
+backend-b5-helius-ifma = ["core-probe", "solana-bn254-batch-syscall/backend-b5-helius-ifma", "solana-syscalls/backend-b5-helius-ifma"]
 
 [dependencies]
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"], optional = true }

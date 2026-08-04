@@ -50,7 +50,7 @@ pub use crate::{
 
 #[cfg(all(
     not(target_os = "solana"),
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -65,12 +65,12 @@ pub use crate::backend::{FinalExponentiationProbe, FinalExponentiationResult, G2
 
 #[cfg(all(
     not(target_os = "solana"),
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
 ))]
-pub const PREPARED_G2_BYTES: usize = helios_bn254::PREPARED_G2_BYTES;
+pub const PREPARED_G2_BYTES: usize = helius_bn254::PREPARED_G2_BYTES;
 
 #[cfg(not(target_os = "solana"))]
 pub fn alt_bn128_g1_msm(
@@ -97,12 +97,12 @@ pub fn alt_bn128_pairing_check(
         let nonidentity = research_observer::nonidentity_pairs(pairs);
         research_observer::record_pairing_check(pairs.len(), nonidentity);
         #[cfg(all(
-            any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+            any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
             not(feature = "backend-b1-arkworks"),
             not(feature = "backend-b2-arkworks-optimized"),
             not(feature = "backend-b3-mcl")
         ))]
-        if helios_bn254::selects_ifma_batch8(nonidentity) {
+        if helius_bn254::selects_ifma_batch8(nonidentity) {
             research_observer::record_ifma_batch8_dispatch();
         }
     }
@@ -120,12 +120,12 @@ pub fn alt_bn128_pairing_map(
         let nonidentity = research_observer::nonidentity_pairs(pairs);
         research_observer::record_pairing_map(pairs.len(), nonidentity);
         #[cfg(all(
-            any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+            any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
             not(feature = "backend-b1-arkworks"),
             not(feature = "backend-b2-arkworks-optimized"),
             not(feature = "backend-b3-mcl")
         ))]
-        if helios_bn254::selects_ifma_batch8(nonidentity) {
+        if helius_bn254::selects_ifma_batch8(nonidentity) {
             research_observer::record_ifma_batch8_dispatch();
         }
     }
@@ -134,7 +134,7 @@ pub fn alt_bn128_pairing_map(
 
 #[cfg(all(
     not(target_os = "solana"),
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -153,7 +153,7 @@ pub fn pairing_check_registered(
                 .count(),
         );
         research_observer::record_registered(full.len(), registered.len(), nonidentity);
-        if helios_bn254::selects_ifma_batch8(nonidentity) {
+        if helius_bn254::selects_ifma_batch8(nonidentity) {
             research_observer::record_ifma_mixed_batch8_dispatch();
         }
     }
@@ -162,7 +162,7 @@ pub fn pairing_check_registered(
 
 #[cfg(all(
     not(target_os = "solana"),
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -178,7 +178,7 @@ pub fn validate_registered_g2(source: &PodG2Point) -> Result<RegisteredG2, AltBn
 
 #[cfg(all(
     not(target_os = "solana"),
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -250,20 +250,20 @@ pub fn encode_final_exponentiation_result(
 /// Compile-time attestation for the linked B5 AVX-512 IFMA artifact.
 #[cfg(all(
     not(target_os = "solana"),
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
 ))]
 pub const fn selected_backend_compiled_with_avx512_ifma() -> bool {
-    helios_bn254::AVX512_IFMA_COMPILED
+    helius_bn254::AVX512_IFMA_COMPILED
 }
 
-/// Compile-time attestation is false for every non-Helios backend.
+/// Compile-time attestation is false for every non-Helius backend.
 #[cfg(all(
     not(target_os = "solana"),
     not(all(
-        any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+        any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
         not(feature = "backend-b1-arkworks"),
         not(feature = "backend-b2-arkworks-optimized"),
         not(feature = "backend-b3-mcl")
@@ -284,8 +284,8 @@ pub(crate) mod encoding;
         not(any(
             feature = "backend-b2-arkworks-optimized",
             feature = "backend-b3-mcl",
-            feature = "backend-b4-helios",
-            feature = "backend-b5-helios-ifma"
+            feature = "backend-b4-helius",
+            feature = "backend-b5-helius-ifma"
         )),
         test
     )
@@ -298,8 +298,8 @@ pub(crate) mod fr;
         not(any(
             feature = "backend-b2-arkworks-optimized",
             feature = "backend-b3-mcl",
-            feature = "backend-b4-helios",
-            feature = "backend-b5-helios-ifma"
+            feature = "backend-b4-helius",
+            feature = "backend-b5-helius-ifma"
         )),
         test
     )
@@ -312,8 +312,8 @@ pub(crate) mod msm;
         not(any(
             feature = "backend-b2-arkworks-optimized",
             feature = "backend-b3-mcl",
-            feature = "backend-b4-helios",
-            feature = "backend-b5-helios-ifma"
+            feature = "backend-b4-helius",
+            feature = "backend-b5-helius-ifma"
         )),
         test
     )

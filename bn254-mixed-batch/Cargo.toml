@@ -36,15 +36,15 @@ backend-b3-mcl = [
     "solana-bn254-groth16-batch/backend-b3-mcl",
     "solana-bn254-plonk-batch/backend-b3-mcl",
 ]
-backend-b4-helios = [
-    "solana-bn254-batch-syscall/backend-b4-helios",
-    "solana-bn254-groth16-batch/backend-b4-helios",
-    "solana-bn254-plonk-batch/backend-b4-helios",
+backend-b4-helius = [
+    "solana-bn254-batch-syscall/backend-b4-helius",
+    "solana-bn254-groth16-batch/backend-b4-helius",
+    "solana-bn254-plonk-batch/backend-b4-helius",
 ]
-backend-b5-helios-ifma = [
-    "solana-bn254-batch-syscall/backend-b5-helios-ifma",
-    "solana-bn254-groth16-batch/backend-b5-helios-ifma",
-    "solana-bn254-plonk-batch/backend-b5-helios-ifma",
+backend-b5-helius-ifma = [
+    "solana-bn254-batch-syscall/backend-b5-helius-ifma",
+    "solana-bn254-groth16-batch/backend-b5-helius-ifma",
+    "solana-bn254-plonk-batch/backend-b5-helius-ifma",
 ]
 
 [dependencies]

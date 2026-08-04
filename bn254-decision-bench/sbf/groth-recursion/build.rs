@@ -42,8 +42,8 @@ fn read_sealed(path: &std::path::Path, expected: &str) -> Vec<u8> {
 
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
-    println!("cargo:rerun-if-env-changed=HELIOS_GROTH_RECURSION_FIXTURE_ROOT");
-    let fixtures = env::var_os("HELIOS_GROTH_RECURSION_FIXTURE_ROOT")
+    println!("cargo:rerun-if-env-changed=HELIUS_GROTH_RECURSION_FIXTURE_ROOT");
+    let fixtures = env::var_os("HELIUS_GROTH_RECURSION_FIXTURE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             manifest.join("../../../research/bn254-decision-table-v2-20260804/recursion-v2")
@@ -55,17 +55,17 @@ fn main() {
         std::str::from_utf8(&compact_manifest).expect("compact recursion manifest UTF-8");
     assert!(
         compact_manifest
-            .contains("\"schema\": \"helios.bn254-real-zolana-recursion-runtime-compact.v4\"")
+            .contains("\"schema\": \"helius.bn254-real-zolana-recursion-runtime-compact.v4\"")
     );
     assert!(compact_manifest.contains(SOURCE_ZOLANA_MANIFEST_SHA256));
-    println!("cargo:rustc-env=HELIOS_GROTH_RECURSION_MANIFEST_SHA256={COMPACT_MANIFEST_SHA256}");
+    println!("cargo:rustc-env=HELIUS_GROTH_RECURSION_MANIFEST_SHA256={COMPACT_MANIFEST_SHA256}");
 
     for fixture in [
         Fixture {
             directory: "n2-distinct",
             symbol: "VK_G2",
-            vk_digest_environment: "HELIOS_GROTH_G2_OUTER_VK_SHA256",
-            payload_digest_environment: "HELIOS_GROTH_G2_PAYLOAD_SHA256",
+            vk_digest_environment: "HELIUS_GROTH_G2_OUTER_VK_SHA256",
+            payload_digest_environment: "HELIUS_GROTH_G2_PAYLOAD_SHA256",
             expected_vk_sha256: "2a6fda1a4be28af88044e181e59c4ea0cc23ba5f1e35c0958baaa504174ee416",
             expected_payload_sha256: "6901c6d6d4575d24ad987caf3defa82113cbccf36794a9a4d69d02810ee15278",
             expected_generation_sha256: "3bfd41011e55dd5227b0d3f5a65d4c5b51def5c4a887dfb59d0cca9e7a5f0e44",
@@ -78,8 +78,8 @@ fn main() {
         Fixture {
             directory: "n3-distinct",
             symbol: "VK_G3",
-            vk_digest_environment: "HELIOS_GROTH_G3_OUTER_VK_SHA256",
-            payload_digest_environment: "HELIOS_GROTH_G3_PAYLOAD_SHA256",
+            vk_digest_environment: "HELIUS_GROTH_G3_OUTER_VK_SHA256",
+            payload_digest_environment: "HELIUS_GROTH_G3_PAYLOAD_SHA256",
             expected_vk_sha256: "ef5786d016d67e10bc5290ff62de65a18b67ca3a1627022a11a4eed557f8cc8a",
             expected_payload_sha256: "58d8db8c9f035386f1419b35c230c3589a62f47e89bf370cc734880f2487c79f",
             expected_generation_sha256: "9b40c2f47d6dec8e3041025f704cf689f2fef669c0601849f4c4ff27113e8020",
@@ -92,8 +92,8 @@ fn main() {
         Fixture {
             directory: "n5-same",
             symbol: "VK_G5",
-            vk_digest_environment: "HELIOS_GROTH_G5_OUTER_VK_SHA256",
-            payload_digest_environment: "HELIOS_GROTH_G5_PAYLOAD_SHA256",
+            vk_digest_environment: "HELIUS_GROTH_G5_OUTER_VK_SHA256",
+            payload_digest_environment: "HELIUS_GROTH_G5_PAYLOAD_SHA256",
             expected_vk_sha256: "a265ecefc4f5da6c9b9c433b4ab083462908749784692cd74b807fd59621f9f4",
             expected_payload_sha256: "4e949e0ec63f00197ce059a7be6b7a9aaac8fe8be08907f37f86e7c5aeb1dc86",
             expected_generation_sha256: "85889924d9d3f764697d38dadb266c24b5e585797a09b4843a01706aa74e31c2",
@@ -111,7 +111,7 @@ fn main() {
         );
         let generation = std::str::from_utf8(&generation).expect("generation JSON UTF-8");
         assert!(generation.contains(
-            "\"schema\": \"helios.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
+            "\"schema\": \"helius.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
         ));
         assert!(generation.contains(&format!("\"n_inner_proofs\": {}", fixture.expected_n)));
         assert!(generation.contains(&format!(

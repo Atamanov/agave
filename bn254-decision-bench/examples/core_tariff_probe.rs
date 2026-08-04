@@ -15,7 +15,7 @@ use {
 #[cfg(feature = "core-probe-observer")]
 use solana_bn254_batch_syscall::research_observer;
 
-#[cfg(any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"))]
+#[cfg(any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"))]
 use {
     solana_bn254_batch_syscall::{PodG1RegisteredG2Pair, PodTrustedGtExponent},
     solana_pubkey::Pubkey,
@@ -91,10 +91,10 @@ fn backend_feature() -> &'static str {
         "backend-b2-arkworks-optimized"
     } else if cfg!(feature = "backend-b3-mcl") {
         "backend-b3-mcl"
-    } else if cfg!(feature = "backend-b4-helios") {
-        "backend-b4-helios"
-    } else if cfg!(feature = "backend-b5-helios-ifma") {
-        "backend-b5-helios-ifma"
+    } else if cfg!(feature = "backend-b4-helius") {
+        "backend-b4-helius"
+    } else if cfg!(feature = "backend-b5-helius-ifma") {
+        "backend-b5-helius-ifma"
     } else {
         unreachable!("core-probe requires exactly one backend feature")
     }
@@ -402,15 +402,15 @@ fn run_batch(args: &Args) -> Result<Vec<TariffEntry>, String> {
         },
     ));
 
-    #[cfg(any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"))]
-    add_helios_registry_entries(args, &mut entries)?;
+    #[cfg(any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"))]
+    add_helius_registry_entries(args, &mut entries)?;
     Ok(entries)
 }
 
-#[cfg(all(feature = "backend-b5-helios-ifma", feature = "core-probe-observer"))]
+#[cfg(all(feature = "backend-b5-helius-ifma", feature = "core-probe-observer"))]
 fn b5_dispatch_attestation() -> Result<(bool, u64, u64), String> {
     if !solana_bn254_batch_syscall::selected_backend_compiled_with_avx512_ifma() {
-        return Err("B5 executable was not compiled with the Helios AVX512IFMA cfg".to_owned());
+        return Err("B5 executable was not compiled with the Helius AVX512IFMA cfg".to_owned());
     }
     let pairs = pairing_fixture(8);
     research_observer::reset();
@@ -464,24 +464,24 @@ fn b5_dispatch_attestation() -> Result<(bool, u64, u64), String> {
 }
 
 #[cfg(all(
-    feature = "backend-b5-helios-ifma",
+    feature = "backend-b5-helius-ifma",
     not(feature = "core-probe-observer")
 ))]
 fn b5_dispatch_attestation() -> Result<(bool, u64, u64), String> {
     let compiled = solana_bn254_batch_syscall::selected_backend_compiled_with_avx512_ifma();
     if !compiled {
-        return Err("B5 executable was not compiled with the Helios AVX512IFMA cfg".to_owned());
+        return Err("B5 executable was not compiled with the Helius AVX512IFMA cfg".to_owned());
     }
     Ok((compiled, 0, 0))
 }
 
-#[cfg(not(feature = "backend-b5-helios-ifma"))]
+#[cfg(not(feature = "backend-b5-helius-ifma"))]
 fn b5_dispatch_attestation() -> Result<(bool, u64, u64), String> {
     Ok((false, 0, 0))
 }
 
-#[cfg(any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"))]
-fn add_helios_registry_entries(args: &Args, entries: &mut Vec<TariffEntry>) -> Result<(), String> {
+#[cfg(any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"))]
+fn add_helius_registry_entries(args: &Args, entries: &mut Vec<TariffEntry>) -> Result<(), String> {
     for (full_count, registered_count) in [(5usize, 3usize), (2, 6), (3, 9), (0, 2)] {
         let total = full_count.saturating_add(registered_count);
         let q_scalars: Vec<_> = (0..total)

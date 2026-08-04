@@ -47,7 +47,7 @@ members = [
     "geyser-plugin-manager",
     "gossip",
     "gossip-cli",
-    "helios-bn254",
+    "helius-bn254",
     "install",
     "io-uring",
     "keygen",
@@ -272,7 +272,7 @@ gag = "1.0.0"
 gethostname = "1.1.0"
 goauth = "0.17.0"
 group = "0.13.0"
-helios-bn254 = { path = "helios-bn254", version = "0.1.0", default-features = false }
+helius-bn254 = { path = "helius-bn254", version = "0.1.0", default-features = false }
 hex = "0.4.3"
 hex-literal = "1.1.0"
 hidapi = { version = "2.6.5", default-features = false }

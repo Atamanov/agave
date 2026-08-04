@@ -11,11 +11,11 @@ work="$(mktemp -d)"
 trap 'kill "${vpid:-}" 2>/dev/null || true; rm -rf "$work"' EXIT
 
 case "$backend" in
-  backend-b1-arkworks | backend-b2-arkworks-optimized | backend-b3-mcl | backend-b4-helios | backend-b5-helios-ifma) ;;
+  backend-b1-arkworks | backend-b2-arkworks-optimized | backend-b3-mcl | backend-b4-helius | backend-b5-helius-ifma) ;;
   *) echo "unsupported BN254_BACKEND: $backend" >&2; exit 2 ;;
 esac
 
-if [[ "$backend" == backend-b5-helios-ifma ]]; then
+if [[ "$backend" == backend-b5-helius-ifma ]]; then
   if [[ "$(uname -m)" != x86_64 ]] || ! {
     { [[ -r /proc/cpuinfo ]] && grep -qiw avx512ifma /proc/cpuinfo; } ||
       { command -v sysctl >/dev/null 2>&1 && sysctl -a 2>/dev/null | grep -iw avx512ifma >/dev/null; }

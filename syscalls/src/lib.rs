@@ -59,7 +59,7 @@ use {
 };
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -540,7 +540,7 @@ pub fn create_program_runtime_environment(
         SyscallAltBn128PairingMap
     )?;
     #[cfg(all(
-        any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+        any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
         not(feature = "backend-b1-arkworks"),
         not(feature = "backend-b2-arkworks-optimized"),
         not(feature = "backend-b3-mcl")
@@ -3049,7 +3049,7 @@ declare_builtin_function!(
 );
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -3191,7 +3191,7 @@ declare_builtin_function!(
 );
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -3306,7 +3306,7 @@ declare_builtin_function!(
 );
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")

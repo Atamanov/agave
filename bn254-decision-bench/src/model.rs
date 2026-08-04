@@ -3,7 +3,7 @@ use {
     std::collections::BTreeMap,
 };
 
-pub const SCHEMA_PREFIX: &str = "helios.bn254-decision-table-v3";
+pub const SCHEMA_PREFIX: &str = "helius.bn254-decision-table-v3";
 pub const MAX_TRANSACTION_CU: u64 = 1_400_000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -99,8 +99,8 @@ impl ColumnId {
         match self {
             Self::Current => "agave-current",
             Self::CurrentFp12 => "current-fp12",
-            Self::BatchFp12B5 => "helios-b5-fp12",
-            Self::BatchB5 | Self::RegistryB5 | Self::RecursionB5 => "helios-b5",
+            Self::BatchFp12B5 => "helius-b5-fp12",
+            Self::BatchB5 | Self::RegistryB5 | Self::RecursionB5 => "helius-b5",
         }
     }
 

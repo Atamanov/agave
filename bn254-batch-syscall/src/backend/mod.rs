@@ -13,20 +13,20 @@ pub(crate) mod b2;
 ))]
 pub(crate) mod b3;
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
 ))]
-pub(crate) mod helios;
+pub(crate) mod helius;
 
 #[cfg(any(
     feature = "backend-b1-arkworks",
     not(any(
         feature = "backend-b2-arkworks-optimized",
         feature = "backend-b3-mcl",
-        feature = "backend-b4-helios",
-        feature = "backend-b5-helios-ifma"
+        feature = "backend-b4-helius",
+        feature = "backend-b5-helius-ifma"
     ))
 ))]
 mod probes_b1;
@@ -36,8 +36,8 @@ mod probes_b1;
     not(any(
         feature = "backend-b2-arkworks-optimized",
         feature = "backend-b3-mcl",
-        feature = "backend-b4-helios",
-        feature = "backend-b5-helios-ifma"
+        feature = "backend-b4-helius",
+        feature = "backend-b5-helius-ifma"
     ))
 ))]
 pub use crate::{
@@ -51,8 +51,8 @@ pub use crate::{
     not(any(
         feature = "backend-b2-arkworks-optimized",
         feature = "backend-b3-mcl",
-        feature = "backend-b4-helios",
-        feature = "backend-b5-helios-ifma"
+        feature = "backend-b4-helius",
+        feature = "backend-b5-helius-ifma"
     ))
 ))]
 pub use probes_b1::{
@@ -85,12 +85,12 @@ pub use b3::{
 };
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
 ))]
-pub use helios::{
+pub use helius::{
     FinalExponentiationProbe, FinalExponentiationResult, G2SubgroupProbe, RegisteredG2,
     RegisteredG2Pair, TrustedGt, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
     alt_bn128_pairing_check, alt_bn128_pairing_map, encode_final_exponentiation_result,

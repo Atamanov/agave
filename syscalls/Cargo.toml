@@ -21,8 +21,8 @@ research-observer = ["solana-bn254-batch-syscall/research-observer"]
 backend-b1-arkworks = ["solana-bn254-batch-syscall/backend-b1-arkworks"]
 backend-b2-arkworks-optimized = ["solana-bn254-batch-syscall/backend-b2-arkworks-optimized"]
 backend-b3-mcl = ["solana-bn254-batch-syscall/backend-b3-mcl"]
-backend-b4-helios = ["solana-bn254-batch-syscall/backend-b4-helios"]
-backend-b5-helios-ifma = ["solana-bn254-batch-syscall/backend-b5-helios-ifma"]
+backend-b4-helius = ["solana-bn254-batch-syscall/backend-b4-helius"]
+backend-b5-helius-ifma = ["solana-bn254-batch-syscall/backend-b5-helius-ifma"]
 metrics = ["solana-program-runtime/metrics"]
 shuttle-test = [
     "solana-program-runtime/shuttle-test",

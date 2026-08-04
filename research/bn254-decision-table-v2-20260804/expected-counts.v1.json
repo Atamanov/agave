@@ -1,5 +1,5 @@
 {
-  "schema": "helios.bn254-decision-table-v3.expected-counts.v1",
+  "schema": "helius.bn254-decision-table-v3.expected-counts.v1",
   "contract_id": "bn254-corrected-six-columns-counts-20260805",
   "cells": [
     {

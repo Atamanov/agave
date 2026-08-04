@@ -352,10 +352,10 @@ const REQUIRED_FRESH_TARIFF_JOBS: &[(&str, &str, &str)] = &[
     ("b1", "backend-b1-arkworks", "batch"),
     ("b2", "backend-b2-arkworks-optimized", "batch"),
     ("b3", "backend-b3-mcl", "batch"),
-    ("b4", "backend-b4-helios", "batch"),
-    ("b5", "backend-b5-helios-ifma", "batch"),
+    ("b4", "backend-b4-helius", "batch"),
+    ("b5", "backend-b5-helius-ifma", "batch"),
     ("current_fp12", "backend-b1-arkworks", "batch"),
-    ("batch_fp12_b5", "backend-b5-helios-ifma", "batch"),
+    ("batch_fp12_b5", "backend-b5-helius-ifma", "batch"),
 ];
 
 fn validate_fresh_tariff_jobs(jobs: &[TariffProbeJob]) -> Result<(), Error> {
@@ -506,7 +506,7 @@ fn measure_fresh_tariff(
     }
 
     let temp_root = env::temp_dir().join(format!(
-        "helios-bn254-decision-tariff-{}",
+        "helius-bn254-decision-tariff-{}",
         std::process::id()
     ));
     if temp_root.exists() {
@@ -521,7 +521,7 @@ fn measure_fresh_tariff(
     })?;
 
     let mut features: BTreeSet<_> = jobs.iter().map(|job| job.backend_feature.clone()).collect();
-    const B5_OBSERVER_FEATURES: &str = "backend-b5-helios-ifma,core-probe-observer";
+    const B5_OBSERVER_FEATURES: &str = "backend-b5-helius-ifma,core-probe-observer";
     let inherited_rustflags = env::var("RUSTFLAGS").unwrap_or_default();
     let native_rustflags = format!("{inherited_rustflags} -C target-cpu=native");
     let b5_rustflags = format!("{native_rustflags} -C target-feature=+avx512f,+avx512ifma");
@@ -549,7 +549,7 @@ fn measure_fresh_tariff(
             .stderr(Stdio::piped());
         command.env(
             "RUSTFLAGS",
-            if feature.contains("backend-b5-helios-ifma") {
+            if feature.contains("backend-b5-helius-ifma") {
                 &b5_rustflags
             } else {
                 &native_rustflags
@@ -627,7 +627,7 @@ fn measure_fresh_tariff(
                 job.pricing_id
             )));
         }
-        if job.backend_feature == "backend-b5-helios-ifma" {
+        if job.backend_feature == "backend-b5-helius-ifma" {
             if !fragment.avx512ifma_compiled
                 || fragment.ifma_batch8_dispatches != 0
                 || fragment.ifma_mixed_batch8_dispatches != 0
@@ -646,7 +646,7 @@ fn measure_fresh_tariff(
                 job.pricing_id
             )));
         }
-        let build_rustflags = if job.backend_feature == "backend-b5-helios-ifma" {
+        let build_rustflags = if job.backend_feature == "backend-b5-helius-ifma" {
             &b5_rustflags
         } else {
             &native_rustflags
@@ -691,7 +691,7 @@ fn measure_fresh_tariff(
         })?;
     if attestation_fragment.schema != format!("{SCHEMA_PREFIX}.core-tariff-fragment.v1")
         || attestation_fragment.pricing_id != "b5_dispatch_attestation"
-        || attestation_fragment.backend_feature != "backend-b5-helios-ifma"
+        || attestation_fragment.backend_feature != "backend-b5-helius-ifma"
         || attestation_fragment.host_architecture != host.architecture
         || !attestation_fragment.avx512ifma_compiled
         || attestation_fragment.ifma_batch8_dispatches == 0
@@ -709,7 +709,7 @@ fn measure_fresh_tariff(
         tariff_id: tariff_id.to_owned(),
         coverage: "exact_no_interpolation".to_owned(),
         b5_attestation: B5Attestation {
-            backend_id: "helios-b5".to_owned(),
+            backend_id: "helius-b5".to_owned(),
             architecture: host.architecture.clone(),
             cpu_model: host.cpu_model.clone(),
             logical_cpu_count: host.logical_cpu_count,
@@ -726,7 +726,7 @@ fn measure_fresh_tariff(
             cu_conversion_assumption:
                 "Agave conventional conversion assumption: 1 CU = 33ns; not validator-fleet calibrated"
                     .to_owned(),
-            timing_executable_sha256: sha256_hex(&read_bytes(&binaries["backend-b5-helios-ifma"])?),
+            timing_executable_sha256: sha256_hex(&read_bytes(&binaries["backend-b5-helius-ifma"])?),
             observer_executable_sha256: sha256_hex(&read_bytes(attestation_binary)?),
             source_revision: source_revision.to_owned(),
             captured_at_utc: captured_at_utc.to_owned(),
@@ -1349,12 +1349,12 @@ fn build_in_tree_litesvm_executor(
         SbfBuild {
             label: "Groth16 recursion decision guest",
             manifest: "bn254-decision-bench/sbf/groth-recursion/Cargo.toml",
-            features: Some("bpf-entrypoint,backend-b5-helios-ifma"),
+            features: Some("bpf-entrypoint,backend-b5-helius-ifma"),
         },
         SbfBuild {
             label: "PLONK recursion decision guest",
             manifest: "bn254-decision-bench/sbf/plonk-recursion/Cargo.toml",
-            features: Some("bpf-entrypoint,backend-b5-helios-ifma"),
+            features: Some("bpf-entrypoint,backend-b5-helius-ifma"),
         },
     ];
     for build in builds {
@@ -1425,7 +1425,7 @@ fn build_in_tree_litesvm_executor(
             "solana-bn254-decision-collector",
             "--no-default-features",
             "--features",
-            "backend-b5-helios-ifma",
+            "backend-b5-helius-ifma",
         ])
         .env("CARGO_TARGET_DIR", &collector_target)
         .env("RUSTFLAGS", rustflags)

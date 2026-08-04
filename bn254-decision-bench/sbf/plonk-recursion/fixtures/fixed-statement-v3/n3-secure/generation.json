@@ -1,5 +1,5 @@
 {
-  "schema": "helios.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3",
+  "schema": "helius.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3",
   "n_proofs": 3,
   "ordered_public_inputs": 6,
   "fixture_sha256": [
@@ -82,7 +82,7 @@
   "application_public_inputs_sha256": "76b6e060ed90f488c113139378ddc8a636b7716f86cdda818df628fb7a5722e0",
   "outer_vk_sha256": "32cf5f71d4d462e930745414a7fea30cb19cd0a42a3242225b3aba8e6bf70d81",
   "outer_ccs_sha256": "9eb9ec2fc2156d33b45f45964a74abc00868400246a375c8f6f9676437163810",
-  "outer_fixture_dir": "/root/helios/plonk-recursion-v3/n3-secure",
+  "outer_fixture_dir": "/root/helius/plonk-recursion-v3/n3-secure",
   "export_mode": "secure-os-random",
   "entropy_source": "crypto/rand.Reader delegated to the operating-system CSPRNG",
   "entropy_audit_scope": "all entropy returned to gnark Groth16 Setup and Prove; only byte count and one-way SHA-256 commitment retained",

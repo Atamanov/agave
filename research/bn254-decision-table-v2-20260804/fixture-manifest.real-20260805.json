@@ -1,5 +1,5 @@
 {
-  "schema": "helios.bn254-decision-table-v3.fixture-manifest.v1",
+  "schema": "helius.bn254-decision-table-v3.fixture-manifest.v1",
   "fixture_set_id": "zolana-real-groth16-plus-canonical-plonk-v3-20260805",
   "artifact_root": "fixtures-v3",
   "provenance": {

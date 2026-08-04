@@ -212,7 +212,7 @@ pub fn observed_standalone_probe_calls() -> (u64, u64) {
 }
 
 /// Number of successful pairing calls whose validated nonidentity shape
-/// selected the linked Helios AVX-512 IFMA batch8 path.
+/// selected the linked Helius AVX-512 IFMA batch8 path.
 pub fn observed_ifma_batch8_dispatches() -> u64 {
     IFMA_BATCH8_DISPATCHES.load(Ordering::SeqCst)
 }
@@ -260,7 +260,7 @@ pub(crate) fn record_pairing_map(pairs: usize, nonidentity: usize) {
 }
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -279,7 +279,7 @@ pub fn record_registry_init(g2: usize, gt: usize) {
 }
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -290,7 +290,7 @@ pub(crate) fn record_registry_g2_preparation() {
 }
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -319,7 +319,7 @@ pub(crate) fn record_final_exp_probe() {
 }
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")
@@ -329,7 +329,7 @@ pub(crate) fn record_ifma_batch8_dispatch() {
 }
 
 #[cfg(all(
-    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
     not(feature = "backend-b2-arkworks-optimized"),
     not(feature = "backend-b3-mcl")

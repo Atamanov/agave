@@ -1,5 +1,5 @@
 {
-  "schema": "helios.bn254-decision-table-v3.campaign.v1",
+  "schema": "helius.bn254-decision-table-v3.campaign.v1",
   "campaign_id": "bn254-decision-table-v3-REPLACE",
   "mode": "final",
   "fixture_manifest": "fixture-manifest.real-20260805.json",
@@ -34,12 +34,12 @@
       },
       {
         "pricing_id": "b4",
-        "backend_feature": "backend-b4-helios",
+        "backend_feature": "backend-b4-helius",
         "profile": "batch"
       },
       {
         "pricing_id": "b5",
-        "backend_feature": "backend-b5-helios-ifma",
+        "backend_feature": "backend-b5-helius-ifma",
         "profile": "batch"
       },
       {
@@ -49,7 +49,7 @@
       },
       {
         "pricing_id": "batch_fp12_b5",
-        "backend_feature": "backend-b5-helios-ifma",
+        "backend_feature": "backend-b5-helius-ifma",
         "profile": "batch"
       }
     ]

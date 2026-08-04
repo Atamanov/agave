@@ -93,7 +93,7 @@ fn main() {
         })
     };
     let manifest = json!({
-        "schema": "helios.bn254-decision.plonk-direct-test-exceptions.v1",
+        "schema": "helius.bn254-decision.plonk-direct-test-exceptions.v1",
         "semantics": "canonical committed Zolana snarkjs mul1/mul2/mul3 test exceptions; not fresh or production proofs",
         "source_set_sha256": export.source_set_sha256,
         "rows": {

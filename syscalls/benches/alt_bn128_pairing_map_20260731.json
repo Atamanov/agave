@@ -1,5 +1,5 @@
 {
-  "schema": "helios.bn254-pairing-map-native-benchmark.v1",
+  "schema": "helius.bn254-pairing-map-native-benchmark.v1",
   "date": "2026-07-31",
   "source_base_commit": "248ed94accbbeadbd8d8b4c7ef2cf94d8aeb7a26",
   "candidate_commit": "ed4e4e57f47dc789a49e40eb9ef63f8b80bd04cc",

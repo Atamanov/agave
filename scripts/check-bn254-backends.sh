@@ -10,13 +10,13 @@ backends=(
     backend-b1-arkworks
     backend-b2-arkworks-optimized
     backend-b3-mcl
-    backend-b4-helios
+    backend-b4-helius
 )
 b5_compile_only=false
 
 case "$#:${1:-}" in
     0:) ;;
-    1:--include-b5) backends+=(backend-b5-helios-ifma) ;;
+    1:--include-b5) backends+=(backend-b5-helius-ifma) ;;
     *)
         echo "usage: $0 [--include-b5]" >&2
         exit 2
@@ -25,7 +25,7 @@ esac
 
 for backend in "${backends[@]}"; do
     echo "checking $backend"
-    if [[ "$backend" == backend-b5-helios-ifma ]]; then
+    if [[ "$backend" == backend-b5-helius-ifma ]]; then
         if [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] && \
             grep -qiw avx512ifma /proc/cpuinfo
         then
@@ -64,14 +64,14 @@ cargo test \
 conflicts=(
     "backend-b1-arkworks,backend-b2-arkworks-optimized"
     "backend-b1-arkworks,backend-b3-mcl"
-    "backend-b1-arkworks,backend-b4-helios"
-    "backend-b1-arkworks,backend-b5-helios-ifma"
+    "backend-b1-arkworks,backend-b4-helius"
+    "backend-b1-arkworks,backend-b5-helius-ifma"
     "backend-b2-arkworks-optimized,backend-b3-mcl"
-    "backend-b2-arkworks-optimized,backend-b4-helios"
-    "backend-b2-arkworks-optimized,backend-b5-helios-ifma"
-    "backend-b3-mcl,backend-b4-helios"
-    "backend-b3-mcl,backend-b5-helios-ifma"
-    "backend-b4-helios,backend-b5-helios-ifma"
+    "backend-b2-arkworks-optimized,backend-b4-helius"
+    "backend-b2-arkworks-optimized,backend-b5-helius-ifma"
+    "backend-b3-mcl,backend-b4-helius"
+    "backend-b3-mcl,backend-b5-helius-ifma"
+    "backend-b4-helius,backend-b5-helius-ifma"
 )
 
 conflict_log="$(mktemp)"

@@ -17,8 +17,8 @@ struct Fixture {
 
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
-    println!("cargo:rerun-if-env-changed=HELIOS_PLONK_RECURSION_FIXTURE_ROOT");
-    let fixtures = env::var_os("HELIOS_PLONK_RECURSION_FIXTURE_ROOT")
+    println!("cargo:rerun-if-env-changed=HELIUS_PLONK_RECURSION_FIXTURE_ROOT");
+    let fixtures = env::var_os("HELIUS_PLONK_RECURSION_FIXTURE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| manifest.join("fixtures/fixed-statement-v3"));
     let output = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
@@ -27,7 +27,7 @@ fn main() {
         Fixture {
             directory: "n2-secure",
             symbol: "VK_N2_SECURE",
-            digest_environment: "HELIOS_PLONK_N2_OUTER_VK_SHA256",
+            digest_environment: "HELIUS_PLONK_N2_OUTER_VK_SHA256",
             expected_generation_sha256: "4594d021e9d9d8a138dc445b3561a304ec5f99e5c571940b262fa2a5f52db581",
             expected_payload_sha256: "5a381a6ae9c930e49b0a758324331c87594abefbb496fe159f1a176f3327f4f3",
             expected_vk_sha256: "0ab7160a5df8ac73ee8e0bdfb4e30867ff5219e1de484d41f78a89c10b311ed7",
@@ -38,7 +38,7 @@ fn main() {
         Fixture {
             directory: "n3-secure",
             symbol: "VK_N3_SECURE",
-            digest_environment: "HELIOS_PLONK_N3_OUTER_VK_SHA256",
+            digest_environment: "HELIUS_PLONK_N3_OUTER_VK_SHA256",
             expected_generation_sha256: "b36fa21be193f3eaa382d8cdb968aad6f332d96a6ecb7c49e0cd2454447f65b8",
             expected_payload_sha256: "58e22abcfc95483ae180e081f44d32cd5b6b898d092571b14a1c5f5caa9cf4ca",
             expected_vk_sha256: "32cf5f71d4d462e930745414a7fea30cb19cd0a42a3242225b3aba8e6bf70d81",
@@ -67,7 +67,7 @@ fn main() {
             .unwrap_or_else(|error| panic!("decode {}: {error}", generation_path.display()));
         assert!(
             generation.contains(
-                "\"schema\": \"helios.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3\""
+                "\"schema\": \"helius.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3\""
             ),
             "{} is not the fixed-statement-v3 PLONK recursion export",
             generation_path.display()

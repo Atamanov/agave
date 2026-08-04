@@ -14,7 +14,7 @@ use {
 };
 
 fn fixture_root() -> PathBuf {
-    std::env::var_os("HELIOS_PLONK_RECURSION_FIXTURE_ROOT")
+    std::env::var_os("HELIUS_PLONK_RECURSION_FIXTURE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/fixed-statement-v3")
@@ -73,11 +73,11 @@ fn execute(so: &[u8], data: Vec<u8>) -> Result<u64, String> {
 }
 
 #[test]
-#[ignore = "set HELIOS_PLONK_RECURSION_SBF_PATH to the freshly built deploy .so"]
+#[ignore = "set HELIUS_PLONK_RECURSION_SBF_PATH to the freshly built deploy .so"]
 fn sbf_accepts_exact_v3_and_rejects_commitment_mutation() {
     let so_path = PathBuf::from(
-        std::env::var_os("HELIOS_PLONK_RECURSION_SBF_PATH")
-            .expect("HELIOS_PLONK_RECURSION_SBF_PATH"),
+        std::env::var_os("HELIUS_PLONK_RECURSION_SBF_PATH")
+            .expect("HELIUS_PLONK_RECURSION_SBF_PATH"),
     );
     let so = std::fs::read(&so_path).expect("read fresh PLONK recursion SBF");
 

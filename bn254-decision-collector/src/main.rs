@@ -214,7 +214,7 @@ fn plonk_metadata(dir: &Path, proof_count: u32) -> Result<PlonkMaterial, String>
     }
     let metadata: PlonkFixtureMetadata = serde_json::from_slice(&metadata_bytes)
         .map_err(|error| format!("PLONK exporter manifest JSON: {error}"))?;
-    if metadata.schema != "helios.bn254-decision.plonk-direct-test-exceptions.v1"
+    if metadata.schema != "helius.bn254-decision.plonk-direct-test-exceptions.v1"
         || metadata.semantics
             != "canonical committed Zolana snarkjs mul1/mul2/mul3 test exceptions; not fresh or production proofs"
         || metadata.source_set_sha256
@@ -519,9 +519,9 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
 }
 
 fn require_b5_dispatch_attestation(snapshot: &ObserverSnapshot) -> Result<(), String> {
-    #[cfg(not(feature = "backend-b5-helios-ifma"))]
+    #[cfg(not(feature = "backend-b5-helius-ifma"))]
     let _ = snapshot;
-    #[cfg(feature = "backend-b5-helios-ifma")]
+    #[cfg(feature = "backend-b5-helius-ifma")]
     {
         let ordinary_eight = snapshot
             .pairing_checks
@@ -673,7 +673,7 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
 fn main() {
     let result = (|| {
         let cli = parse_cli()?;
-        #[cfg(feature = "backend-b5-helios-ifma")]
+        #[cfg(feature = "backend-b5-helius-ifma")]
         if !solana_bn254_decision_litesvm::selected_backend_compiled_with_avx512_ifma() {
             return Err("collector selected B5 without compile-time AVX-512 IFMA".into());
         }

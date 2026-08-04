@@ -1,5 +1,5 @@
 {
-  "schema": "helios.bn254-real-zolana-recursion-runtime-compact.v4",
+  "schema": "helius.bn254-real-zolana-recursion-runtime-compact.v4",
   "source_zolana_manifest_sha256": "df35081dcc762c81f81b90b91af9849a9815bf3772bf8139b9aa92c0ad055a0c",
   "source_recursion_manifest_sha256": "a05811162574ce721ba1b42a87ac75103c6fcf1c3bd478f17a2a54c7062a3e18",
   "rows": [

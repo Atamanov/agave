@@ -228,7 +228,7 @@ pub fn validate_tariff(
     }
 
     let attestation = &tariff.b5_attestation;
-    if attestation.backend_id != "helios-b5"
+    if attestation.backend_id != "helius-b5"
         || attestation.architecture != "x86_64"
         || attestation.cpu_model.trim().is_empty()
         || attestation.cpu_model == "unavailable"

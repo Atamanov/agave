@@ -172,23 +172,23 @@ pub fn verify_account_payload(data: &[u8]) -> Option<bool> {
 
 pub fn compiled_outer_vk_sha256(selector: u8) -> Option<&'static str> {
     match selector {
-        2 => Some(env!("HELIOS_GROTH_G2_OUTER_VK_SHA256")),
-        3 => Some(env!("HELIOS_GROTH_G3_OUTER_VK_SHA256")),
-        5 => Some(env!("HELIOS_GROTH_G5_OUTER_VK_SHA256")),
+        2 => Some(env!("HELIUS_GROTH_G2_OUTER_VK_SHA256")),
+        3 => Some(env!("HELIUS_GROTH_G3_OUTER_VK_SHA256")),
+        5 => Some(env!("HELIUS_GROTH_G5_OUTER_VK_SHA256")),
         _ => None,
     }
 }
 
 pub fn compiled_payload_sha256(selector: u8) -> Option<&'static str> {
     match selector {
-        2 => Some(env!("HELIOS_GROTH_G2_PAYLOAD_SHA256")),
-        3 => Some(env!("HELIOS_GROTH_G3_PAYLOAD_SHA256")),
-        5 => Some(env!("HELIOS_GROTH_G5_PAYLOAD_SHA256")),
+        2 => Some(env!("HELIUS_GROTH_G2_PAYLOAD_SHA256")),
+        3 => Some(env!("HELIUS_GROTH_G3_PAYLOAD_SHA256")),
+        5 => Some(env!("HELIUS_GROTH_G5_PAYLOAD_SHA256")),
         _ => None,
     }
 }
 
-pub const COMPILED_COMPACT_MANIFEST_SHA256: &str = env!("HELIOS_GROTH_RECURSION_MANIFEST_SHA256");
+pub const COMPILED_COMPACT_MANIFEST_SHA256: &str = env!("HELIUS_GROTH_RECURSION_MANIFEST_SHA256");
 
 #[cfg(all(target_os = "solana", feature = "bpf-entrypoint"))]
 mod entrypoint {
@@ -228,7 +228,7 @@ mod tests {
     static VERIFICATION_LOCK: Mutex<()> = Mutex::new(());
 
     fn fixture_root() -> PathBuf {
-        std::env::var_os("HELIOS_GROTH_RECURSION_FIXTURE_ROOT")
+        std::env::var_os("HELIUS_GROTH_RECURSION_FIXTURE_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -266,7 +266,7 @@ mod tests {
             let generation = fixture_file(selector, "generation.json");
             let generation = std::str::from_utf8(&generation).expect("generation UTF-8");
             assert!(generation.contains(
-                "\"schema\": \"helios.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
+                "\"schema\": \"helius.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
             ));
             assert!(generation.contains("\"exact_inner_proof_equality_constrained\": true"));
             assert!(generation.contains("\"all_inner_proofs_host_verified\": true"));
@@ -324,7 +324,7 @@ mod tests {
         use solana_bn254_batch_syscall::research_observer;
 
         let _guard = VERIFICATION_LOCK.lock().expect("verification test lock");
-        #[cfg(feature = "backend-b5-helios-ifma")]
+        #[cfg(feature = "backend-b5-helius-ifma")]
         assert!(solana_bn254_batch_syscall::selected_backend_compiled_with_avx512_ifma());
         for (selector, expected_gamma_msm) in [(2u8, 6u64), (3, 7), (5, 9)] {
             research_observer::reset();

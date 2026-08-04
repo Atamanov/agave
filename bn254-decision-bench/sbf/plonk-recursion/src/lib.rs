@@ -180,8 +180,8 @@ pub fn verify_account_payload(data: &[u8]) -> Option<bool> {
 
 pub fn compiled_outer_vk_sha256(selector: u8) -> Option<&'static str> {
     match selector {
-        2 => Some(env!("HELIOS_PLONK_N2_OUTER_VK_SHA256")),
-        3 => Some(env!("HELIOS_PLONK_N3_OUTER_VK_SHA256")),
+        2 => Some(env!("HELIUS_PLONK_N2_OUTER_VK_SHA256")),
+        3 => Some(env!("HELIUS_PLONK_N3_OUTER_VK_SHA256")),
         _ => None,
     }
 }
@@ -224,7 +224,7 @@ mod tests {
     static VERIFICATION_LOCK: Mutex<()> = Mutex::new(());
 
     fn fixture_root() -> PathBuf {
-        std::env::var_os("HELIOS_PLONK_RECURSION_FIXTURE_ROOT")
+        std::env::var_os("HELIUS_PLONK_RECURSION_FIXTURE_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/fixed-statement-v3")
@@ -251,7 +251,7 @@ mod tests {
             let generation = fixture_file(selector, "generation.json");
             let generation = std::str::from_utf8(&generation).expect("generation JSON UTF-8");
             assert!(generation.contains(
-                "\"schema\": \"helios.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3\""
+                "\"schema\": \"helius.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3\""
             ));
             assert!(generation.contains("\"measurement_ready\": true"));
 
@@ -295,7 +295,7 @@ mod tests {
         use solana_bn254_batch_syscall::research_observer;
 
         let _guard = VERIFICATION_LOCK.lock().expect("verification test lock");
-        #[cfg(feature = "backend-b5-helios-ifma")]
+        #[cfg(feature = "backend-b5-helius-ifma")]
         assert!(solana_bn254_batch_syscall::selected_backend_compiled_with_avx512_ifma());
         for (selector, expected_gamma_msm) in [(2u8, 7u64), (3, 10)] {
             research_observer::reset();
