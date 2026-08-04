@@ -1,0 +1,3 @@
+# Golden snapshots of the build-generated kernels (see kernel_golden.rs).
+# linguist-generated collapses them in PR views; diffs stay available.
+*.s linguist-generated
