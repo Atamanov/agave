@@ -23,6 +23,9 @@ backend-b2-arkworks-optimized = ["solana-bn254-batch-syscall/backend-b2-arkworks
 backend-b3-mcl = ["solana-bn254-batch-syscall/backend-b3-mcl"]
 backend-b4-helius = ["solana-bn254-batch-syscall/backend-b4-helius"]
 backend-b5-helius-ifma = ["solana-bn254-batch-syscall/backend-b5-helius-ifma"]
+# Hard-fails the build without AVX-512 IFMA. For an attested pricing capture,
+# where a silent portable fallback would corrupt the tariff.
+require-ifma = ["solana-bn254-batch-syscall/require-ifma"]
 # Exposes `test_utils` fixtures to dependent test suites.
 test-fixtures = ["dep:ark-std"]
 

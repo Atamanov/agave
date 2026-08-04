@@ -46,6 +46,13 @@ backend-b5-helius-ifma = [
     "solana-bn254-groth16-batch/backend-b5-helius-ifma",
     "solana-bn254-plonk-batch/backend-b5-helius-ifma",
 ]
+# Hard-fails the build without AVX-512 IFMA. For an attested pricing capture,
+# where a silent portable fallback would corrupt the tariff.
+require-ifma = [
+    "solana-bn254-batch-syscall/require-ifma",
+    "solana-bn254-groth16-batch/require-ifma",
+    "solana-bn254-plonk-batch/require-ifma",
+]
 
 [dependencies]
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
