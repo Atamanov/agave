@@ -2,6 +2,9 @@
   "schema": "helios.bn254-pairing-map-native-benchmark.v1",
   "date": "2026-07-31",
   "source_base_commit": "248ed94accbbeadbd8d8b4c7ef2cf94d8aeb7a26",
+  "candidate_commit": "ed4e4e57f47dc789a49e40eb9ef63f8b80bd04cc",
+  "candidate_scope": "The native timing was produced from this pairing-map candidate. The smoke binary was rebuilt after the later PLONK integration commit recorded separately below.",
+  "integrated_candidate_commit": "c520144b3d9d69a9dd51ad24f3ae692ac6dbc1d0",
   "host": {
     "os": "Darwin 25.4.0 arm64",
     "cpu": "Apple M4 Max",
@@ -43,7 +46,8 @@
   },
   "sbf_smoke_binary": {
     "path": "programs/sbf/target/deploy/solana_sbf_rust_alt_bn128_batch.so",
-    "sha256": "9c85000fd0aae763cd86022caa6e4f5c59e1d562446b3ab7485a03e928d9932e",
+    "sha256": "8f917bba8ce8e8a54829bd322a19dd0b0cc5b995793d6ede17cca6f69432dda9",
+    "built_from_commit": "c520144b3d9d69a9dd51ad24f3ae692ac6dbc1d0",
     "behavior": "Calls the map on identity and nonidentity products and consumes all 384 bytes in verdict assertions."
   }
 }
