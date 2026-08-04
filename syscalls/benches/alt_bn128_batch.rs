@@ -9,9 +9,10 @@ use {
     ark_std::rand::{SeedableRng, rngs::StdRng},
     criterion::{BenchmarkId, Criterion, criterion_group, criterion_main},
     solana_bn254_batch_syscall::{
-        PodPlonkReductionContext, PodPlonkReductionInput, PodScalar, Version,
-        alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
-        alt_bn128_pairing_map, alt_bn128_plonk_batch_reduce,
+        PodG1G2Pair, PodPlonkReductionContext, PodPlonkReductionInput, PodScalar, TrustedGt,
+        Version, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
+        alt_bn128_pairing_check, alt_bn128_pairing_map, alt_bn128_plonk_batch_reduce,
+        trusted_gt_from_pair, trusted_gt_multiexp,
     },
 };
 
@@ -268,7 +269,10 @@ fn bench_plonk_batch_reduce(c: &mut Criterion) {
 
 fn bench_g1_msm(c: &mut Criterion) {
     // One size in each price bucket checks the complete MSM discount table.
-    const NS: &[usize] = &[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+    // Includes 7 and 10, which the earlier capture skipped and the table needs.
+    const NS: &[usize] = &[
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 32, 36, 54, 64, 128, 256, 512, 1024, 2048,
+    ];
 
     let mut group = c.benchmark_group("BN254 G1 MSM");
     group.sample_size(20);
@@ -304,7 +308,9 @@ fn bench_g1_msm(c: &mut Criterion) {
 }
 
 fn bench_pairing_check(c: &mut Criterion) {
-    const NS: &[usize] = &[1, 2, 3, 4, 8, 16];
+    // Every pair count the decision table charges, plus 16 to pin the second
+    // IFMA lane. Do not thin this list: the schedule is fitted to it.
+    const NS: &[usize] = &[1, 2, 3, 4, 6, 7, 8, 9, 12, 16];
     const POOL: usize = 64;
 
     let mut group = c.benchmark_group("BN254 Pairing check");
@@ -329,7 +335,9 @@ fn bench_pairing_check(c: &mut Criterion) {
 }
 
 fn bench_pairing_map(c: &mut Criterion) {
-    const NS: &[usize] = &[1, 2, 3, 4, 8, 16];
+    // Every pair count the decision table charges, plus 16 to pin the second
+    // IFMA lane. Do not thin this list: the schedule is fitted to it.
+    const NS: &[usize] = &[1, 2, 3, 4, 6, 7, 8, 9, 12, 16];
     const POOL: usize = 64;
 
     let mut group = c.benchmark_group("BN254 Pairing map");
@@ -375,12 +383,71 @@ fn bench_g2_subgroup_check(c: &mut Criterion) {
     group.finish();
 }
 
+/// Isolates the final exponentiation the runtime charges as a pairing's base
+/// cost. Measured as the difference a Miller loop alone cannot show: map one
+/// pair, then exponentiate. Reported standalone so the base term is auditable.
+fn bench_final_exponentiation(c: &mut Criterion) {
+    const POOL: usize = 64;
+
+    let pool = random_pairing_check_be(POOL, 1);
+    let mut group = c.benchmark_group("BN254 final exponentiation");
+    let mut i = 0usize;
+    group.bench_function("one", |b| {
+        b.iter(|| {
+            let r = alt_bn128_pairing_map(Version::V0, bytemuck::cast_slice(&pool[i])).unwrap();
+            i = advance(i, POOL);
+            r
+        })
+    });
+    group.finish();
+}
+
+/// GT multiexponentiation over authenticated targets. No prior capture exists
+/// for this operation on any x86 host, so the runtime schedule is a
+/// placeholder until this group lands.
+fn bench_trusted_gt_multiexp(c: &mut Criterion) {
+    const NS: &[usize] = &[1, 2, 3, 4];
+    const POOL: usize = 32;
+
+    let mut group = c.benchmark_group("BN254 trusted GT multiexp");
+    for &n in NS {
+        let mut targets: Vec<Vec<TrustedGt>> = Vec::with_capacity(POOL);
+        let mut exps: Vec<Vec<PodScalar>> = Vec::with_capacity(POOL);
+        let mut r = rng();
+        for bytes in random_pairing_check_be(POOL, n) {
+            let pairs: &[PodG1G2Pair] = bytemuck::cast_slice(&bytes);
+            targets.push(
+                pairs
+                    .iter()
+                    .map(|pair| trusted_gt_from_pair(pair).expect("valid fixture"))
+                    .collect(),
+            );
+            let mut scalars = Vec::with_capacity(n.saturating_mul(32));
+            for _ in 0..n {
+                scalars.extend_from_slice(&reverse_chunks(&fr_le(Fr::rand(&mut r)), 32));
+            }
+            exps.push(bytemuck::cast_slice::<u8, PodScalar>(&scalars).to_vec());
+        }
+        let mut i = 0usize;
+        group.bench_with_input(BenchmarkId::new("targets", n), &n, |b, _| {
+            b.iter(|| {
+                let r = trusted_gt_multiexp(&targets[i], &exps[i]);
+                i = advance(i, POOL);
+                r
+            })
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_g1_msm,
     bench_pairing_check,
     bench_pairing_map,
     bench_g2_subgroup_check,
+    bench_final_exponentiation,
+    bench_trusted_gt_multiexp,
     bench_fr_lincomb,
     bench_fr_batch_invert,
     bench_plonk_batch_reduce,
