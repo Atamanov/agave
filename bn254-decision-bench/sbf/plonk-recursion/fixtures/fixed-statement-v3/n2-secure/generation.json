@@ -1,0 +1,86 @@
+{
+  "schema": "helios.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3",
+  "n_proofs": 2,
+  "ordered_public_inputs": 3,
+  "fixture_sha256": [
+    {
+      "name": "mul1",
+      "proof.json": "e83bf34c9ee7d9c150a69d28b9cf37ce17a534c04ac8413e8e617e8142116670",
+      "public.json": "16e83046941abbbe3196719fedd9cac00ce22a33e7c593cea3910c1bb25d9ac1",
+      "verification_key.json": "28c03da271eb07571213fc9847dacb07843dfe4ed6901e4517fb57dd263694b5"
+    },
+    {
+      "name": "mul2",
+      "proof.json": "910d8ca382f845ed6137128572a27c2249a6299759999e2eaab4befdb087e9d3",
+      "public.json": "b37e80d45f207decb1dd683675d1ed8186dd9b1a9db4028cbff63c96c2fd972d",
+      "verification_key.json": "3deeb70be57ccb3b370bbc0bf43a19990fcbc9d965afeadfcab4b0fda2e224a6"
+    }
+  ],
+  "gnark_version": "v0.15.0",
+  "gnark_crypto_version": "v0.20.1",
+  "go_version": "go1.25.7",
+  "stage": "full",
+  "outer_constraints": 7339083,
+  "outer_public_variables_including_one_wire": 5,
+  "outer_secret_variables": 192,
+  "outer_internal_variables": 10865540,
+  "compile_millis": 13660,
+  "solve_millis": 1324,
+  "setup_millis": 210433,
+  "prove_millis": 5415,
+  "verify_millis": 1,
+  "outer_proof": {
+    "compressed_bytes": 196,
+    "raw_bytes": 388
+  },
+  "outer_vk": {
+    "compressed_bytes": 624,
+    "raw_bytes": 1232
+  },
+  "outer_bsb22_commitments": 1,
+  "outer_wire_proof_bytes": 192,
+  "outer_embedded_vk_bytes": 1088,
+  "changed_public_rejected": true,
+  "changed_statement_commitment_rejected": true,
+  "reordered_public_groups_rejected": true,
+  "changed_proof_rejected": true,
+  "statement_sha256": "2b37e961e24b31f90c6e219b13c135ff1c51fa1f08ff57f6b9883aaee1fdbe83",
+  "statement_commitment_fr_be": "2b37e961e24b31f90c6e219b13c135ff1c51fa1f08ff57f6b9883aaee1fdbe83",
+  "proof_vk_indices": [
+    0,
+    1
+  ],
+  "ordered_vk_sha256s": [
+    "2343c45fef24926ceba159ba2688bf5a66869cdf5f9fd6323ec9c638f1756de7",
+    "352c60aa84dfd4655e3ec043f517534cc27fb0ec3c47152fc040e1143d976b60"
+  ],
+  "ordered_proof_sha256s": [
+    "65f0997dc701b0ec616052dd0a8917173fb6add5e2b3d227e4564b668132c89f",
+    "5a3232e34114c02bba9ea1c99c44649c6f06154f2535590b95b06f181866cf9e"
+  ],
+  "ordered_public_input_sha256s": [
+    "e3872ccfe29e8ddfc6fe1dca36f1acc5707d9bf3ce979ed15365bb735137a767",
+    "240cd1637c0528e45742db830129b2ea4ae95edab3e06cb86f6b377a6cf945c9"
+  ],
+  "ordered_public_input_byte_lengths": [
+    32,
+    64
+  ],
+  "shared_srs_sha256": "4efcd9e7c379eef81eb869564b3127fe9ff41fc202e3369ea101f6cf2c8e608f",
+  "inner_instance_set_sha256": "be13cd7328836f99a78130c20610b349ac13f4cef3263b6d627c519e62e4e79c",
+  "application_public_inputs_sha256": "a485abed4641067b98b2a9521236fedbaa89a9d563947effe40e34e8fde36c39",
+  "outer_vk_sha256": "0ab7160a5df8ac73ee8e0bdfb4e30867ff5219e1de484d41f78a89c10b311ed7",
+  "outer_ccs_sha256": "8f6a088477bad5fe8e1f0b0e40672e1098338a4f07270b4be2e293bea4febd81",
+  "outer_fixture_dir": "/root/helios/plonk-recursion-v3/n2-secure",
+  "export_mode": "secure-os-random",
+  "entropy_source": "crypto/rand.Reader delegated to the operating-system CSPRNG",
+  "entropy_audit_scope": "all entropy returned to gnark Groth16 Setup and Prove; only byte count and one-way SHA-256 commitment retained",
+  "entropy_bytes": 384,
+  "entropy_commitment_sha256": "0a32001387380b133115a436404bda84f6dc6c9af470fb9595a51bc3712b0ba2",
+  "deterministic_public_toxic_waste": false,
+  "toxic_waste_exported": false,
+  "proving_key_exported": false,
+  "single_party_setup": true,
+  "measurement_ready": true,
+  "activation_ready": false
+}

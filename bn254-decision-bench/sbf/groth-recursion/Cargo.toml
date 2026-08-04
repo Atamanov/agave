@@ -1,0 +1,61 @@
+[package]
+name = "bn254-decision-groth-recursion-guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["bpf-entrypoint", "backend-b4-helios"]
+bpf-entrypoint = []
+backend-b1-arkworks = [
+    "solana-bn254-batch-syscall/backend-b1-arkworks",
+    "solana-bn254-groth16-batch/backend-b1-arkworks",
+]
+backend-b4-helios = [
+    "solana-bn254-batch-syscall/backend-b4-helios",
+    "solana-bn254-groth16-batch/backend-b4-helios",
+    "solana-bn254-decision-litesvm/backend-b4-helios",
+]
+backend-b5-helios-ifma = [
+    "solana-bn254-batch-syscall/backend-b5-helios-ifma",
+    "solana-bn254-groth16-batch/backend-b5-helios-ifma",
+    "solana-bn254-decision-litesvm/backend-b5-helios-ifma",
+]
+research-observer = [
+    "solana-bn254-batch-syscall/research-observer",
+    "solana-bn254-groth16-batch/research-observer",
+]
+
+[dependencies]
+ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
+ark-ff = { version = "0.5", default-features = false }
+groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "43fee1a67e91c0df7bb4edad5ba87ae4602aa208", features = ["bsb22"] }
+pinocchio = "0.11"
+solana-bn254-batch-syscall = { path = "../../../bn254-batch-syscall", default-features = false, features = ["agave-unstable-api"] }
+solana-bn254-groth16-batch = { path = "../../../bn254-groth16-batch", default-features = false, features = ["agave-unstable-api"] }
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+sha2 = "0.10"
+
+[build-dependencies]
+groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "43fee1a67e91c0df7bb4edad5ba87ae4602aa208", features = ["gnark-vk"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+solana-account = "3.4"
+solana-bn254-decision-litesvm = { path = "../../../bn254-decision-litesvm", default-features = false }
+solana-compute-budget-interface = "3.0"
+solana-instruction = "3.4"
+solana-keypair = "3.1.2"
+solana-message = "3.1"
+solana-pubkey = "4.2"
+solana-signer = "3.0"
+solana-transaction = { version = "3.1", features = ["bincode"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(target_os, values(\"solana\"))"] }

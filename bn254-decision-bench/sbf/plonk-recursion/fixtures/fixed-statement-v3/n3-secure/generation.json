@@ -1,0 +1,97 @@
+{
+  "schema": "helios.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3",
+  "n_proofs": 3,
+  "ordered_public_inputs": 6,
+  "fixture_sha256": [
+    {
+      "name": "mul1",
+      "proof.json": "e83bf34c9ee7d9c150a69d28b9cf37ce17a534c04ac8413e8e617e8142116670",
+      "public.json": "16e83046941abbbe3196719fedd9cac00ce22a33e7c593cea3910c1bb25d9ac1",
+      "verification_key.json": "28c03da271eb07571213fc9847dacb07843dfe4ed6901e4517fb57dd263694b5"
+    },
+    {
+      "name": "mul2",
+      "proof.json": "910d8ca382f845ed6137128572a27c2249a6299759999e2eaab4befdb087e9d3",
+      "public.json": "b37e80d45f207decb1dd683675d1ed8186dd9b1a9db4028cbff63c96c2fd972d",
+      "verification_key.json": "3deeb70be57ccb3b370bbc0bf43a19990fcbc9d965afeadfcab4b0fda2e224a6"
+    },
+    {
+      "name": "mul3",
+      "proof.json": "0f62952f0144f62be1c26d4a0ea56a2ff63430eb67e94cc956586206535aed55",
+      "public.json": "8348e0afaed33f7d5d4258af4535a9bc8ce44ee8b4eb7ead909b958fce366b35",
+      "verification_key.json": "cf5443a8d764dedacd2a3bc22d1ac9c0ab2425d10da849112ed0663ea0d1269d"
+    }
+  ],
+  "gnark_version": "v0.15.0",
+  "gnark_crypto_version": "v0.20.1",
+  "go_version": "go1.25.7",
+  "stage": "full",
+  "outer_constraints": 10755131,
+  "outer_public_variables_including_one_wire": 8,
+  "outer_secret_variables": 288,
+  "outer_internal_variables": 15860532,
+  "compile_millis": 19675,
+  "solve_millis": 2042,
+  "setup_millis": 303892,
+  "prove_millis": 8466,
+  "verify_millis": 1,
+  "outer_proof": {
+    "compressed_bytes": 196,
+    "raw_bytes": 388
+  },
+  "outer_vk": {
+    "compressed_bytes": 720,
+    "raw_bytes": 1424
+  },
+  "outer_bsb22_commitments": 1,
+  "outer_wire_proof_bytes": 192,
+  "outer_embedded_vk_bytes": 1280,
+  "changed_public_rejected": true,
+  "changed_statement_commitment_rejected": true,
+  "reordered_public_groups_rejected": true,
+  "changed_proof_rejected": true,
+  "statement_sha256": "f8a63adb29ee8086b1214a2bd85956b6fb0769e1aac80e6d94255c7615ff096d",
+  "statement_commitment_fr_be": "06b0b29cc3f65fb6178fed9b50d29ce53203e0774a28db9740bb909265ff0968",
+  "proof_vk_indices": [
+    0,
+    1,
+    2
+  ],
+  "ordered_vk_sha256s": [
+    "2343c45fef24926ceba159ba2688bf5a66869cdf5f9fd6323ec9c638f1756de7",
+    "352c60aa84dfd4655e3ec043f517534cc27fb0ec3c47152fc040e1143d976b60",
+    "82942659221e24f9890dea74b24a8d93ee017ff810702dcea9a1571215c8dc90"
+  ],
+  "ordered_proof_sha256s": [
+    "65f0997dc701b0ec616052dd0a8917173fb6add5e2b3d227e4564b668132c89f",
+    "5a3232e34114c02bba9ea1c99c44649c6f06154f2535590b95b06f181866cf9e",
+    "bcabf2332d7ebba8daa2105c5abc0acd86374cbecaf194b565b4ce82add696c1"
+  ],
+  "ordered_public_input_sha256s": [
+    "e3872ccfe29e8ddfc6fe1dca36f1acc5707d9bf3ce979ed15365bb735137a767",
+    "240cd1637c0528e45742db830129b2ea4ae95edab3e06cb86f6b377a6cf945c9",
+    "8fe2a46833485df6e597f5c9e1044e05104bc2d5f0bb1440b414c8532ab2c56a"
+  ],
+  "ordered_public_input_byte_lengths": [
+    32,
+    64,
+    96
+  ],
+  "shared_srs_sha256": "4efcd9e7c379eef81eb869564b3127fe9ff41fc202e3369ea101f6cf2c8e608f",
+  "inner_instance_set_sha256": "dd0e64e0e7e49e46594edb5987aaf69cc594af557ea8a68f104043e75121df64",
+  "application_public_inputs_sha256": "76b6e060ed90f488c113139378ddc8a636b7716f86cdda818df628fb7a5722e0",
+  "outer_vk_sha256": "32cf5f71d4d462e930745414a7fea30cb19cd0a42a3242225b3aba8e6bf70d81",
+  "outer_ccs_sha256": "9eb9ec2fc2156d33b45f45964a74abc00868400246a375c8f6f9676437163810",
+  "outer_fixture_dir": "/root/helios/plonk-recursion-v3/n3-secure",
+  "export_mode": "secure-os-random",
+  "entropy_source": "crypto/rand.Reader delegated to the operating-system CSPRNG",
+  "entropy_audit_scope": "all entropy returned to gnark Groth16 Setup and Prove; only byte count and one-way SHA-256 commitment retained",
+  "entropy_bytes": 320,
+  "entropy_commitment_sha256": "b2fe09c9565f88f049a5cd11c6aa9ff455606e463edf61821467fa3e2a99e3b9",
+  "deterministic_public_toxic_waste": false,
+  "toxic_waste_exported": false,
+  "proving_key_exported": false,
+  "single_party_setup": true,
+  "measurement_ready": true,
+  "activation_ready": false
+}

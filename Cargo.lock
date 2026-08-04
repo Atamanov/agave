@@ -7327,6 +7327,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-bn254-decision-bench"
+version = "4.1.2"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "bytemuck",
+ "hex",
+ "serde",
+ "serde_json",
+ "solana-bn254",
+ "solana-bn254-batch-syscall",
+ "solana-pubkey 4.2.0",
+ "solana-sha256-hasher",
+ "solana-syscalls",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "solana-bn254-groth16-batch"
 version = "4.1.2"
 dependencies = [
@@ -7334,6 +7356,7 @@ dependencies = [
  "ark-ec 0.5.0",
  "ark-ff 0.5.0",
  "ark-std 0.5.0",
+ "solana-bn254",
  "solana-bn254-batch-syscall",
  "solana-keccak-hasher",
  "thiserror 2.0.18",
@@ -8150,9 +8173,9 @@ dependencies = [
 
 [[package]]
 name = "solana-curve25519"
-version = "3.1.4"
+version = "3.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2cb3f53e40375fba75e908295c7723d16dad3fb54384140366fade2c7ef37bb"
+checksum = "5aff7432cdf2ec6a44ac06b4d64d2ee006f6c0066d6456e032a7fe25be40cd5c"
 dependencies = [
  "bytemuck",
  "bytemuck_derive",
@@ -11885,7 +11908,7 @@ checksum = "879a9ebad0d77383d3ea71e7de50503554961ff0f4ef6cbca39ad126e6f6da3a"
 dependencies = [
  "bytemuck",
  "solana-account-info",
- "solana-curve25519 3.1.4",
+ "solana-curve25519 3.1.14",
  "solana-instruction",
  "solana-instructions-sysvar",
  "solana-msg",

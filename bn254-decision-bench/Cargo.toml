@@ -1,0 +1,62 @@
+[package]
+name = "solana-bn254-decision-bench"
+description = "Strict, reproducible BN254 decision-table campaign harness"
+version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[features]
+default = []
+core-probe = [
+    "dep:ark-bn254",
+    "dep:ark-ec",
+    "dep:ark-ff",
+    "dep:ark-serialize",
+    "dep:ark-std",
+    "dep:bytemuck",
+    "dep:solana-bn254",
+    "dep:solana-bn254-batch-syscall",
+    "dep:solana-pubkey",
+    "dep:solana-syscalls",
+]
+core-probe-observer = ["core-probe", "solana-bn254-batch-syscall/research-observer", "solana-syscalls/research-observer"]
+backend-b1-arkworks = ["core-probe", "solana-bn254-batch-syscall/backend-b1-arkworks", "solana-syscalls/backend-b1-arkworks"]
+backend-b2-arkworks-optimized = ["core-probe", "solana-bn254-batch-syscall/backend-b2-arkworks-optimized", "solana-syscalls/backend-b2-arkworks-optimized"]
+backend-b3-mcl = ["core-probe", "solana-bn254-batch-syscall/backend-b3-mcl", "solana-syscalls/backend-b3-mcl"]
+backend-b4-helios = ["core-probe", "solana-bn254-batch-syscall/backend-b4-helios", "solana-syscalls/backend-b4-helios"]
+backend-b5-helios-ifma = ["core-probe", "solana-bn254-batch-syscall/backend-b5-helios-ifma", "solana-syscalls/backend-b5-helios-ifma"]
+
+[dependencies]
+ark-bn254 = { version = "0.5", default-features = false, features = ["curve"], optional = true }
+ark-ec = { version = "0.5", default-features = false, optional = true }
+ark-ff = { version = "0.5", default-features = false, optional = true }
+ark-serialize = { version = "0.5", default-features = false, optional = true }
+ark-std = { version = "0.5", default-features = false, optional = true }
+bytemuck = { workspace = true, features = ["min_const_generics"], optional = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+solana-bn254 = { workspace = true, optional = true }
+solana-bn254-batch-syscall = { workspace = true, default-features = false, optional = true }
+solana-pubkey = { workspace = true, optional = true }
+solana-sha256-hasher = { workspace = true, features = ["sha2"] }
+solana-syscalls = { workspace = true, default-features = false, optional = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[[bench]]
+name = "decision_table"
+harness = false
+
+[[example]]
+name = "core_tariff_probe"
+required-features = ["core-probe"]
+
+[lints]
+workspace = true

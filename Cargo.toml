@@ -12,6 +12,7 @@ members = [
     "bloom",
     "bls-cert-verify",
     "bn254-batch-syscall",
+    "bn254-decision-bench",
     "bn254-groth16-batch",
     "bn254-mcl-sys",
     "bn254-mixed-batch",
@@ -377,6 +378,7 @@ solana-bls-signatures = { version = "3.3.0", features = ["serde"] }
 solana-bls12-381-syscall = "0.1.0"
 solana-bn254 = "3.2.1"
 solana-bn254-batch-syscall = { path = "bn254-batch-syscall", version = "=4.1.2", default-features = false, features = ["agave-unstable-api"] }
+solana-bn254-decision-bench = { path = "bn254-decision-bench", version = "=4.1.2" }
 solana-bn254-groth16-batch = { path = "bn254-groth16-batch", version = "=4.1.2", default-features = false, features = ["agave-unstable-api"] }
 solana-bn254-mcl-sys = { path = "bn254-mcl-sys", version = "=4.1.2" }
 solana-bn254-plonk-batch = { path = "bn254-plonk-batch", version = "=4.1.2", default-features = false, features = ["agave-unstable-api"] }
