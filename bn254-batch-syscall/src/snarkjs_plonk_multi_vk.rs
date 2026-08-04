@@ -7,8 +7,8 @@
 //! group-omission surface created by independently seeded per-key calls.
 //!
 //! Output order is exact and compact:
-//! - `8 * num_contexts` key-local Q coefficients, in context order;
-//! - one generator coefficient collapsed across every context;
+//! - `9 * num_contexts` Q coefficients, in context order: eight verifying-key
+//!   coefficients followed by the context generator coefficient;
 //! - `11 * num_proofs` proof-local coefficients, in proof-index order.
 
 use {
@@ -229,12 +229,8 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
         .ok_or(AltBn128BatchError::CapExceeded)?;
     let mut output = vec![PodScalar([0u8; 32]); output_count];
     let mut shared = vec![[Fr::zero(); PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS]; contexts.len()];
-    let mut generator = Fr::zero();
 
-    let (shared_output, remaining_output) = output.split_at_mut(shared_count);
-    let (generator_output, proof_output) = remaining_output
-        .split_first_mut()
-        .ok_or(AltBn128BatchError::BackendInvariant)?;
+    let (shared_output, proof_output) = output.split_at_mut(shared_count);
     let mut proof_rows = proof_output.chunks_exact_mut(PLONK_PER_PROOF_OUTPUTS);
     let mut remaining_denominators = denominators.as_slice();
     for proof in prepared {
@@ -257,8 +253,7 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
         let context_shared = shared
             .get_mut(proof.context_index)
             .ok_or(AltBn128BatchError::BackendInvariant)?;
-        reduced.accumulate_shared_q(proof.native.rho, context_shared);
-        generator = generator.sub(reduced.generator_contribution(proof.native.rho));
+        reduced.accumulate_shared(proof.native.rho, context_shared)?;
 
         let row = proof_rows
             .next()
@@ -280,7 +275,6 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
     if !context_rows.into_remainder().is_empty() {
         return Err(AltBn128BatchError::BackendInvariant);
     }
-    *generator_output = PodScalar::from(&generator);
     Ok(output)
 }
 
@@ -512,10 +506,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(first, second);
-        assert_eq!(
-            first.len(),
-            2 * PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS + 1 + 2 * 11
-        );
+        assert_eq!(first.len(), 2 * PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS + 2 * 11);
         assert!(first.iter().all(|scalar| scalar.to_fr().is_ok()));
     }
 
@@ -627,8 +618,12 @@ mod tests {
         assert_eq!(crate::unpack_snarkjs_plonk_multi_vk_shape(shape), (2, 3, 5));
         assert_eq!(
             crate::snarkjs_plonk_multi_vk_output_count(2, 3),
-            Some(2 * 8 + 1 + 3 * 11)
+            Some(2 * 9 + 3 * 11)
         );
+        assert!(crate::snarkjs_plonk_multi_vk_shape(1, 226, 0).is_some());
+        assert!(crate::snarkjs_plonk_multi_vk_shape(1, 227, 0).is_none());
+        assert!(crate::snarkjs_plonk_multi_vk_shape(226, 1, 0).is_some());
+        assert!(crate::snarkjs_plonk_multi_vk_shape(227, 1, 0).is_none());
         assert!(crate::snarkjs_plonk_multi_vk_shape(0, 3, 5).is_none());
         assert!(crate::snarkjs_plonk_multi_vk_shape(2, 0, 5).is_none());
         assert!(crate::snarkjs_plonk_multi_vk_shape(2, 3, FR_MAX_ELEMS + 1).is_none());

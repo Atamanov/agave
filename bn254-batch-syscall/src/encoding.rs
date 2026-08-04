@@ -29,9 +29,10 @@ pub const PLONK_CHALLENGES: usize = 6;
 pub const PLONK_EVALUATIONS: usize = 6;
 pub const PLONK_SHARED_OUTPUTS: usize = 9;
 pub const PLONK_PER_PROOF_OUTPUTS: usize = 11;
-/// Multi-VK output has eight key-local coefficients per context. The ninth
-/// shared coefficient (the G1 generator) is collapsed once across all keys.
-pub const PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS: usize = 8;
+/// Multi-VK output has eight key-local coefficients and one generator
+/// coefficient per context. The generator stays context-local because
+/// contexts can use different KZG SRS pairs.
+pub const PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS: usize = 9;
 pub const PLONK_REDUCE_MAX_PROOFS: usize = (MSM_MAX_POINTS - PLONK_SHARED_OUTPUTS) / 9;
 
 /// Canonical snarkjs transcript inputs. The verification key contributes
@@ -80,10 +81,9 @@ pub const fn unpack_plonk_reduction_shape(shape: u64) -> (u64, u64) {
 
 /// Scalar count returned by the atomic multi-VK reducer.
 ///
-/// Each context owns eight collapsed shared coefficients, the batch owns one
-/// global generator coefficient, and each proof owns eleven coefficients.
-/// The Q-side MSM has one global generator, eight
-/// verifying-key points per context, and nine points per proof.
+/// Each context owns eight verifying-key coefficients and one generator
+/// coefficient. Each proof owns eleven coefficients. Context-local generator
+/// terms let consumers partition equations by KZG SRS.
 pub const fn snarkjs_plonk_multi_vk_output_count(
     num_contexts: usize,
     num_proofs: usize,
@@ -103,20 +103,16 @@ pub const fn snarkjs_plonk_multi_vk_output_count(
     let Some(proof_points) = SNARKJS_PLONK_PROOF_POINTS.checked_mul(num_proofs) else {
         return None;
     };
-    let q_points = match vk_points.checked_add(proof_points) {
-        Some(value) => match value.checked_add(1) {
-            Some(value) => value,
-            None => return None,
-        },
-        None => return None,
+    let Some(q_points) = vk_points.checked_add(num_contexts) else {
+        return None;
+    };
+    let Some(q_points) = q_points.checked_add(proof_points) else {
+        return None;
     };
     if q_points > MSM_MAX_POINTS || num_proofs > MSM_MAX_POINTS / 2 {
         return None;
     }
-    match shared.checked_add(1) {
-        Some(value) => value.checked_add(per_proof),
-        None => None,
-    }
+    shared.checked_add(per_proof)
 }
 
 /// Pack the exact atomic multi-VK input dimensions.

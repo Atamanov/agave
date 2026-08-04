@@ -42,10 +42,11 @@ pub struct VerifyingKey {
 
 /// The only key form the verifier accepts. [`VerifyingKey::validate`] fully
 /// validates every point off-chain. [`VerifyingKey::trust`] is the explicit
-/// static-key SBF path: it rejects infinity but assumes canonical, on-curve,
-/// subgroup-checked constants supplied by the program. Omega and the coset
-/// shifts are derived and checked here so the reduction never re-validates
-/// them.
+/// static-key SBF path: it rejects infinity for permutation and SRS points but
+/// assumes canonical, on-curve, subgroup-checked constants supplied by the
+/// program. A selector commitment can be infinity when its polynomial is zero.
+/// Omega and the coset shifts are derived and checked here so the reduction
+/// never re-validates them.
 #[derive(Clone, Debug)]
 pub struct ValidatedVerifyingKey {
     key: VerifyingKey,
@@ -58,11 +59,11 @@ pub struct ValidatedVerifyingKey {
 impl VerifyingKey {
     pub fn validate(self) -> Result<ValidatedVerifyingKey, PlonkBatchError> {
         self.check_domain_shape()?;
-        validate_g1(&self.q_m, "q_m")?;
-        validate_g1(&self.q_l, "q_l")?;
-        validate_g1(&self.q_r, "q_r")?;
-        validate_g1(&self.q_o, "q_o")?;
-        validate_g1(&self.q_c, "q_c")?;
+        validate_selector_g1(&self.q_m, "q_m")?;
+        validate_selector_g1(&self.q_l, "q_l")?;
+        validate_selector_g1(&self.q_r, "q_r")?;
+        validate_selector_g1(&self.q_o, "q_o")?;
+        validate_selector_g1(&self.q_c, "q_c")?;
         validate_g1(&self.s_sigma[0], "s_sigma1")?;
         validate_g1(&self.s_sigma[1], "s_sigma2")?;
         validate_g1(&self.s_sigma[2], "s_sigma3")?;
@@ -71,13 +72,13 @@ impl VerifyingKey {
         self.finish_scalar_side()
     }
 
-    /// Shape, domain, coset-shift, and no-infinity checks plus the digest,
-    /// without full curve validation. For compile-time constant keys on SBF
-    /// where curve checks are not available (host should still prefer
+    /// Shape, domain, coset-shift, required nonzero-point checks, and the
+    /// digest, without full curve validation. For compile-time constant keys
+    /// on SBF where curve checks are not available (host should still prefer
     /// [`Self::validate`]).
     pub fn trust(self) -> Result<ValidatedVerifyingKey, PlonkBatchError> {
         self.check_domain_shape()?;
-        self.validate_no_infinities()?;
+        self.validate_required_nonzero_points()?;
         self.finish_scalar_side()
     }
 
@@ -93,12 +94,7 @@ impl VerifyingKey {
         Ok(())
     }
 
-    fn validate_no_infinities(&self) -> Result<(), PlonkBatchError> {
-        reject_infinity_g1(&self.q_m, "q_m")?;
-        reject_infinity_g1(&self.q_l, "q_l")?;
-        reject_infinity_g1(&self.q_r, "q_r")?;
-        reject_infinity_g1(&self.q_o, "q_o")?;
-        reject_infinity_g1(&self.q_c, "q_c")?;
+    fn validate_required_nonzero_points(&self) -> Result<(), PlonkBatchError> {
         reject_infinity_g1(&self.s_sigma[0], "s_sigma1")?;
         reject_infinity_g1(&self.s_sigma[1], "s_sigma2")?;
         reject_infinity_g1(&self.s_sigma[2], "s_sigma3")?;
@@ -218,10 +214,25 @@ fn reject_infinity_g2(point: &PodG2Point, what: &'static str) -> Result<(), Plon
     Ok(())
 }
 
-// `to_affine` does the canonical, on-curve, and (for G2) subgroup checks; a
-// key point must additionally never be infinity, which would erase entire
-// terms downstream. On SBF the byte-level infinity check remains available
-// even though full curve validation does not.
+// A zero selector polynomial has the identity as its KZG commitment. The
+// decoder must still reject non-canonical and off-curve selector encodings.
+#[cfg(not(target_os = "solana"))]
+fn validate_selector_g1(point: &PodG1Point, what: &'static str) -> Result<(), PlonkBatchError> {
+    point
+        .to_affine()
+        .map(|_| ())
+        .map_err(|_| PlonkBatchError::InvalidVerifyingKey(what))
+}
+
+#[cfg(target_os = "solana")]
+fn validate_selector_g1(_point: &PodG1Point, _what: &'static str) -> Result<(), PlonkBatchError> {
+    Ok(())
+}
+
+// `to_affine` does the canonical, on-curve, and (for G2) subgroup checks.
+// Permutation and SRS points must not be infinity because infinity would erase
+// soundness-critical terms. SBF retains the byte-level infinity check when
+// full curve validation is not available.
 #[cfg(not(target_os = "solana"))]
 fn validate_g1(point: &PodG1Point, what: &'static str) -> Result<(), PlonkBatchError> {
     let invalid = || PlonkBatchError::InvalidVerifyingKey(what);
@@ -257,6 +268,23 @@ mod tests {
         crate::test_support::{fr_bytes, g2_bytes, make_vk, non_subgroup_g2, rng},
     };
 
+    fn assert_infinity_rejected(
+        template: &VerifyingKey,
+        name: &'static str,
+        set_infinity: fn(&mut VerifyingKey),
+    ) {
+        let mut vk = template.clone();
+        set_infinity(&mut vk);
+        assert_eq!(
+            vk.clone().validate().unwrap_err(),
+            PlonkBatchError::InvalidVerifyingKey(name)
+        );
+        assert_eq!(
+            vk.trust().unwrap_err(),
+            PlonkBatchError::InvalidVerifyingKey(name)
+        );
+    }
+
     #[test]
     fn test_valid_key_validates() {
         let mut rng = rng();
@@ -269,23 +297,53 @@ mod tests {
     }
 
     #[test]
+    fn test_infinity_selector_commitments_validate() {
+        let mut rng = rng();
+        let (_, valid) = make_vk(&mut rng);
+        let template = valid.key();
+        let set_infinity: [fn(&mut VerifyingKey); 5] = [
+            |vk| vk.q_m = PodG1Point([0u8; 64]),
+            |vk| vk.q_l = PodG1Point([0u8; 64]),
+            |vk| vk.q_r = PodG1Point([0u8; 64]),
+            |vk| vk.q_o = PodG1Point([0u8; 64]),
+            |vk| vk.q_c = PodG1Point([0u8; 64]),
+        ];
+
+        for set_selector_infinity in set_infinity {
+            let mut vk = template.clone();
+            set_selector_infinity(&mut vk);
+            assert!(vk.clone().validate().is_ok());
+            assert!(vk.trust().is_ok());
+        }
+    }
+
+    #[test]
     fn test_degenerate_keys_rejected() {
         let mut rng = rng();
         let (_, valid) = make_vk(&mut rng);
         let template = valid.key();
 
-        // infinity selector commitment
+        // Infinity permutation commitments remove soundness-critical terms.
+        let infinity = PodG1Point([0u8; 64]);
+        for (index, name) in ["s_sigma1", "s_sigma2", "s_sigma3"].into_iter().enumerate() {
+            let mut vk = template.clone();
+            vk.s_sigma[index] = infinity;
+            assert_eq!(
+                vk.clone().validate().unwrap_err(),
+                PlonkBatchError::InvalidVerifyingKey(name)
+            );
+            assert_eq!(
+                vk.trust().unwrap_err(),
+                PlonkBatchError::InvalidVerifyingKey(name)
+            );
+        }
+
+        // Selector commitments can be infinity but must still be on-curve.
         let mut vk = template.clone();
-        vk.q_m = PodG1Point([0u8; 64]);
+        vk.q_r.0[63] = vk.q_r.0[63].wrapping_add(1);
         assert_eq!(
             vk.validate().unwrap_err(),
-            PlonkBatchError::InvalidVerifyingKey("q_m")
-        );
-        let mut vk = template.clone();
-        vk.q_m = PodG1Point([0u8; 64]);
-        assert_eq!(
-            vk.trust().unwrap_err(),
-            PlonkBatchError::InvalidVerifyingKey("q_m")
+            PlonkBatchError::InvalidVerifyingKey("q_r")
         );
 
         // off-curve permutation commitment
@@ -305,19 +363,13 @@ mod tests {
             PlonkBatchError::InvalidVerifyingKey("g2_tau")
         );
 
-        // infinity [1]_2
-        let mut vk = template.clone();
-        vk.g2_gen = PodG2Point([0u8; 128]);
-        assert_eq!(
-            vk.validate().unwrap_err(),
-            PlonkBatchError::InvalidVerifyingKey("g2_gen")
-        );
-        let mut vk = template.clone();
-        vk.g2_gen = PodG2Point([0u8; 128]);
-        assert_eq!(
-            vk.trust().unwrap_err(),
-            PlonkBatchError::InvalidVerifyingKey("g2_gen")
-        );
+        // Both SRS points are required by the final pairing equation.
+        assert_infinity_rejected(template, "g2_gen", |vk| {
+            vk.g2_gen = PodG2Point([0u8; 128]);
+        });
+        assert_infinity_rejected(template, "g2_tau", |vk| {
+            vk.g2_tau = PodG2Point([0u8; 128]);
+        });
 
         // bad domain sizes: zero, not a power of two, too small, too large
         for bad in [0u64, 6, 2, 1 << 29] {
