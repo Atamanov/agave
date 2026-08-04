@@ -140,6 +140,38 @@ impl Fp {
         Self(limbs)
     }
 
+    /// Restore explicitly little-endian Montgomery limbs from authenticated
+    /// backend state, rejecting representations outside the canonical bound.
+    #[inline]
+    pub const fn from_montgomery_limbs(limbs: [u64; 4]) -> Option<Self> {
+        if lt4(&limbs, &P) {
+            Some(Self(limbs))
+        } else {
+            None
+        }
+    }
+
+    /// Return this element's canonical Montgomery limbs for backend state.
+    #[inline]
+    pub const fn to_montgomery_limbs(self) -> [u64; 4] {
+        self.0
+    }
+
+    /// Return the same value in the IFMA backend's five-limb radix-52
+    /// Montgomery domain (`value * 2^260 mod p`).
+    #[inline]
+    pub fn to_ifma_montgomery_limbs52(self) -> [u64; 5] {
+        let shifted = self.double().double().double().double().0;
+        const MASK52: u64 = (1u64 << 52) - 1;
+        [
+            shifted[0] & MASK52,
+            ((shifted[0] >> 52) | (shifted[1] << 12)) & MASK52,
+            ((shifted[1] >> 40) | (shifted[2] << 24)) & MASK52,
+            ((shifted[2] >> 28) | (shifted[3] << 36)) & MASK52,
+            shifted[3] >> 16,
+        ]
+    }
+
     /// Test-only escape hatch: wrap limbs with no canonicity check. Exists
     /// solely to drive kernels past their `< p` contract in controlled tests.
     #[cfg(test)]

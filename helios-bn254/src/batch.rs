@@ -30,18 +30,35 @@ use crate::{
     fr::{invert_raw as fr_invert_raw, mont_mul as fr_mont_mul},
     limb,
     msm::msm_variable_time_affine,
-    pairing::multi_pairing,
+    pairing::{
+        final_exponentiation,
+        miller::{
+            PREPARED_G2_BYTES as MILLER_PREPARED_G2_BYTES, PreparedG2, multi_miller_loop_mixed,
+            prepare_g2,
+        },
+        miller_loop, multi_miller_loop, multi_pairing,
+    },
 };
 
 /// Per-call cap on [`g1_msm`] points; exceeding it is [`InputError::CapExceeded`].
 pub const MSM_MAX_POINTS: usize = 2048;
 /// Per-call cap on [`pairing_product_is_one`] pairs.
 pub const PAIRING_MAX_PAIRS: usize = 256;
+/// Whether this linked artifact contains the AVX-512 IFMA pairing backend.
+pub const AVX512_IFMA_COMPILED: bool = cfg!(helios_avx512_ifma);
+/// Whether a validated call with this many nonidentity pairs selects batch8.
+pub const fn selects_ifma_batch8(nonidentity_pairs: usize) -> bool {
+    AVX512_IFMA_COMPILED && nonidentity_pairs >= 8
+}
 /// Per-call cap on [`pairing_map`] pairs.
-pub const PAIRING_MAP_MAX_PAIRS: usize = 16;
+/// Sixteen dynamic proof pairs plus two fixed-G2 folds for the same-VK
+/// Groth16 target-comparison construction.
+pub const PAIRING_MAP_MAX_PAIRS: usize = 18;
 /// Per-call cap on immutable registry targets consumed by
 /// [`trusted_gt_multiexp`].
 pub const TRUSTED_GT_MAX_TARGETS: usize = 16;
+/// Canonical account bytes for one Helios G2 Miller-line schedule.
+pub const PREPARED_G2_BYTES: usize = MILLER_PREPARED_G2_BYTES;
 /// Per-call cap on [`fr_lincomb`] and [`fr_batch_invert`] elements.
 pub const FR_MAX_ELEMS: usize = 2048;
 /// Encoded G1 point size: `x | y`, 32 bytes each.
@@ -113,6 +130,43 @@ pub struct GtBytes(pub [u8; GT_BYTES]);
 #[derive(Clone, Debug)]
 pub struct TrustedGt {
     value: Fp12,
+}
+
+/// A G2 point whose subgroup membership was validated while an authenticated
+/// registry account was initialized.
+#[derive(Clone, Debug)]
+pub struct RegisteredG2 {
+    source: G2Affine,
+    prepared: PreparedG2,
+}
+
+/// One dynamic G1 paired with a G2 point resolved from an authenticated,
+/// immutable registry account.
+#[derive(Clone, Debug)]
+pub struct RegisteredG2Pair {
+    /// Dynamic G1 operand, validated on every hot call.
+    pub g1: G1Bytes,
+    /// Opaque registry-resolved G2 operand.
+    pub g2: RegisteredG2,
+}
+
+/// Opaque selected-backend Miller output for a standalone final-exponentiation
+/// benchmark probe.
+#[derive(Clone, Debug)]
+pub struct FinalExponentiationProbe {
+    miller: Fp12,
+}
+
+/// Opaque post-final-exponentiation value; encoding is a separate step.
+#[derive(Clone, Debug)]
+pub struct FinalExponentiationResult {
+    value: Fp12,
+}
+
+/// Opaque canonical/on-curve G2 value for a standalone subgroup predicate.
+#[derive(Clone, Copy, Debug)]
+pub struct G2SubgroupProbe {
+    point: G2Affine,
 }
 
 // Exact Agave-facing spellings. `pub use` preserves tuple-struct constructors,
@@ -275,31 +329,81 @@ impl TrustedGt {
     /// membership. The registry must prove owner, source, and identifier
     /// bindings.
     pub fn from_canonical_subgroup_bytes(bytes: &GtBytes) -> Result<Self, InputError> {
-        let mut coefficients = [Fp::ZERO; 12];
-        for (coefficient, encoded) in coefficients.iter_mut().zip(bytes.0.chunks_exact(32)) {
-            let mut coefficient_bytes = [0u8; 32];
-            coefficient_bytes.copy_from_slice(encoded);
-            *coefficient = Fp::from_bytes_be(&coefficient_bytes).ok_or(InputError::NonCanonical)?;
-        }
-
-        let value = Fp12::new(
-            Fp6::new(
-                Fp2::new(coefficients[0], coefficients[1]),
-                Fp2::new(coefficients[2], coefficients[3]),
-                Fp2::new(coefficients[4], coefficients[5]),
-            ),
-            Fp6::new(
-                Fp2::new(coefficients[6], coefficients[7]),
-                Fp2::new(coefficients[8], coefficients[9]),
-                Fp2::new(coefficients[10], coefficients[11]),
-            ),
-        );
+        let value = decode_gt(bytes)?;
 
         if value.is_zero() || value.pow_limbs(&R) != Fp12::ONE {
             return Err(InputError::NotInSubgroup);
         }
 
         Ok(Self { value })
+    }
+
+    /// Recreate a target from a frozen authenticated registry entry.
+    ///
+    /// # Safety
+    ///
+    /// `bytes` must exactly match a target produced by [`TrustedGt::from_pair`]
+    /// during registry initialization and committed to the authenticated
+    /// account. Canonical encoding is checked, but the expensive GT subgroup
+    /// exponentiation is intentionally not repeated on the hot path.
+    pub unsafe fn from_authenticated_registry_bytes(bytes: &GtBytes) -> Result<Self, InputError> {
+        let value = decode_gt(bytes)?;
+        if value.is_zero() {
+            return Err(InputError::NotInSubgroup);
+        }
+        Ok(Self { value })
+    }
+
+    /// Canonical account representation of this authenticated target.
+    #[inline]
+    pub fn to_bytes(&self) -> GtBytes {
+        GtBytes::from_gt(&self.value)
+    }
+}
+
+impl RegisteredG2 {
+    /// Validate a canonical G2 source for insertion into a registry account.
+    #[inline]
+    pub fn validate_for_registry(source: &G2Bytes) -> Result<Self, InputError> {
+        let source = decode_g2(source)?;
+        if source.infinity {
+            return Err(InputError::ZeroInput);
+        }
+        let prepared = prepare_g2(&source);
+        Ok(Self { source, prepared })
+    }
+
+    /// Recreate a hot-path handle from an authenticated immutable account.
+    ///
+    /// # Safety
+    ///
+    /// `source` must be byte-for-byte an entry previously accepted by
+    /// [`RegisteredG2::validate_for_registry`] and committed to a frozen,
+    /// current-program-owned registry account. Canonical coordinates and the
+    /// curve equation are checked again, while the subgroup check is the work
+    /// intentionally saved by the registry.
+    pub unsafe fn from_authenticated_registry_bytes(
+        source: &G2Bytes,
+        prepared: &[u8],
+    ) -> Result<Self, InputError> {
+        let source = decode_g2_on_curve(source)?;
+        if source.infinity {
+            return Err(InputError::ZeroInput);
+        }
+        let prepared =
+            PreparedG2::from_registry_bytes(prepared).ok_or(InputError::InvalidLength)?;
+        Ok(Self { source, prepared })
+    }
+
+    /// Canonical source bytes stored in the registry account.
+    #[inline]
+    pub fn to_bytes(&self) -> G2Bytes {
+        encode_g2(&self.source)
+    }
+
+    /// Backend-versioned prepared schedule persisted next to the source binding.
+    pub fn prepared_bytes(&self) -> Vec<u8> {
+        self.prepared.to_registry_bytes()
     }
 }
 
@@ -403,6 +507,98 @@ pub fn pairing_map(pairs: &[PairBytes]) -> Result<GtBytes, InputError> {
     pairing_product(pairs).map(|value| GtBytes::from_gt(&value))
 }
 
+/// Pairing product with ordinary operands plus G2 operands resolved from an
+/// authenticated registry. Ordinary pairs retain full G2 subgroup validation;
+/// registered pairs skip only that repeated check and use the same backend
+/// dispatch and one shared final exponentiation.
+pub fn pairing_product_registered(
+    full: &[PairBytes],
+    registered: &[RegisteredG2Pair],
+) -> Result<bool, InputError> {
+    let count = full
+        .len()
+        .checked_add(registered.len())
+        .ok_or(InputError::CapExceeded)?;
+    if count == 0 {
+        return Err(InputError::ZeroInput);
+    }
+    if count > PAIRING_MAX_PAIRS {
+        return Err(InputError::CapExceeded);
+    }
+
+    let decoded = decode_pairs(full)?;
+    let mut registered_g1 = Vec::with_capacity(registered.len());
+    for pair in registered {
+        let g1 = pair.g1.to_affine()?;
+        if !g1.infinity {
+            registered_g1.push((g1, &pair.g2.prepared));
+        }
+    }
+    let full_refs: Vec<_> = decoded.iter().map(|(g1, g2)| (g1, g2)).collect();
+    let registered_refs: Vec<_> = registered_g1
+        .iter()
+        .map(|(g1, prepared)| (g1, *prepared))
+        .collect();
+    #[cfg(helios_avx512_ifma)]
+    let miller = if full_refs.len().saturating_add(registered_refs.len()) >= 8 {
+        crate::batch8::multi_miller8_mixed(&full_refs, &registered_refs)
+    } else {
+        multi_miller_loop_mixed(&full_refs, &registered_refs)
+    };
+    #[cfg(not(helios_avx512_ifma))]
+    let miller = multi_miller_loop_mixed(&full_refs, &registered_refs);
+    Ok(final_exponentiation(&miller).is_one())
+}
+
+/// Execute the standalone subgroup predicate after canonical/on-curve decode.
+/// This is a benchmark probe, not a substitute for normal validation.
+pub fn probe_g2_subgroup(source: &G2Bytes) -> Result<bool, InputError> {
+    Ok(run_g2_subgroup_probe(&prepare_g2_subgroup_probe(source)?))
+}
+
+/// Decode canonical coordinates and check the curve equation outside timing.
+pub fn prepare_g2_subgroup_probe(source: &G2Bytes) -> Result<G2SubgroupProbe, InputError> {
+    Ok(G2SubgroupProbe {
+        point: decode_g2_on_curve(source)?,
+    })
+}
+
+/// Execute only Helios' G2 subgroup predicate.
+pub fn run_g2_subgroup_probe(probe: &G2SubgroupProbe) -> bool {
+    probe.point.infinity || probe.point.is_in_correct_subgroup_assuming_on_curve()
+}
+
+/// Perform validation and the exact selected Miller path, leaving only final
+/// exponentiation and result encoding for [`run_final_exponentiation_probe`].
+pub fn prepare_final_exponentiation_probe(
+    pairs: &[PairBytes],
+) -> Result<FinalExponentiationProbe, InputError> {
+    if pairs.is_empty() {
+        return Err(InputError::ZeroInput);
+    }
+    if pairs.len() > PAIRING_MAX_PAIRS {
+        return Err(InputError::CapExceeded);
+    }
+    let decoded = decode_pairs(pairs)?;
+    Ok(FinalExponentiationProbe {
+        miller: pairing_miller_product(&decoded),
+    })
+}
+
+/// Execute only final exponentiation; canonical encoding is a separate step.
+pub fn run_final_exponentiation_probe(
+    probe: &FinalExponentiationProbe,
+) -> FinalExponentiationResult {
+    FinalExponentiationResult {
+        value: final_exponentiation(&probe.miller),
+    }
+}
+
+/// Canonically encode a completed FE result outside the timed probe.
+pub fn encode_final_exponentiation_result(result: &FinalExponentiationResult) -> GtBytes {
+    GtBytes::from_gt(&result.value)
+}
+
 /// Exponentiate runtime-resolved registry targets and return canonical GT.
 ///
 /// This is the arithmetic core for an opaque-target syscall whose public
@@ -484,6 +680,11 @@ fn pairing_product(pairs: &[PairBytes]) -> Result<Fp12, InputError> {
         return Err(InputError::CapExceeded);
     }
 
+    let decoded = decode_pairs(pairs)?;
+    Ok(pairing_product_decoded(&decoded))
+}
+
+fn decode_pairs(pairs: &[PairBytes]) -> Result<Vec<(G1Affine, G2Affine)>, InputError> {
     // Validate both partners before deciding whether an infinity pair can be
     // removed from the arithmetic product.
     let mut decoded = Vec::with_capacity(pairs.len());
@@ -506,20 +707,52 @@ fn pairing_product(pairs: &[PairBytes]) -> Result<Fp12, InputError> {
             decoded.push((g1, g2));
         }
     }
+    Ok(decoded)
+}
+
+fn pairing_miller_product(decoded: &[(G1Affine, G2Affine)]) -> Fp12 {
     if decoded.is_empty() {
-        return Ok(Fp12::ONE);
+        return Fp12::ONE;
     }
 
-    // With >= 8 non-identity terms an AVX-512 IFMA build runs the Miller loops
-    // 8-wide ([`crate::batch8::multi_pairing8`]) under one shared final
-    // exponentiation. Below 8 the scalar path wins: it keeps the common-Q
-    // bilinearity fold and pays no radix-52 domain conversion.
     #[cfg(helios_avx512_ifma)]
     if decoded.len() >= 8 {
-        return Ok(crate::batch8::multi_pairing8(&decoded));
+        return crate::batch8::multi_miller8(decoded);
+    }
+
+    let mut nonzero = decoded.iter();
+    let (first_p, common_q) = nonzero.next().expect("nonempty checked above");
+    let mut sum = crate::G1Projective::from(*first_p);
+    let mut all_q_equal = true;
+    for (p, q) in nonzero {
+        if q != common_q {
+            all_q_equal = false;
+            break;
+        }
+        sum = sum.add_mixed(*p);
+    }
+    if all_q_equal {
+        if sum.is_identity() {
+            return Fp12::ONE;
+        }
+        return miller_loop(&sum.to_affine(), common_q);
     }
     let refs: Vec<_> = decoded.iter().map(|(g1, g2)| (g1, g2)).collect();
-    Ok(multi_pairing(&refs))
+    multi_miller_loop(&refs)
+}
+
+fn pairing_product_decoded(decoded: &[(G1Affine, G2Affine)]) -> Fp12 {
+    if decoded.is_empty() {
+        return Fp12::ONE;
+    }
+
+    // Keep the normal full-pairing path on the same tuned backend dispatch.
+    #[cfg(helios_avx512_ifma)]
+    if decoded.len() >= 8 {
+        return crate::batch8::multi_pairing8(decoded);
+    }
+    let refs: Vec<_> = decoded.iter().map(|(g1, g2)| (g1, g2)).collect();
+    multi_pairing(&refs)
 }
 
 /// `sum(a[i] * b[i])` in Fr, with one canonical output reduction.
@@ -625,6 +858,15 @@ fn decode_g1(bytes: &G1Bytes) -> Result<G1Affine, InputError> {
 
 #[inline]
 fn decode_g2(bytes: &G2Bytes) -> Result<G2Affine, InputError> {
+    let point = decode_g2_on_curve(bytes)?;
+    if !point.infinity && !point.is_in_correct_subgroup_assuming_on_curve() {
+        return Err(InputError::NotInSubgroup);
+    }
+    Ok(point)
+}
+
+#[inline]
+fn decode_g2_on_curve(bytes: &G2Bytes) -> Result<G2Affine, InputError> {
     if bytes.0.iter().all(|byte| *byte == 0) {
         return Ok(G2Affine::identity());
     }
@@ -640,10 +882,28 @@ fn decode_g2(bytes: &G2Bytes) -> Result<G2Affine, InputError> {
     if !point.is_on_curve() {
         return Err(InputError::NotOnCurve);
     }
-    if !point.is_in_correct_subgroup_assuming_on_curve() {
-        return Err(InputError::NotInSubgroup);
-    }
     Ok(point)
+}
+
+fn decode_gt(bytes: &GtBytes) -> Result<Fp12, InputError> {
+    let mut coefficients = [Fp::ZERO; 12];
+    for (coefficient, encoded) in coefficients.iter_mut().zip(bytes.0.chunks_exact(32)) {
+        let mut coefficient_bytes = [0u8; 32];
+        coefficient_bytes.copy_from_slice(encoded);
+        *coefficient = Fp::from_bytes_be(&coefficient_bytes).ok_or(InputError::NonCanonical)?;
+    }
+    Ok(Fp12::new(
+        Fp6::new(
+            Fp2::new(coefficients[0], coefficients[1]),
+            Fp2::new(coefficients[2], coefficients[3]),
+            Fp2::new(coefficients[4], coefficients[5]),
+        ),
+        Fp6::new(
+            Fp2::new(coefficients[6], coefficients[7]),
+            Fp2::new(coefficients[8], coefficients[9]),
+            Fp2::new(coefficients[10], coefficients[11]),
+        ),
+    ))
 }
 
 #[inline]

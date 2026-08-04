@@ -9,14 +9,14 @@
 //! production batch-verify entry (8-wide Miller loops, one shared scalar
 //! final exponentiation); `pairing8`/`final_exp8` stay as the 8-wide oracle.
 
-use core::ops::Neg;
+use {alloc::vec::Vec, core::ops::Neg};
 
 use crate::consts::ATE_LOOP_COUNT;
 use crate::fp::Fp;
 use crate::fp::avx512ifma::FpVec8;
 #[cfg(test)]
 use crate::fp12::X_W4;
-use crate::pairing::miller::{mul_by_char, twist_b_f2};
+use crate::pairing::miller::{PreparedFp2x52, PreparedG2, mul_by_char, twist_b_f2};
 use crate::{Fp2, Fp6, Fp12, G1Affine, G2Affine};
 
 /// `c0 + c1 u`, `u^2 = -1`, eight lanes.
@@ -37,6 +37,13 @@ impl Fp2x8 {
     pub(crate) fn store(&self) -> [Fp2; 8] {
         let (c0, c1) = (self.c0.store(), self.c1.store());
         core::array::from_fn(|i| Fp2::new(c0[i], c1[i]))
+    }
+
+    fn load_prepared(values: &[PreparedFp2x52; 8]) -> Self {
+        Self {
+            c0: FpVec8::load_radix52_montgomery(&core::array::from_fn(|lane| values[lane].0)),
+            c1: FpVec8::load_radix52_montgomery(&core::array::from_fn(|lane| values[lane].1)),
+        }
     }
 
     #[inline(always)]
@@ -106,6 +113,14 @@ impl Fp2x8 {
         Self {
             c0: self.c0.mul(f),
             c1: self.c1.mul(f),
+        }
+    }
+
+    #[inline(always)]
+    fn blend(&self, other: &Self, mask: u8) -> Self {
+        Self {
+            c0: self.c0.blend(&other.c0, mask),
+            c1: self.c1.blend(&other.c1, mask),
         }
     }
 }
@@ -440,6 +455,34 @@ fn ell8(f: &mut Fp12x8, coeffs: &EllCoeff8, px: &FpVec8, py: &FpVec8) {
     *f = f.mul_by_034(&c0, &c3, &c4);
 }
 
+#[inline]
+fn select_prepared_coefficients(
+    computed: EllCoeff8,
+    registered: &[Option<&PreparedG2>; 8],
+    registered_mask: u8,
+    coefficient_index: usize,
+) -> EllCoeff8 {
+    if registered_mask == 0 {
+        return computed;
+    }
+    let coefficients: [(PreparedFp2x52, PreparedFp2x52, PreparedFp2x52); 8] =
+        core::array::from_fn(|lane| {
+            registered[lane]
+                .map(|prepared| prepared.coefficients_ifma[coefficient_index])
+                .unwrap_or((([0; 5], [0; 5]), ([0; 5], [0; 5]), ([0; 5], [0; 5])))
+        });
+    let prepared = (
+        Fp2x8::load_prepared(&core::array::from_fn(|lane| coefficients[lane].0)),
+        Fp2x8::load_prepared(&core::array::from_fn(|lane| coefficients[lane].1)),
+        Fp2x8::load_prepared(&core::array::from_fn(|lane| coefficients[lane].2)),
+    );
+    (
+        computed.0.blend(&prepared.0, registered_mask),
+        computed.1.blend(&prepared.1, registered_mask),
+        computed.2.blend(&prepared.2, registered_mask),
+    )
+}
+
 /// 8-wide optimal-ate Miller loop: eight independent pairings, one per lane,
 /// all following the same ate schedule in lockstep. Inputs must be
 /// non-identity (the batch-verify caller filters identities).
@@ -493,6 +536,86 @@ pub(crate) fn miller8(p: &[G1Affine; 8], q: &[G2Affine; 8]) -> Fp12x8 {
     ell8(&mut f, &coeffs, &px, &py);
     let coeffs = r.add_in_place(&q2x, &q2y);
     ell8(&mut f, &coeffs, &px, &py);
+    f
+}
+
+/// Eight-lane Miller loop with authenticated prepared schedules injected into
+/// selected lanes. Dummy G2 states keep the vector control flow uniform; each
+/// dummy line is replaced in registers before it can affect the Fp12 lane.
+fn miller8_mixed(
+    p: &[G1Affine; 8],
+    q: &[G2Affine; 8],
+    registered: &[Option<&PreparedG2>; 8],
+) -> Fp12x8 {
+    let registered_mask = registered
+        .iter()
+        .enumerate()
+        .fold(0u8, |mask, (lane, prepared)| {
+            if prepared.is_some() {
+                mask | (1u8 << lane)
+            } else {
+                mask
+            }
+        });
+    let px = FpVec8::load(&core::array::from_fn(|lane| p[lane].x));
+    let py = FpVec8::load(&core::array::from_fn(|lane| p[lane].y));
+    let qx = Fp2x8::load(&core::array::from_fn(|lane| q[lane].x));
+    let qy = Fp2x8::load(&core::array::from_fn(|lane| q[lane].y));
+    let nqy = qy.neg();
+    let twist_b = {
+        let value = twist_b_f2();
+        Fp2x8::broadcast(Fp2::new(Fp(value.0), Fp(value.1)))
+    };
+    let inv2 = FpVec8::load(&[Fp::INV_TWO; 8]);
+    let q1: [G2Affine; 8] = core::array::from_fn(|lane| mul_by_char(q[lane]));
+    let q2: [G2Affine; 8] = core::array::from_fn(|lane| mul_by_char(q1[lane]).neg());
+    let q1x = Fp2x8::load(&core::array::from_fn(|lane| q1[lane].x));
+    let q1y = Fp2x8::load(&core::array::from_fn(|lane| q1[lane].y));
+    let q2x = Fp2x8::load(&core::array::from_fn(|lane| q2[lane].x));
+    let q2y = Fp2x8::load(&core::array::from_fn(|lane| q2[lane].y));
+
+    let mut r = G2x8::from_affine(qx, qy);
+    let mut f = Fp12x8::one();
+    let mut coefficient_index = 0usize;
+    for i in (1..ATE_LOOP_COUNT.len()).rev() {
+        if i != ATE_LOOP_COUNT.len() - 1 {
+            f = f.square();
+        }
+        let computed = r.double_in_place(&twist_b, &inv2);
+        let coefficients =
+            select_prepared_coefficients(computed, registered, registered_mask, coefficient_index);
+        coefficient_index += 1;
+        if i == ATE_LOOP_COUNT.len() - 1 {
+            f = line_value8(&coefficients, &px, &py);
+        } else {
+            ell8(&mut f, &coefficients, &px, &py);
+        }
+        let computed = match ATE_LOOP_COUNT[i - 1] {
+            1 => Some(r.add_in_place(&qx, &qy)),
+            -1 => Some(r.add_in_place(&qx, &nqy)),
+            _ => None,
+        };
+        if let Some(computed) = computed {
+            let coefficients = select_prepared_coefficients(
+                computed,
+                registered,
+                registered_mask,
+                coefficient_index,
+            );
+            coefficient_index += 1;
+            ell8(&mut f, &coefficients, &px, &py);
+        }
+    }
+    for computed in [r.add_in_place(&q1x, &q1y), r.add_in_place(&q2x, &q2y)] {
+        let coefficients =
+            select_prepared_coefficients(computed, registered, registered_mask, coefficient_index);
+        coefficient_index += 1;
+        ell8(&mut f, &coefficients, &px, &py);
+    }
+    debug_assert_eq!(
+        coefficient_index,
+        crate::pairing::miller::PREPARED_G2_COEFFICIENTS
+    );
     f
 }
 
@@ -627,13 +750,11 @@ pub(crate) fn pairing8(p: &[G1Affine; 8], q: &[G2Affine; 8]) -> Fp12x8 {
     final_exp8(&miller8(p, q))
 }
 
-/// Batch multi-pairing `prod_i e(p_i, q_i)`, the batch-verification primitive.
-/// The Miller loops run 8-wide; their product shares a single final
-/// exponentiation, so the final exp is amortized across the whole batch (mcl's
-/// `millerLoopVec` shares it too, but has no BN254 IFMA for the Miller loops).
-/// Inputs must be non-identity (the batch-verify caller validates upstream).
-pub(crate) fn multi_pairing8(pairs: &[(G1Affine, G2Affine)]) -> Fp12 {
-    use crate::pairing::final_exponentiation;
+/// Product of Miller-loop outputs using the 8-wide IFMA path.
+///
+/// Inputs must be non-identity and validated by the public byte facade. This
+/// split is also the exact standalone-final-exponentiation benchmark seam.
+pub(crate) fn multi_miller8(pairs: &[(G1Affine, G2Affine)]) -> Fp12 {
     use crate::pairing::miller::miller_loop;
 
     let mut acc = Fp12::ONE;
@@ -648,7 +769,69 @@ pub(crate) fn multi_pairing8(pairs: &[(G1Affine, G2Affine)]) -> Fp12 {
     for &(p, q) in chunks.remainder() {
         acc *= miller_loop(&p, &q);
     }
-    final_exponentiation(&acc)
+    acc
+}
+
+#[derive(Clone, Copy)]
+enum MixedPair<'a> {
+    Full(&'a G1Affine, &'a G2Affine),
+    Registered(&'a G1Affine, &'a PreparedG2),
+}
+
+/// Mixed full/prepared Miller product using IFMA for every complete group of
+/// eight lanes and the scalar mixed loop only for the final remainder.
+pub(crate) fn multi_miller8_mixed(
+    full: &[(&G1Affine, &G2Affine)],
+    registered: &[(&G1Affine, &PreparedG2)],
+) -> Fp12 {
+    use crate::pairing::miller::multi_miller_loop_mixed;
+
+    let lanes: Vec<_> = full
+        .iter()
+        .map(|&(p, q)| MixedPair::Full(p, q))
+        .chain(
+            registered
+                .iter()
+                .map(|&(p, prepared)| MixedPair::Registered(p, prepared)),
+        )
+        .collect();
+    let dummy_q = G2Affine::arkworks_generator();
+    let mut acc = Fp12::ONE;
+    let mut chunks = lanes.chunks_exact(8);
+    for chunk in &mut chunks {
+        let p = core::array::from_fn(|lane| match chunk[lane] {
+            MixedPair::Full(p, _) | MixedPair::Registered(p, _) => *p,
+        });
+        let q = core::array::from_fn(|lane| match chunk[lane] {
+            MixedPair::Full(_, q) => *q,
+            MixedPair::Registered(_, _) => dummy_q,
+        });
+        let prepared = core::array::from_fn(|lane| match chunk[lane] {
+            MixedPair::Full(_, _) => None,
+            MixedPair::Registered(_, prepared) => Some(prepared),
+        });
+        for value in miller8_mixed(&p, &q, &prepared).store() {
+            acc *= value;
+        }
+    }
+    let mut remainder_full = Vec::new();
+    let mut remainder_registered = Vec::new();
+    for lane in chunks.remainder() {
+        match *lane {
+            MixedPair::Full(p, q) => remainder_full.push((p, q)),
+            MixedPair::Registered(p, prepared) => remainder_registered.push((p, prepared)),
+        }
+    }
+    if !remainder_full.is_empty() || !remainder_registered.is_empty() {
+        acc *= multi_miller_loop_mixed(&remainder_full, &remainder_registered);
+    }
+    acc
+}
+
+/// Batch multi-pairing `prod_i e(p_i, q_i)`, the batch-verification primitive.
+/// The Miller loops run 8-wide and share a single final exponentiation.
+pub(crate) fn multi_pairing8(pairs: &[(G1Affine, G2Affine)]) -> Fp12 {
+    crate::pairing::final_exponentiation(&multi_miller8(pairs))
 }
 
 #[cfg(test)]
@@ -756,6 +939,74 @@ mod tests {
         for i in 0..8 {
             assert_eq!(got[i], miller_loop(&p[i], &q[i]), "lane {i}");
         }
+    }
+
+    #[test]
+    fn mixed_miller8_matches_scalar_for_registry_splits() {
+        use crate::Fr;
+        use crate::pairing::miller::prepare_g2;
+        use crate::{G1Projective, G2Projective};
+
+        // Unoptimized AVX-512 field kernels have a much larger compiler-created
+        // stack frame than release builtins. Give this debug differential test
+        // an explicit stack so its exact cargo-test invocation is reliable.
+        std::thread::Builder::new()
+            .name("mixed-miller8-differential".to_owned())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let g1 = G1Projective::generator();
+                let g2 = G2Projective::from(G2Affine::test_generator());
+                let p: [G1Affine; 8] = core::array::from_fn(|index| {
+                    g1.mul(Fr::from_raw([1 + index as u64, 7, 0, 0]))
+                        .to_affine()
+                });
+                let q: [G2Affine; 8] = core::array::from_fn(|index| {
+                    g2.mul(Fr::from_raw([3 + index as u64, 9, 0, 0]))
+                        .to_affine()
+                });
+                // Each prepared schedule owns roughly 37 KiB of authenticated
+                // backend state. Construct the fixture directly on the heap.
+                let prepared: Vec<PreparedG2> = q.iter().map(prepare_g2).collect();
+
+                for full_count in [0usize, 2, 5, 8] {
+                    let full: Vec<_> = (0..full_count)
+                        .map(|index| (&p[index], &q[index]))
+                        .collect();
+                    let registered: Vec<_> = (full_count..8)
+                        .map(|index| (&p[index], &prepared[index]))
+                        .collect();
+                    let got = mixed_ifma_product(&full, &registered);
+                    let expected = mixed_scalar_product(&full, &registered);
+                    assert_eq!(
+                        got,
+                        expected,
+                        "full={full_count}, registered={}",
+                        8usize.saturating_sub(full_count),
+                    );
+                }
+            })
+            .expect("spawn mixed Miller differential")
+            .join()
+            .expect("mixed Miller differential panicked");
+    }
+
+    // Keep the two large arithmetic kernels out of the fixture's stack frame.
+    // The production hot path likewise passes prepared schedules by reference;
+    // it never copies the registry's serialized schedule into a stack array.
+    #[inline(never)]
+    fn mixed_ifma_product(
+        full: &[(&G1Affine, &G2Affine)],
+        registered: &[(&G1Affine, &PreparedG2)],
+    ) -> Fp12 {
+        multi_miller8_mixed(full, registered)
+    }
+
+    #[inline(never)]
+    fn mixed_scalar_product(
+        full: &[(&G1Affine, &G2Affine)],
+        registered: &[(&G1Affine, &PreparedG2)],
+    ) -> Fp12 {
+        crate::pairing::miller::multi_miller_loop_mixed(full, registered)
     }
 
     #[test]

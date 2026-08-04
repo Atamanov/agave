@@ -357,6 +357,17 @@ fn mont_sos_mac_8(a: &[[__m512i; 5]], b: &[[__m512i; 5]]) -> [__m512i; 5] {
 }
 
 impl FpVec8 {
+    /// Load values already stored in the radix-52 Montgomery domain.
+    pub(crate) fn load_radix52_montgomery(values: &[[u64; 5]; 8]) -> Self {
+        let lanes: [[u64; 8]; 5] =
+            core::array::from_fn(|limb| core::array::from_fn(|lane| values[lane][limb]));
+        unsafe {
+            Self {
+                l: core::array::from_fn(|limb| _mm512_loadu_si512(lanes[limb].as_ptr().cast())),
+            }
+        }
+    }
+
     /// Convert eight canonical `Fp` (4x64 Montgomery) into the batched
     /// radix-52 domain: repack, then one batched multiplication by
     /// `2^264 mod p`.
@@ -401,6 +412,18 @@ impl FpVec8 {
                 lanes[4][lane],
             ]))
         })
+    }
+
+    /// Select `other` for mask-set lanes and `self` for the remaining lanes.
+    #[inline(always)]
+    pub(crate) fn blend(&self, other: &Self, mask: u8) -> Self {
+        unsafe {
+            Self {
+                l: core::array::from_fn(|index| {
+                    _mm512_mask_blend_epi64(mask, self.l[index], other.l[index])
+                }),
+            }
+        }
     }
 
     #[inline(always)]
@@ -649,6 +672,16 @@ mod tests {
             let input = fp8(chunk);
             assert_eq!(FpVec8::load(&input).store(), input);
         }
+    }
+
+    #[test]
+    fn preconverted_radix52_load_matches_regular_load() {
+        let values: [Fp; 8] = core::array::from_fn(|index| Fp::from_u64(11 + index as u64));
+        let preconverted = core::array::from_fn(|index| values[index].to_ifma_montgomery_limbs52());
+        assert_eq!(
+            FpVec8::load_radix52_montgomery(&preconverted).store(),
+            values
+        );
     }
 
     #[test]

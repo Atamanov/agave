@@ -213,7 +213,7 @@ fn pairing_products_match_arkworks() {
     // n >= 8 crosses the AVX-512 IFMA 8-wide dispatch threshold in
     // pairing_product_is_one, so on an IFMA build this gates the batched path
     // against arkworks; on a scalar build it gates multi_pairing.
-    for n in [1usize, 2, 4, 7, 8, 9, 16, 53] {
+    for n in [1usize, 2, 4, 7, 8, 9, 16, 18, 53] {
         let g1: Vec<_> = (0..n).map(|_| ark_g1(&mut rng)).collect();
         let g2: Vec<_> = (0..n).map(|_| ark_g2(&mut rng)).collect();
         let pairs: Vec<_> = g1

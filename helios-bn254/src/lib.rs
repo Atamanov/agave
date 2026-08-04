@@ -57,12 +57,17 @@ mod wnaf;
 mod arkworks_bn254_0_5_tests;
 
 pub use batch::{
-    AltBn128BatchError, FR_MAX_ELEMS, G1_BYTES, G1Bytes, G2_BYTES, G2Bytes, GT_BYTES, GtBytes,
-    InputError, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS, PairBytes,
-    PodG1G2Pair, PodG1Point, PodG2Point, PodGt, PodPairingResult, PodScalar, SCALAR_BYTES,
-    ScalarBytes, TRUSTED_GT_MAX_TARGETS, TrustedGt, Version, alt_bn128_fr_batch_invert,
-    alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check, alt_bn128_pairing_map,
-    fr_batch_invert, fr_lincomb, g1_msm, pairing_map, pairing_product_is_one, trusted_gt_multiexp,
+    AVX512_IFMA_COMPILED, AltBn128BatchError, FR_MAX_ELEMS, FinalExponentiationProbe,
+    FinalExponentiationResult, G1_BYTES, G1Bytes, G2_BYTES, G2Bytes, G2SubgroupProbe, GT_BYTES,
+    GtBytes, InputError, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS,
+    PREPARED_G2_BYTES, PairBytes, PodG1G2Pair, PodG1Point, PodG2Point, PodGt, PodPairingResult,
+    PodScalar, RegisteredG2, RegisteredG2Pair, SCALAR_BYTES, ScalarBytes, TRUSTED_GT_MAX_TARGETS,
+    TrustedGt, Version, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
+    alt_bn128_pairing_check, alt_bn128_pairing_map, encode_final_exponentiation_result,
+    fr_batch_invert, fr_lincomb, g1_msm, pairing_map, pairing_product_is_one,
+    pairing_product_registered, prepare_final_exponentiation_probe, prepare_g2_subgroup_probe,
+    probe_g2_subgroup, run_final_exponentiation_probe, run_g2_subgroup_probe, selects_ifma_batch8,
+    trusted_gt_multiexp,
 };
 // Compile README examples as doctests without duplicating them in crate docs.
 #[cfg(doctest)]

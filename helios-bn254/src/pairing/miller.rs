@@ -39,6 +39,127 @@ struct G2Hom {
 
 type EllCoeff = (F2, F2, F2);
 
+/// Number of D-twist line triples in one non-identity BN254 G2 schedule.
+pub(crate) const PREPARED_G2_COEFFICIENTS: usize = 87;
+const PREPARED_G2_SCALAR_BYTES: usize = PREPARED_G2_COEFFICIENTS * 3 * 2 * 32;
+const PREPARED_G2_IFMA_BYTES: usize = PREPARED_G2_COEFFICIENTS * 3 * 2 * 5 * 8;
+/// Backend state for scalar Montgomery coefficients plus their radix-52 IFMA
+/// form. The latter removes every hot-path coefficient-domain conversion.
+pub(crate) const PREPARED_G2_BYTES: usize = PREPARED_G2_SCALAR_BYTES + PREPARED_G2_IFMA_BYTES;
+
+pub(crate) type PreparedFp2x52 = ([u64; 5], [u64; 5]);
+pub(crate) type PreparedTriple52 = (PreparedFp2x52, PreparedFp2x52, PreparedFp2x52);
+
+/// G2-only Miller line schedule. Coefficients are stored independently of G1
+/// so one authenticated VK entry can serve arbitrary dynamic G1 operands.
+#[derive(Clone, Debug)]
+pub(crate) struct PreparedG2 {
+    pub(crate) coefficients: Vec<(Fp2, Fp2, Fp2)>,
+    pub(crate) coefficients_ifma: Vec<PreparedTriple52>,
+}
+
+impl PreparedG2 {
+    /// Backend-versioned account form: explicit little-endian Montgomery limbs.
+    pub(crate) fn to_registry_bytes(&self) -> Vec<u8> {
+        let mut output = Vec::with_capacity(PREPARED_G2_BYTES);
+        for triple in &self.coefficients {
+            for coefficient in [triple.0, triple.1, triple.2] {
+                for component in [coefficient.c0, coefficient.c1] {
+                    for limb in component.to_montgomery_limbs() {
+                        output.extend_from_slice(&limb.to_le_bytes());
+                    }
+                }
+            }
+        }
+        for triple in &self.coefficients_ifma {
+            for coefficient in [triple.0, triple.1, triple.2] {
+                for component in [coefficient.0, coefficient.1] {
+                    for limb in component {
+                        output.extend_from_slice(&limb.to_le_bytes());
+                    }
+                }
+            }
+        }
+        debug_assert_eq!(output.len(), PREPARED_G2_BYTES);
+        output
+    }
+
+    /// Restore an authenticated backend-versioned account schedule without
+    /// repeating 522 canonical-to-Montgomery field conversions.
+    pub(crate) fn from_registry_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != PREPARED_G2_BYTES {
+            return None;
+        }
+        let (scalar_bytes, ifma_bytes) = bytes.split_at(PREPARED_G2_SCALAR_BYTES);
+        let mut coefficients = Vec::with_capacity(PREPARED_G2_COEFFICIENTS);
+        for triple in scalar_bytes.chunks_exact(3 * 2 * 32) {
+            let mut fp2 = [Fp2::ZERO; 3];
+            for (output, encoded) in fp2.iter_mut().zip(triple.chunks_exact(64)) {
+                let mut components = [Fp::ZERO; 2];
+                for (component, encoded_component) in
+                    components.iter_mut().zip(encoded.chunks_exact(32))
+                {
+                    let mut limbs = [0u64; 4];
+                    for (limb, bytes) in limbs.iter_mut().zip(encoded_component.chunks_exact(8)) {
+                        *limb = u64::from_le_bytes(bytes.try_into().ok()?);
+                    }
+                    *component = Fp::from_montgomery_limbs(limbs)?;
+                }
+                let [c0, c1] = components;
+                *output = Fp2::new(c0, c1);
+            }
+            coefficients.push((fp2[0], fp2[1], fp2[2]));
+        }
+        let mut coefficients_ifma = Vec::with_capacity(PREPARED_G2_COEFFICIENTS);
+        for triple in ifma_bytes.chunks_exact(3 * 2 * 5 * 8) {
+            let mut fp2 = [([0u64; 5], [0u64; 5]); 3];
+            for (output, encoded) in fp2.iter_mut().zip(triple.chunks_exact(2 * 5 * 8)) {
+                let mut components = [[0u64; 5]; 2];
+                for (component, encoded_component) in
+                    components.iter_mut().zip(encoded.chunks_exact(5 * 8))
+                {
+                    for (limb, bytes) in component.iter_mut().zip(encoded_component.chunks_exact(8))
+                    {
+                        *limb = u64::from_le_bytes(bytes.try_into().ok()?);
+                    }
+                    if !radix52_montgomery_is_canonical(component) {
+                        return None;
+                    }
+                }
+                *output = (components[0], components[1]);
+            }
+            coefficients_ifma.push((fp2[0], fp2[1], fp2[2]));
+        }
+        (coefficients.len() == PREPARED_G2_COEFFICIENTS
+            && coefficients_ifma.len() == PREPARED_G2_COEFFICIENTS)
+            .then_some(Self {
+                coefficients,
+                coefficients_ifma,
+            })
+    }
+}
+
+fn radix52_montgomery_is_canonical(limbs: &[u64; 5]) -> bool {
+    const MASK52: u64 = (1u64 << 52) - 1;
+    if limbs.iter().any(|limb| *limb > MASK52) {
+        return false;
+    }
+    let raw = [
+        limbs[0] | (limbs[1] << 52),
+        (limbs[1] >> 12) | (limbs[2] << 40),
+        (limbs[2] >> 24) | (limbs[3] << 28),
+        (limbs[3] >> 36) | (limbs[4] << 16),
+    ];
+    Fp::from_montgomery_limbs(raw).is_some()
+}
+
+fn fp2_to_ifma(value: Fp2) -> PreparedFp2x52 {
+    (
+        value.c0.to_ifma_montgomery_limbs52(),
+        value.c1.to_ifma_montgomery_limbs52(),
+    )
+}
+
 /// `mul_by_034` operands: line coefficients with the G1 scalings applied.
 type ScaledCoeffs = (Fp2, Fp2, Fp2);
 
@@ -314,6 +435,161 @@ pub fn miller_loop(p: &G1Affine, q: &G2Affine) -> Fp12 {
 
 /// Fused Miller loop over several pairs sharing one Fp12 accumulator;
 /// callers filter identity pairs and apply the final exponentiation.
+pub(crate) fn prepare_g2(q: &G2Affine) -> PreparedG2 {
+    assert!(!q.is_identity(), "prepared G2 must be non-identity");
+    let mut r = G2Hom::from_affine(q);
+    let qx = f2_from(q.x);
+    let qy = f2_from(q.y);
+    let nqy = f2_neg(qy);
+    let mut coefficients = Vec::with_capacity(PREPARED_G2_COEFFICIENTS);
+    let mut push = |coefficient: EllCoeff| {
+        coefficients.push((
+            f2_to(coefficient.0),
+            f2_to(coefficient.1),
+            f2_to(coefficient.2),
+        ));
+    };
+    for i in (1..ATE_LOOP_COUNT.len()).rev() {
+        push(r.double_in_place());
+        match ATE_LOOP_COUNT[i - 1] {
+            1 => push(r.add_in_place(qx, qy)),
+            -1 => push(r.add_in_place(qx, nqy)),
+            _ => {}
+        }
+    }
+    let q1 = mul_by_char(*q);
+    let q2 = -mul_by_char(q1);
+    push(r.add_in_place(f2_from(q1.x), f2_from(q1.y)));
+    push(r.add_in_place(f2_from(q2.x), f2_from(q2.y)));
+    assert_eq!(coefficients.len(), PREPARED_G2_COEFFICIENTS);
+    let coefficients_ifma = coefficients
+        .iter()
+        .map(|triple| {
+            (
+                fp2_to_ifma(triple.0),
+                fp2_to_ifma(triple.1),
+                fp2_to_ifma(triple.2),
+            )
+        })
+        .collect();
+    PreparedG2 {
+        coefficients,
+        coefficients_ifma,
+    }
+}
+
+fn ell_prepared(f: &mut Fp12, coeffs: &(Fp2, Fp2, Fp2), p: &G1Affine) {
+    f.mul_by_034_assign(coeffs.0.mul_by_fp(p.y), coeffs.1.mul_by_fp(p.x), coeffs.2);
+}
+
+fn first_or_multiply(f: &mut Fp12, initialized: &mut bool, coeffs: &(Fp2, Fp2, Fp2), p: &G1Affine) {
+    if *initialized {
+        ell_prepared(f, coeffs, p);
+    } else {
+        let scaled = (coeffs.0.mul_by_fp(p.y), coeffs.1.mul_by_fp(p.x), coeffs.2);
+        *f = line_value(&scaled);
+        *initialized = true;
+    }
+}
+
+/// Mixed Miller product over ordinary G2 points and authenticated prepared
+/// schedules. Registered operands execute no G2 subgroup predicate and no G2
+/// double/add line preparation on this hot path.
+pub(crate) fn multi_miller_loop_mixed(
+    full: &[(&G1Affine, &G2Affine)],
+    registered: &[(&G1Affine, &PreparedG2)],
+) -> Fp12 {
+    struct FullState<'a> {
+        p: &'a G1Affine,
+        r: G2Hom,
+        qx: F2,
+        qy: F2,
+        nqy: F2,
+        q: G2Affine,
+    }
+    let mut full_states = Vec::with_capacity(full.len());
+    for &(p, q) in full {
+        if p.is_identity() || q.is_identity() {
+            continue;
+        }
+        let qx = f2_from(q.x);
+        let qy = f2_from(q.y);
+        full_states.push(FullState {
+            p,
+            r: G2Hom::from_affine(q),
+            qx,
+            qy,
+            nqy: f2_neg(qy),
+            q: *q,
+        });
+    }
+    let registered: Vec<_> = registered
+        .iter()
+        .copied()
+        .filter(|(p, _)| !p.is_identity())
+        .collect();
+    if full_states.is_empty() && registered.is_empty() {
+        return Fp12::ONE;
+    }
+
+    let mut f = Fp12::ONE;
+    let mut initialized = false;
+    let mut prepared_index = 0usize;
+    for i in (1..ATE_LOOP_COUNT.len()).rev() {
+        if i != ATE_LOOP_COUNT.len() - 1 {
+            f.square_in_place();
+        }
+        for state in &mut full_states {
+            let coefficient = state.r.double_in_place();
+            let coefficient = (
+                f2_to(coefficient.0),
+                f2_to(coefficient.1),
+                f2_to(coefficient.2),
+            );
+            first_or_multiply(&mut f, &mut initialized, &coefficient, state.p);
+        }
+        for (p, prepared) in &registered {
+            first_or_multiply(
+                &mut f,
+                &mut initialized,
+                &prepared.coefficients[prepared_index],
+                p,
+            );
+        }
+        prepared_index += 1;
+        if let digit @ (1 | -1) = ATE_LOOP_COUNT[i - 1] {
+            for state in &mut full_states {
+                let coefficient = if digit == 1 {
+                    state.r.add_in_place(state.qx, state.qy)
+                } else {
+                    state.r.add_in_place(state.qx, state.nqy)
+                };
+                ell(&mut f, &coefficient, state.p);
+            }
+            for (p, prepared) in &registered {
+                ell_prepared(&mut f, &prepared.coefficients[prepared_index], p);
+            }
+            prepared_index += 1;
+        }
+    }
+    for state in &mut full_states {
+        let q1 = mul_by_char(state.q);
+        let q2 = -mul_by_char(q1);
+        let coefficient = state.r.add_in_place(f2_from(q1.x), f2_from(q1.y));
+        ell(&mut f, &coefficient, state.p);
+        let coefficient = state.r.add_in_place(f2_from(q2.x), f2_from(q2.y));
+        ell(&mut f, &coefficient, state.p);
+    }
+    for (p, prepared) in &registered {
+        ell_prepared(&mut f, &prepared.coefficients[prepared_index], p);
+        ell_prepared(&mut f, &prepared.coefficients[prepared_index + 1], p);
+    }
+    prepared_index += 2;
+    debug_assert_eq!(prepared_index, PREPARED_G2_COEFFICIENTS);
+    f
+}
+
+/// Fused Miller loop over several ordinary affine pairs.
 pub fn multi_miller_loop(pairs: &[(&G1Affine, &G2Affine)]) -> Fp12 {
     struct State<'a> {
         p: &'a G1Affine,
@@ -390,6 +666,7 @@ pub fn multi_miller_loop(pairs: &[(&G1Affine, &G2Affine)]) -> Fp12 {
 mod tests {
     use super::*;
     use crate::fr::Fr;
+    use crate::g1::G1Projective;
     use crate::g2::G2Projective;
     use core::ops::Mul;
 
@@ -413,5 +690,32 @@ mod tests {
         let b = f2_to(twist_b_f2());
         let q = mul_by_char(G2Affine::test_generator());
         assert_eq!(q.y.square(), q.x.square() * q.x + b);
+    }
+
+    #[test]
+    fn authenticated_prepared_schedule_round_trips_and_matches_full_miller() {
+        let p1 = G1Affine::generator();
+        let p2 = G1Projective::from(p1).mul(Fr::from_u64(2)).to_affine();
+        let q1 = G2Affine::arkworks_generator();
+        let q2 = G2Projective::from(q1).mul(Fr::from_u64(3)).to_affine();
+        let prepared = prepare_g2(&q2);
+        let bytes = prepared.to_registry_bytes();
+        assert_eq!(bytes.len(), PREPARED_G2_BYTES);
+        let restored = PreparedG2::from_registry_bytes(&bytes).unwrap();
+
+        let ordinary = [(&p1, &q1), (&p2, &q2)];
+        assert_eq!(
+            multi_miller_loop_mixed(&[(&p1, &q1)], &[(&p2, &restored)]),
+            multi_miller_loop(&ordinary),
+        );
+        assert_eq!(
+            multi_miller_loop_mixed(&[], &[(&p1, &prepare_g2(&q1)), (&p2, &restored)]),
+            multi_miller_loop(&ordinary),
+        );
+
+        let mut noncanonical = bytes;
+        noncanonical[..32].fill(0xff);
+        assert!(PreparedG2::from_registry_bytes(&noncanonical).is_none());
+        assert!(PreparedG2::from_registry_bytes(&noncanonical[..32]).is_none());
     }
 }

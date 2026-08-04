@@ -3,8 +3,9 @@ pub mod agave_fixtures;
 use core::mem::{align_of, offset_of, size_of};
 use helios_bn254::{
     AltBn128BatchError, FR_MAX_ELEMS, G1_BYTES, G1Bytes, G2_BYTES, G2Bytes, InputError,
-    MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAX_PAIRS, PairBytes, PodG1G2Pair, PodG1Point, PodG2Point,
-    PodPairingResult, PodScalar, SCALAR_BYTES, ScalarBytes, Version, alt_bn128_g1_msm,
+    MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS, PairBytes, PodG1G2Pair,
+    PodG1Point, PodG2Point, PodPairingResult, PodScalar, SCALAR_BYTES, ScalarBytes, Version,
+    alt_bn128_g1_msm,
 };
 
 #[test]
@@ -13,6 +14,7 @@ fn agave_limits_and_wire_layout_are_pinned() {
 
     assert_eq!(MSM_MAX_POINTS, 2048);
     assert_eq!(PAIRING_MAX_PAIRS, 256);
+    assert_eq!(PAIRING_MAP_MAX_PAIRS, 18);
     assert_eq!(FR_MAX_ELEMS, 2048);
     assert_eq!(
         (G1_BYTES, G2_BYTES, PAIR_BYTES, SCALAR_BYTES),
