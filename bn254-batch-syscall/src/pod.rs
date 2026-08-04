@@ -231,9 +231,8 @@ impl From<&Fr> for PodScalar {
         // into_bigint().to_bytes_be(), so batch_invert stays alloc-free per element
         let limbs = scalar.into_bigint().0;
         let mut out = [0u8; SCALAR_BYTES];
-        for (i, limb) in limbs.iter().enumerate() {
-            let start = SCALAR_BYTES - 8 * (i + 1);
-            out[start..start + 8].copy_from_slice(&limb.to_be_bytes());
+        for (out, limb) in out.rchunks_exact_mut(8).zip(limbs) {
+            out.copy_from_slice(&limb.to_be_bytes());
         }
         Self(out)
     }

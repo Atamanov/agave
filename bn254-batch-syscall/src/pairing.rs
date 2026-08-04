@@ -1,7 +1,7 @@
 use {
     crate::{
         Version,
-        encoding::PAIRING_MAX_PAIRS,
+        encoding::{PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS},
         pod::{PodG1G2Pair, PodGtElement},
         validation::AltBn128BatchError,
     },
@@ -9,38 +9,6 @@ use {
     ark_ec::{AffineRepr, pairing::Pairing},
     ark_ff::One,
 };
-
-// Common validated pairing core. Every declared point is checked for canonical
-// coordinates and curve membership, including the partner of an infinity;
-// every G2 is subgroup checked. Infinity pairs contribute the identity. The
-// Miller loop and exactly one final exponentiation remain inside this helper.
-fn multi_pairing_gt(pairs: &[PodG1G2Pair]) -> Result<Fq12, AltBn128BatchError> {
-    if pairs.is_empty() {
-        return Err(AltBn128BatchError::ZeroInput);
-    }
-    if pairs.len() > PAIRING_MAX_PAIRS {
-        return Err(AltBn128BatchError::CapExceeded);
-    }
-
-    let mut g1s = Vec::with_capacity(pairs.len());
-    let mut g2s = Vec::with_capacity(pairs.len());
-    for pair in pairs {
-        let g1 = pair.g1.to_affine()?;
-        let g2 = pair.g2.to_affine()?;
-        // Validate both members even when the identity contribution is skipped.
-        if g1.is_zero() || g2.is_zero() {
-            continue;
-        }
-        g1s.push(g1);
-        g2s.push(g2);
-    }
-    if g1s.is_empty() {
-        return Ok(Fq12::one());
-    }
-
-    // One shared Miller loop followed by exactly one final exponentiation.
-    Ok(Bn254::multi_pairing(g1s, g2s).0)
-}
 
 /// Return the canonical post-final-exponentiation pairing product in GT.
 ///
@@ -54,6 +22,9 @@ pub fn alt_bn128_pairing_map(
     _version: Version,
     pairs: &[PodG1G2Pair],
 ) -> Result<PodGtElement, AltBn128BatchError> {
+    if pairs.len() > PAIRING_MAP_MAX_PAIRS {
+        return Err(AltBn128BatchError::CapExceeded);
+    }
     Ok(PodGtElement::from(&multi_pairing_gt(pairs)?))
 }
 
@@ -65,6 +36,35 @@ pub fn alt_bn128_pairing_check(
     pairs: &[PodG1G2Pair],
 ) -> Result<bool, AltBn128BatchError> {
     Ok(multi_pairing_gt(pairs)? == Fq12::one())
+}
+
+// All points are validated, including the partner of an infinity. Infinity
+// pairs contribute the identity. One final exponentiation covers all pairs.
+fn multi_pairing_gt(pairs: &[PodG1G2Pair]) -> Result<Fq12, AltBn128BatchError> {
+    if pairs.is_empty() {
+        return Err(AltBn128BatchError::ZeroInput);
+    }
+    if pairs.len() > PAIRING_MAX_PAIRS {
+        return Err(AltBn128BatchError::CapExceeded);
+    }
+
+    let mut g1s = Vec::with_capacity(pairs.len());
+    let mut g2s = Vec::with_capacity(pairs.len());
+    for pair in pairs {
+        let g1 = pair.g1.to_affine()?;
+        let g2 = pair.g2.to_affine()?;
+        // Validation must run before an identity contribution is skipped.
+        if g1.is_zero() || g2.is_zero() {
+            continue;
+        }
+        g1s.push(g1);
+        g2s.push(g2);
+    }
+    if g1s.is_empty() {
+        return Ok(Fq12::one());
+    }
+
+    Ok(Bn254::multi_pairing(g1s, g2s).0)
 }
 
 #[cfg(test)]
@@ -316,6 +316,16 @@ mod tests {
         let pairs = vec![0u8; (PAIRING_MAX_PAIRS + 1) * PAIR_BYTES];
         assert_eq!(check(&pairs), Err(AltBn128BatchError::CapExceeded));
         assert_eq!(check(&pairs[..PAIRING_MAX_PAIRS * PAIR_BYTES]), Ok(true));
+    }
+
+    #[test]
+    fn test_pairing_map_rejects_over_cap() {
+        let pairs = vec![0u8; (PAIRING_MAP_MAX_PAIRS + 1) * PAIR_BYTES];
+        assert_eq!(map(&pairs), Err(AltBn128BatchError::CapExceeded));
+        assert_eq!(
+            map(&pairs[..PAIRING_MAP_MAX_PAIRS * PAIR_BYTES]),
+            Ok(PodGtElement::identity())
+        );
     }
 
     #[test]

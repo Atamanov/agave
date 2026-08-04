@@ -6,9 +6,8 @@ use {
     ark_ff::{BigInt, PrimeField, Zero},
 };
 
-// wire format is big-endian, byte-for-byte the encoding of the existing
-// `sol_alt_bn128_group_op` pairing; all-zeros is the point at infinity in both
-// groups
+// The point format matches `sol_alt_bn128_group_op`. It is big-endian, and an
+// all-zero point is the identity in each group.
 pub const G1_BYTES: usize = 64;
 pub const G2_BYTES: usize = 128;
 pub const PAIR_BYTES: usize = G1_BYTES + G2_BYTES;
@@ -19,13 +18,13 @@ pub const FQ12_BYTES: usize = 12 * 32;
 
 pub const MSM_MAX_POINTS: usize = 2048;
 pub const PAIRING_MAX_PAIRS: usize = 256;
+pub const PAIRING_MAP_MAX_PAIRS: usize = 16;
 pub const FR_MAX_ELEMS: usize = 2048;
 
-// KZG PLONK scalar-reduction ABI. The operation deliberately stops at
-// canonical scalar coefficients: transcript hashing and the two MSM bases
-// remain verifier-owned, while the Montgomery-heavy field reduction runs
-// natively. One proof contributes nine Q-side points, so this cap is exactly
-// the largest batch that can feed the existing G1 MSM syscall.
+// The synthetic PLONK reducer accepts verifier-derived challenges. The
+// canonical reducers derive the transcript. All reducers return scalar
+// coefficients and keep the two MSM bases in the verifier. Nine Q-side points
+// per proof set the maximum batch size for the G1 MSM syscall.
 pub const PLONK_CHALLENGES: usize = 6;
 pub const PLONK_EVALUATIONS: usize = 6;
 pub const PLONK_SHARED_OUTPUTS: usize = 9;
@@ -92,21 +91,17 @@ pub const fn snarkjs_plonk_multi_vk_output_count(
     if num_contexts == 0 || num_proofs == 0 {
         return None;
     }
-    let shared = match PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS.checked_mul(num_contexts) {
-        Some(value) => value,
-        None => return None,
+    let Some(shared) = PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS.checked_mul(num_contexts) else {
+        return None;
     };
-    let per_proof = match PLONK_PER_PROOF_OUTPUTS.checked_mul(num_proofs) {
-        Some(value) => value,
-        None => return None,
+    let Some(per_proof) = PLONK_PER_PROOF_OUTPUTS.checked_mul(num_proofs) else {
+        return None;
     };
-    let vk_points = match SNARKJS_PLONK_VK_POINTS.checked_mul(num_contexts) {
-        Some(value) => value,
-        None => return None,
+    let Some(vk_points) = SNARKJS_PLONK_VK_POINTS.checked_mul(num_contexts) else {
+        return None;
     };
-    let proof_points = match SNARKJS_PLONK_PROOF_POINTS.checked_mul(num_proofs) {
-        Some(value) => value,
-        None => return None,
+    let Some(proof_points) = SNARKJS_PLONK_PROOF_POINTS.checked_mul(num_proofs) else {
+        return None;
     };
     let q_points = match vk_points.checked_add(proof_points) {
         Some(value) => match value.checked_add(1) {
@@ -153,13 +148,12 @@ pub const fn unpack_snarkjs_plonk_multi_vk_shape(shape: u64) -> (u64, u64, u64) 
 const FQ_BYTES: usize = 32;
 
 #[cfg(not(target_os = "solana"))]
-fn bigint_from_be(bytes: &[u8]) -> BigInt<4> {
+pub(crate) fn bigint_from_be(bytes: &[u8]) -> BigInt<4> {
     debug_assert_eq!(bytes.len(), FQ_BYTES);
     let mut limbs = [0u64; 4];
-    for (i, limb) in limbs.iter_mut().enumerate() {
-        let start = FQ_BYTES - 8 * (i + 1);
+    for (limb, bytes) in limbs.iter_mut().zip(bytes.rchunks_exact(8)) {
         let mut chunk = [0u8; 8];
-        chunk.copy_from_slice(&bytes[start..start + 8]);
+        chunk.copy_from_slice(bytes);
         *limb = u64::from_be_bytes(chunk);
     }
     BigInt::new(limbs)
@@ -175,9 +169,8 @@ fn fq_from_be(bytes: &[u8]) -> Result<Fq, AltBn128BatchError> {
 #[cfg(not(target_os = "solana"))]
 pub(crate) fn fq_to_be(value: &Fq, out: &mut [u8]) {
     debug_assert_eq!(out.len(), FQ_BYTES);
-    for (i, limb) in value.into_bigint().0.iter().enumerate() {
-        let start = FQ_BYTES - 8 * (i + 1);
-        out[start..start + 8].copy_from_slice(&limb.to_be_bytes());
+    for (out, limb) in out.rchunks_exact_mut(8).zip(value.into_bigint().0) {
+        out.copy_from_slice(&limb.to_be_bytes());
     }
 }
 
@@ -255,8 +248,8 @@ pub(crate) fn serialize_fq12(value: &Fq12) -> [u8; FQ12_BYTES] {
         &value.c1.c2.c1,
     ];
     let mut out = [0u8; FQ12_BYTES];
-    for (i, coefficient) in coefficients.into_iter().enumerate() {
-        fq_to_be(coefficient, &mut out[i * FQ_BYTES..(i + 1) * FQ_BYTES]);
+    for (out, coefficient) in out.chunks_exact_mut(FQ_BYTES).zip(coefficients) {
+        fq_to_be(coefficient, out);
     }
     out
 }
@@ -269,17 +262,23 @@ pub(crate) fn parse_fq12(bytes: &[u8]) -> Result<Fq12, AltBn128BatchError> {
     if bytes.len() != FQ12_BYTES {
         return Err(AltBn128BatchError::InvalidLength);
     }
-    let coefficient = |i: usize| fq_from_be(&bytes[i * FQ_BYTES..(i + 1) * FQ_BYTES]);
+    let mut coefficients = bytes.chunks_exact(FQ_BYTES);
+    let mut coefficient = || {
+        coefficients
+            .next()
+            .ok_or(AltBn128BatchError::InvalidLength)
+            .and_then(fq_from_be)
+    };
     Ok(Fq12::new(
         Fq6::new(
-            Fq2::new(coefficient(0)?, coefficient(1)?),
-            Fq2::new(coefficient(2)?, coefficient(3)?),
-            Fq2::new(coefficient(4)?, coefficient(5)?),
+            Fq2::new(coefficient()?, coefficient()?),
+            Fq2::new(coefficient()?, coefficient()?),
+            Fq2::new(coefficient()?, coefficient()?),
         ),
         Fq6::new(
-            Fq2::new(coefficient(6)?, coefficient(7)?),
-            Fq2::new(coefficient(8)?, coefficient(9)?),
-            Fq2::new(coefficient(10)?, coefficient(11)?),
+            Fq2::new(coefficient()?, coefficient()?),
+            Fq2::new(coefficient()?, coefficient()?),
+            Fq2::new(coefficient()?, coefficient()?),
         ),
     ))
 }

@@ -7,19 +7,20 @@
 
 use alloc::{string::String, vec::Vec};
 
-#[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
-#[cfg_attr(feature = "force-portable", allow(dead_code))]
+#[cfg(all(
+    target_arch = "aarch64",
+    target_vendor = "apple",
+    any(not(feature = "force-portable"), test)
+))]
 pub(crate) mod aarch64;
 // Generated schedule-DSL leaf (ADR 0001); the cfg is emitted by build.rs
 // exactly when it assembled the generated x86-64 kernel (Linux, bmi2+adx).
-#[cfg(helios_mont4_x86_64_adx)]
-#[cfg_attr(feature = "force-portable", allow(dead_code))]
+#[cfg(all(helios_mont4_x86_64_adx, any(not(feature = "force-portable"), test)))]
 pub(crate) mod x86_64;
 // AVX-512 IFMA 8-way batch kernels; cfg emitted by build.rs exactly when
 // avx512f+avx512ifma are compile-time target features (HELIOS_AVX512_IFMA
 // forces or denies the gate). Batch-phase tier, not a mont_backend.
 #[cfg(helios_avx512_ifma)]
-#[cfg_attr(feature = "force-portable", allow(dead_code))]
 pub(crate) mod avx512ifma;
 #[cfg(any(
     not(target_arch = "aarch64"),
@@ -107,6 +108,8 @@ impl Fp {
     pub const ZERO: Self = Self([0, 0, 0, 0]);
     /// Multiplicative identity (`R mod p` in raw limbs).
     pub const ONE: Self = Self(MONT_ONE);
+    /// Multiplicative inverse of two.
+    pub const INV_TWO: Self = Self(crate::consts::half_mod(MONT_ONE, P));
 
     /// Wrap limbs already in canonical Montgomery form (`limbs < p`).
     ///
@@ -193,16 +196,6 @@ impl Fp {
     #[inline(always)]
     pub fn square(self) -> Self {
         mont_backend::mont_sqr(&self.0)
-    }
-
-    /// Additive inverse.
-    #[inline(always)]
-    pub fn neg(self) -> Self {
-        if self.is_zero() {
-            self
-        } else {
-            Self(limb::sub_noborrow(&P, &self.0))
-        }
     }
 
     /// Variable-time modular inverse.
@@ -299,12 +292,7 @@ impl Fp {
     /// Canonical alt_bn128 big-endian encoding to Montgomery form.
     #[inline]
     pub fn from_bytes_be(bytes: &[u8; 32]) -> Option<Self> {
-        let limbs = [
-            u64::from_be_bytes(bytes[24..32].try_into().unwrap()),
-            u64::from_be_bytes(bytes[16..24].try_into().unwrap()),
-            u64::from_be_bytes(bytes[8..16].try_into().unwrap()),
-            u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
-        ];
+        let limbs = limb::limbs_from_be_bytes(bytes);
         if limb::gte(&limbs, &P) {
             return None;
         }
@@ -440,7 +428,11 @@ impl Neg for Fp {
     type Output = Self;
     #[inline(always)]
     fn neg(self) -> Self {
-        Fp::neg(self)
+        if self.is_zero() {
+            self
+        } else {
+            Self(limb::sub_noborrow(&P, &self.0))
+        }
     }
 }
 
@@ -467,7 +459,7 @@ fn limbs_to_dec(limbs: &[u64; 4]) -> String {
         digits.push(b'0' + rem as u8);
     }
     digits.reverse();
-    String::from_utf8(digits).unwrap()
+    digits.into_iter().map(char::from).collect()
 }
 
 #[cfg(test)]

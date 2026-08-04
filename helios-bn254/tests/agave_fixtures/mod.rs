@@ -1,6 +1,3 @@
-// Fixture helpers shared across test binaries; each binary uses a subset.
-#![allow(dead_code)]
-
 use helios_bn254::{G1Bytes, G2Bytes, PairBytes, ScalarBytes};
 
 pub const FQ_MODULUS_HEX: &str = "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47";

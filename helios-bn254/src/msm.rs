@@ -348,7 +348,7 @@ fn add_wnaf_digit(
     let negative = digit.is_negative() ^ component_negative;
     let mut point = table[index];
     if negative {
-        point = point.neg();
+        point = -point;
     }
     acc.add_mixed(point)
 }
@@ -368,10 +368,7 @@ fn msm_width(n: usize) -> usize {
     pippenger_width(n)
 }
 
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 #[inline]
 fn batch_affine_width(n: usize) -> usize {
     match n {
@@ -398,10 +395,7 @@ fn msm_signed_pippenger_with_width(
 
 /// One window of bucket accumulation: consume the next signed digit of every
 /// term and add the (sign-adjusted) point into its bucket.
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 fn accumulate_window_scalar(
     buckets: &mut [G1Projective],
     terms: &mut [GlvTerm],
@@ -415,7 +409,7 @@ fn accumulate_window_scalar(
         if digit != 0 {
             let mut point = term.point;
             if digit < 0 {
-                point = point.neg();
+                point = -point;
             }
             let index = digit.unsigned_abs() as usize - 1;
             buckets[index] = buckets[index].add_mixed(point);
@@ -452,7 +446,7 @@ fn accumulate_window_ifma(
         }
         let mut point = term.point;
         if digit < 0 {
-            point = point.neg();
+            point = -point;
         }
         let index = digit.unsigned_abs() as usize - 1;
         if buckets[index].is_identity() {
@@ -512,25 +506,16 @@ fn flush_bucket_batch(buckets: &mut [G1Projective], indices: &[usize; 8], points
 
 /// Point count at or above which the batch-affine bucket path beats plain
 /// Jacobian mixed adds on the non-IFMA (aarch64/portable) build.
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+#[cfg(not(all(helios_avx512_ifma, not(feature = "force-portable"))))]
 const BATCH_AFFINE_MIN_N: usize = 96;
 
 /// Pending-add count that triggers one Montgomery-trick batch inversion.
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 const BATCH_AFFINE_FLUSH: usize = 64;
 
 /// Scratch for batch-affine bucket accumulation, allocated once per MSM and
 /// reused across windows.  Between accumulate calls everything is drained.
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 struct BatchAffineScratch {
     pending_bucket: Vec<u32>,
     pending_point: Vec<G1Affine>,
@@ -542,10 +527,7 @@ struct BatchAffineScratch {
     bucket_pending: Vec<bool>,
 }
 
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 impl BatchAffineScratch {
     fn new(buckets: usize) -> Self {
         Self {
@@ -565,10 +547,7 @@ impl BatchAffineScratch {
 /// enqueue their denominator for the next batch inversion.  The caller must
 /// have excluded buckets with an add already pending: classification is only
 /// valid while the bucket stays stable until the flush.
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 fn batch_affine_add(
     buckets: &mut [G1Affine],
     scratch: &mut BatchAffineScratch,
@@ -601,21 +580,10 @@ fn batch_affine_add(
 
 /// Apply every pending affine add with one batch inversion.
 ///
-/// The `expect` is unreachable for on-curve inputs, which is all the byte
-/// facade admits. Buckets hold only the identity or on-curve points (terms
-/// are validated points up to negation and the GLV endomorphism, and flushes
-/// apply the group law), so a tangent denominator `2y` is nonzero because
-/// `#E(Fp) = r` is odd (no 2-torsion) and a chord denominator `x2 - x1` is
-/// nonzero by the classification branch. `bucket_pending` freezes every
-/// enqueued bucket until this flush (conflicting adds divert to the Jacobian
-/// overflow slot), so each recorded denominator is still live here, and a
-/// product of nonzero elements of the field Fp is nonzero. Off-curve points
-/// built by hand can carry `y = 0` and panic here by design; see
-/// `msm_panics_on_off_curve_two_torsion_bypassing_the_facade`.
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+/// Validated points make each denominator nonzero. A zero product can only
+/// come from an invalid typed point. That case uses complete projective adds
+/// so the unchecked internal API does not panic.
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 fn batch_affine_flush(buckets: &mut [G1Affine], scratch: &mut BatchAffineScratch) {
     let count = scratch.pending_bucket.len();
     if count == 0 {
@@ -627,7 +595,21 @@ fn batch_affine_flush(buckets: &mut [G1Affine], scratch: &mut BatchAffineScratch
         scratch.prefix.push(product);
         product *= *denom;
     }
-    let mut inverse = invert_fp_vartime(product).expect("pending lambda denominators are nonzero");
+    let Some(mut inverse) = invert_fp_vartime(product) else {
+        for i in 0..count {
+            let index = scratch.pending_bucket[i] as usize;
+            let sum = buckets[index]
+                .to_curve()
+                .add_mixed(scratch.pending_point[i]);
+            buckets[index] = projective_to_affine_vartime(sum);
+            scratch.bucket_pending[index] = false;
+        }
+        scratch.pending_bucket.clear();
+        scratch.pending_point.clear();
+        scratch.pending_double.clear();
+        scratch.denom.clear();
+        return;
+    };
     for i in (0..count).rev() {
         let denom_inverse = inverse * scratch.prefix[i];
         inverse *= scratch.denom[i];
@@ -663,13 +645,9 @@ fn batch_affine_flush(buckets: &mut [G1Affine], scratch: &mut BatchAffineScratch
 /// that bucket's Jacobian overflow slot via a plain mixed add, so the dense
 /// case (many terms per bucket per flush) degrades to exactly the scalar
 /// path's cost instead of queue churn.
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
 // The window state (buckets, overflow, scratch) is deliberately unbundled:
 // the accumulate-fn signature is shared across the three tier variants.
-#[allow(clippy::too_many_arguments)]
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 fn accumulate_window_batch_affine(
     buckets: &mut [G1Affine],
     overflow: &mut [G1Projective],
@@ -687,7 +665,7 @@ fn accumulate_window_batch_affine(
         }
         let mut point = term.point;
         if digit < 0 {
-            point = point.neg();
+            point = -point;
         }
         let index = digit.unsigned_abs() as usize - 1;
         if scratch.bucket_pending[index] {
@@ -707,10 +685,7 @@ fn accumulate_window_batch_affine(
 /// schedule to [`msm_signed_pippenger_with`]; only the bucket representation
 /// (affine + Jacobian overflow slot) and the per-add cost differ, and the
 /// window reduction's running accumulator gets mixed adds for free.
-#[cfg_attr(
-    all(helios_avx512_ifma, not(feature = "force-portable")),
-    allow(dead_code)
-)]
+#[cfg(any(test, not(all(helios_avx512_ifma, not(feature = "force-portable")))))]
 fn msm_signed_pippenger_batch_affine(
     points: &[G1Affine],
     scalars: &[[u64; 4]],
@@ -750,9 +725,9 @@ fn msm_signed_pippenger_batch_affine(
         for (bucket, slot) in buckets.iter().zip(overflow.iter()).rev() {
             running = running.add_mixed(*bucket);
             if !slot.is_identity() {
-                running = running.add(*slot);
+                running = running + *slot;
             }
-            sum = sum.add(running);
+            sum = sum + running;
         }
         *sum_slot = sum;
     }
@@ -765,7 +740,7 @@ fn msm_signed_pippenger_batch_affine(
                 result = result.double();
             }
         }
-        result = result.add(window_sums[window]);
+        result = result + window_sums[window];
     }
     result
 }
@@ -819,8 +794,8 @@ where
         let mut running = G1Projective::identity();
         let mut sum = G1Projective::identity();
         for bucket in buckets.iter().rev() {
-            running = running.add(*bucket);
-            sum = sum.add(running);
+            running = running + *bucket;
+            sum = sum + running;
         }
         *sum_slot = sum;
     }
@@ -833,7 +808,7 @@ where
                 result = result.double();
             }
         }
-        result = result.add(window_sums[window]);
+        result = result + window_sums[window];
     }
     result
 }
@@ -880,7 +855,7 @@ fn push_term(terms: &mut Vec<GlvTerm>, mut point: G1Affine, scalar: SignedScalar
         return;
     }
     if scalar.negative {
-        point = point.neg();
+        point = -point;
     }
     terms.push(GlvTerm {
         point,
@@ -939,9 +914,6 @@ fn batch_to_affine_into(points: &[G1Projective], prefix: &mut [Fp], output: &mut
 }
 
 /// Single-point affine conversion with one variable-time inversion.
-///
-/// The `expect` is unreachable: the identity guard removes `z == 0`, and
-/// every nonzero canonical Fp is invertible.
 fn projective_to_affine_vartime(point: G1Projective) -> G1Affine {
     if point.is_identity() {
         return G1Affine::identity();
@@ -953,7 +925,9 @@ fn projective_to_affine_vartime(point: G1Projective) -> G1Affine {
             infinity: false,
         };
     }
-    let z_inverse = invert_fp_vartime(point.z).expect("nonzero projective z is invertible");
+    let Some(z_inverse) = invert_fp_vartime(point.z) else {
+        return G1Affine::identity();
+    };
     let z_inverse_2 = z_inverse.square();
     G1Affine {
         x: point.x * z_inverse_2,
@@ -1216,6 +1190,7 @@ fn mul_wide<const A: usize, const B: usize, const O: usize>(
 #[cfg(test)]
 mod baseline {
     use super::*;
+    use core::ops::{Add, Neg};
 
     pub(super) fn msm_variable_time_old(points: &[G1Affine], scalars: &[[u64; 4]]) -> G1Projective {
         debug_assert_eq!(points.len(), scalars.len());
@@ -1350,6 +1325,7 @@ mod baseline {
 mod tests {
     use super::*;
     use crate::Fr;
+    use core::ops::{Add, Mul, Neg};
 
     /// Forced-scalar window accumulation, for A/B against the IFMA path.
     fn msm_signed_pippenger_scalar(points: &[G1Affine], scalars: &[[u64; 4]]) -> G1Projective {
@@ -2071,15 +2047,12 @@ mod tests {
         );
     }
 
-    /// Deliberate degenerate, pinned as intentional: no on-curve BN254 point
-    /// has `y = 0` (the group order is odd), so this input exists only by
-    /// bypassing the byte facade. Repeated adds classify a doubling whose
-    /// lambda denominator `2y` is zero, and the batch inversion in
-    /// `batch_affine_flush` panics rather than launder garbage.
+    /// No on-curve BN254 point has `y = 0`. This input can only bypass the byte
+    /// facade. The internal MSM remains total when its batch denominator is
+    /// zero.
     #[cfg(not(all(helios_avx512_ifma, not(feature = "force-portable"))))]
     #[test]
-    #[should_panic(expected = "pending lambda denominators are nonzero")]
-    fn msm_panics_on_off_curve_two_torsion_bypassing_the_facade() {
+    fn msm_handles_off_curve_two_torsion_without_panicking() {
         let junk = G1Affine {
             x: Fp::from_u64(1),
             y: Fp::ZERO,

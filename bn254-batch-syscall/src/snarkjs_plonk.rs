@@ -11,12 +11,13 @@ use {
     crate::{
         AltBn128BatchError, FR_MAX_ELEMS, PLONK_EVALUATIONS, PLONK_PER_PROOF_OUTPUTS,
         PLONK_SHARED_OUTPUTS, PodScalar, PodSnarkjsPlonkReductionContext,
-        PodSnarkjsPlonkReductionInput, Version,
+        PodSnarkjsPlonkReductionInput, SNARKJS_PLONK_PROOF_POINTS, Version,
         plonk::{NativeProof, reduce_one, validate_context},
         plonk_reduction_output_count,
     },
     ark_bn254::Fr,
     ark_ff::{Field, One, PrimeField, Zero, batch_inversion},
+    core::ops::{Add, Mul, Sub},
     solana_keccak_hasher::hashv,
 };
 
@@ -40,10 +41,12 @@ pub fn alt_bn128_snarkjs_plonk_batch_reduce(
     }
 
     let domain_size = context.domain_size();
-    let num_public_inputs = context.num_public_inputs() as usize;
+    let encoded_public_input_count = context.num_public_inputs();
+    let num_public_inputs = usize::try_from(encoded_public_input_count)
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?;
     if !domain_size.is_power_of_two()
         || !(MIN_DOMAIN_SIZE..=MAX_DOMAIN_SIZE).contains(&domain_size)
-        || num_public_inputs >= domain_size as usize
+        || u64::from(encoded_public_input_count) >= domain_size
     {
         return Err(AltBn128BatchError::InvalidContext);
     }
@@ -54,11 +57,10 @@ pub fn alt_bn128_snarkjs_plonk_batch_reduce(
         return Err(AltBn128BatchError::LengthMismatch);
     }
     let lagrange_count = num_public_inputs.max(1);
-    if lagrange_count
+    let denominator_count = lagrange_count
         .checked_mul(inputs.len())
-        .ok_or(AltBn128BatchError::CapExceeded)?
-        > FR_MAX_ELEMS
-    {
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    if denominator_count > FR_MAX_ELEMS {
         return Err(AltBn128BatchError::CapExceeded);
     }
 
@@ -71,19 +73,21 @@ pub fn alt_bn128_snarkjs_plonk_batch_reduce(
     // output. Raw G1 bytes are intentionally not parsed here: the two MSMs
     // validate exactly the points whose bytes this transcript binds.
     let mut native = Vec::with_capacity(inputs.len());
-    for (i, input) in inputs.iter().enumerate() {
+    let mut remaining_public_inputs = public_inputs;
+    for input in inputs {
         let mut evaluations = [Fr::zero(); PLONK_EVALUATIONS];
         for (out, encoded) in evaluations.iter_mut().zip(&input.evaluations) {
             *out = encoded.to_fr()?;
         }
-        let start = i * num_public_inputs;
-        let end = start + num_public_inputs;
-        let encoded_statement = &public_inputs[start..end];
+        let (encoded_statement, remaining) = remaining_public_inputs
+            .split_at_checked(num_public_inputs)
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        remaining_public_inputs = remaining;
         let statement = encoded_statement
             .iter()
             .map(PodScalar::to_fr)
             .collect::<Result<Vec<_>, _>>()?;
-        let challenges = derive_challenges(context, input, encoded_statement);
+        let challenges = derive_challenges(context, input, encoded_statement)?;
         native.push(NativeProof {
             challenges,
             evaluations,
@@ -91,93 +95,52 @@ pub fn alt_bn128_snarkjs_plonk_batch_reduce(
             rho: Fr::one(),
         });
     }
-    let randomizers = derive_batch_randomizers(context, inputs, public_inputs);
+    let randomizers = derive_batch_randomizers(context, inputs, public_inputs)?;
     for (proof, rho) in native.iter_mut().zip(randomizers) {
         proof.rho = rho;
     }
 
     let n = Fr::from(domain_size);
     let mut vanishings = Vec::with_capacity(native.len());
-    let mut denominators = Vec::with_capacity(native.len() * lagrange_count);
+    let mut denominators = Vec::with_capacity(denominator_count);
     for proof in &native {
         let zeta = proof.challenges[3];
-        let vanishing = zeta.pow([domain_size]) - Fr::one();
+        let vanishing = zeta.pow([domain_size]).sub(Fr::one());
         if vanishing.is_zero() {
             return Err(AltBn128BatchError::DegenerateChallenge);
         }
         vanishings.push(vanishing);
         let mut root = Fr::one();
         for _ in 0..lagrange_count {
-            denominators.push(n * (zeta - root));
-            root *= omega;
+            denominators.push(n.mul(zeta.sub(root)));
+            root = root.mul(omega);
         }
     }
     batch_inversion(&mut denominators);
 
     let mut output = vec![PodScalar([0u8; 32]); output_count];
     let mut shared = [Fr::zero(); PLONK_SHARED_OUTPUTS];
-    for (i, (proof, vanishing)) in native.into_iter().zip(vanishings).enumerate() {
-        let inv_start = i * lagrange_count;
-        let inverses = &denominators[inv_start..inv_start + lagrange_count];
-        let reduced = reduce_one(domain_size, omega, k1, k2, &proof, vanishing, inverses);
-
-        for (accumulator, coefficient) in shared[..8].iter_mut().zip(reduced.shared_q) {
-            *accumulator -= proof.rho * coefficient;
-        }
-        shared[8] -= proof.rho * reduced.generator;
-
-        let base = PLONK_SHARED_OUTPUTS + i * PLONK_PER_PROOF_OUTPUTS;
-        let per = [
-            proof.rho,
-            proof.rho * reduced.p_shifted,
-            -(proof.rho * reduced.z),
-            -(proof.rho * reduced.t_lo),
-            -(proof.rho * reduced.t_mid),
-            -(proof.rho * reduced.t_hi),
-            -(proof.rho * reduced.a),
-            -(proof.rho * reduced.b),
-            -(proof.rho * reduced.c),
-            -(proof.rho * reduced.w_zeta_q),
-            -(proof.rho * reduced.w_zeta_omega_q),
-        ];
-        for (slot, scalar) in output[base..base + PLONK_PER_PROOF_OUTPUTS]
-            .iter_mut()
-            .zip(per)
-        {
+    let (shared_output, per_proof_output) = output.split_at_mut(PLONK_SHARED_OUTPUTS);
+    let mut proof_rows = per_proof_output.chunks_exact_mut(PLONK_PER_PROOF_OUTPUTS);
+    for (((proof, vanishing), inverses), row) in native
+        .into_iter()
+        .zip(vanishings)
+        .zip(denominators.chunks_exact(lagrange_count))
+        .zip(&mut proof_rows)
+    {
+        let reduced = reduce_one(omega, k1, k2, &proof, vanishing, inverses)?;
+        reduced.accumulate_shared(proof.rho, &mut shared)?;
+        for (slot, scalar) in row.iter_mut().zip(reduced.weighted_row(proof.rho)) {
             *slot = PodScalar::from(&scalar);
         }
     }
-    for (slot, scalar) in output[..PLONK_SHARED_OUTPUTS].iter_mut().zip(shared) {
+    if !proof_rows.into_remainder().is_empty() {
+        return Err(AltBn128BatchError::BackendInvariant);
+    }
+    for (slot, scalar) in shared_output.iter_mut().zip(shared) {
         *slot = PodScalar::from(&scalar);
     }
     Ok(output)
-}
-
-/// Host-only conformance hook exposing the six canonical transcript scalars.
-///
-/// This is intentionally hidden from the on-chain API. It exists so fixture
-/// tests can differential-check every phased challenge against an independent
-/// snarkjs-compatible implementation; applications should call only the
-/// reducer and consume its coefficient vector.
-#[doc(hidden)]
-pub fn diagnostic_snarkjs_plonk_challenges(
-    context: &PodSnarkjsPlonkReductionContext,
-    inputs: &[PodSnarkjsPlonkReductionInput],
-    public_inputs: &[PodScalar],
-) -> Result<Vec<[PodScalar; 6]>, AltBn128BatchError> {
-    // Reuse the production path for all shape, domain, and canonical-scalar
-    // checks so this hook cannot accidentally report diagnostics for inputs
-    // the syscall itself rejects.
-    alt_bn128_snarkjs_plonk_batch_reduce(Version::V0, context, inputs, public_inputs)?;
-    let per_statement = context.num_public_inputs() as usize;
-    Ok(inputs
-        .iter()
-        .enumerate()
-        .map(|(i, input)| {
-            let statement = &public_inputs[i * per_statement..(i + 1) * per_statement];
-            derive_challenges(context, input, statement).map(|value| PodScalar::from(&value))
-        })
-        .collect())
 }
 
 /// snarkjs `getChallenge`: Keccak over concatenated canonical byte parts,
@@ -199,26 +162,49 @@ fn derive_batch_randomizers(
     context: &PodSnarkjsPlonkReductionContext,
     inputs: &[PodSnarkjsPlonkReductionInput],
     public_inputs: &[PodScalar],
-) -> Vec<Fr> {
+) -> Result<Vec<Fr>, AltBn128BatchError> {
     const DOMAIN: &[u8] = b"solana-snarkjs-plonk-batch-v1";
-    let proof_count = (inputs.len() as u64).to_be_bytes();
-    let mut parts: Vec<&[u8]> = Vec::with_capacity(
-        9 + context.transcript_vk_points.len() + inputs.len() * (1 + 9 + PLONK_EVALUATIONS),
-    );
-    parts.push(DOMAIN);
-    parts.push(&proof_count);
-    parts.push(&context.domain_size_be);
-    parts.push(&context.num_public_inputs_be);
-    parts.push(&context.omega.0);
-    parts.push(&context.k1.0);
-    parts.push(&context.k2.0);
+    let proof_count = u64::try_from(inputs.len())
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?
+        .to_be_bytes();
+    let per_statement = usize::try_from(context.num_public_inputs())
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?;
+    let per_proof_parts = SNARKJS_PLONK_PROOF_POINTS
+        .checked_add(PLONK_EVALUATIONS)
+        .and_then(|value| value.checked_add(per_statement))
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    let proof_parts = per_proof_parts
+        .checked_mul(inputs.len())
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    let fixed_parts = context
+        .transcript_vk_points
+        .len()
+        .checked_add(8)
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    let capacity = fixed_parts
+        .checked_add(proof_parts)
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    let mut parts: Vec<&[u8]> = Vec::with_capacity(capacity);
+    parts.extend([
+        DOMAIN,
+        &proof_count,
+        &context.domain_size_be,
+        &context.num_public_inputs_be,
+        &context.omega.0,
+        &context.k1.0,
+        &context.k2.0,
+    ]);
     for point in &context.transcript_vk_points {
         parts.push(&point.0);
     }
     parts.push(&context.x_2.0);
-    let per_statement = context.num_public_inputs() as usize;
-    for (i, input) in inputs.iter().enumerate() {
-        for public in &public_inputs[i * per_statement..(i + 1) * per_statement] {
+    let mut remaining_public_inputs = public_inputs;
+    for input in inputs {
+        let (statement, remaining) = remaining_public_inputs
+            .split_at_checked(per_statement)
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        remaining_public_inputs = remaining;
+        for public in statement {
             parts.push(&public.0);
         }
         for point in &input.transcript_points {
@@ -231,11 +217,13 @@ fn derive_batch_randomizers(
     let seed = hashv(&parts).to_bytes();
     (0..inputs.len())
         .map(|i| {
-            let index = (i as u64).to_be_bytes();
+            let index = u64::try_from(i)
+                .map_err(|_| AltBn128BatchError::BackendInvariant)?
+                .to_be_bytes();
             let digest = hashv(&[&seed, &index]).to_bytes();
             let mut low = [0u8; 32];
             low[16..].copy_from_slice(&digest[16..]);
-            Fr::from_be_bytes_mod_order(&low) + Fr::one()
+            Ok(Fr::from_be_bytes_mod_order(&low).add(Fr::one()))
         })
         .collect()
 }
@@ -252,16 +240,22 @@ pub(crate) fn derive_challenges(
     context: &PodSnarkjsPlonkReductionContext,
     input: &PodSnarkjsPlonkReductionInput,
     public_inputs: &[PodScalar],
-) -> [Fr; 6] {
-    let mut beta_parts: Vec<&[u8]> =
-        Vec::with_capacity(context.transcript_vk_points.len() + public_inputs.len() + 3);
+) -> Result<[Fr; 6], AltBn128BatchError> {
+    let capacity = context
+        .transcript_vk_points
+        .len()
+        .checked_add(public_inputs.len())
+        .and_then(|value| value.checked_add(3))
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    let mut beta_parts: Vec<&[u8]> = Vec::with_capacity(capacity);
     for point in &context.transcript_vk_points {
         beta_parts.push(&point.0);
     }
     for public in public_inputs {
         beta_parts.push(&public.0);
     }
-    for point in &input.transcript_points[..3] {
+    let [a, b, c, z, t1, t2, t3, w_xi, w_xi_omega] = &input.transcript_points;
+    for point in [a, b, c] {
         beta_parts.push(&point.0);
     }
     let beta = challenge(&beta_parts);
@@ -270,28 +264,24 @@ pub(crate) fn derive_challenges(
     let gamma = challenge(&[&beta_bytes]);
     let gamma_bytes = canonical_bytes(&gamma);
 
-    let alpha = challenge(&[&beta_bytes, &gamma_bytes, &input.transcript_points[3].0]);
+    let alpha = challenge(&[&beta_bytes, &gamma_bytes, &z.0]);
     let alpha_bytes = canonical_bytes(&alpha);
 
-    let zeta = challenge(&[
-        &alpha_bytes,
-        &input.transcript_points[4].0,
-        &input.transcript_points[5].0,
-        &input.transcript_points[6].0,
-    ]);
+    let zeta = challenge(&[&alpha_bytes, &t1.0, &t2.0, &t3.0]);
     let zeta_bytes = canonical_bytes(&zeta);
 
+    let [a_ev, b_ev, c_ev, s1_ev, s2_ev, zw_ev] = &input.evaluations;
     let v = challenge(&[
         &zeta_bytes,
-        &input.evaluations[0].0,
-        &input.evaluations[1].0,
-        &input.evaluations[2].0,
-        &input.evaluations[3].0,
-        &input.evaluations[4].0,
-        &input.evaluations[5].0,
+        &a_ev.0,
+        &b_ev.0,
+        &c_ev.0,
+        &s1_ev.0,
+        &s2_ev.0,
+        &zw_ev.0,
     ]);
-    let u = challenge(&[&input.transcript_points[7].0, &input.transcript_points[8].0]);
-    [beta, gamma, alpha, zeta, v, u]
+    let u = challenge(&[&w_xi.0, &w_xi_omega.0]);
+    Ok([beta, gamma, alpha, zeta, v, u])
 }
 
 #[cfg(test)]
@@ -312,7 +302,7 @@ mod tests {
             k2: PodScalar::from(&Fr::from(3u64)),
             transcript_vk_points: core::array::from_fn(|i| {
                 let mut bytes = [0u8; 64];
-                bytes[63] = i as u8 + 1;
+                bytes[63] = u8::try_from(i).unwrap_or(u8::MAX).saturating_add(1);
                 PodG1Point(bytes)
             }),
             x_2: {
@@ -328,11 +318,14 @@ mod tests {
             transcript_points: core::array::from_fn(|i| {
                 let mut bytes = [0u8; 64];
                 bytes[31] = seed;
-                bytes[63] = i as u8 + 1;
+                bytes[63] = u8::try_from(i).unwrap_or(u8::MAX).saturating_add(1);
                 PodG1Point(bytes)
             }),
             evaluations: core::array::from_fn(|i| {
-                PodScalar::from(&Fr::from(seed as u64 + i as u64 + 11))
+                let value = u64::from(seed)
+                    .saturating_add(u64::try_from(i).unwrap_or(u64::MAX))
+                    .saturating_add(11);
+                PodScalar::from(&Fr::from(value))
             }),
         }
     }
@@ -344,7 +337,7 @@ mod tests {
         let ctx = context(1);
         let proof = input(7);
         let statement = [PodScalar::from(&Fr::from(101u64))];
-        let challenges = derive_challenges(&ctx, &proof, &statement);
+        let challenges = derive_challenges(&ctx, &proof, &statement).unwrap();
         assert!(challenges.iter().all(|challenge| !challenge.is_zero()));
         let output =
             alt_bn128_snarkjs_plonk_batch_reduce(Version::V0, &ctx, &[proof], &statement).unwrap();
@@ -357,31 +350,51 @@ mod tests {
         let ctx = context(1);
         let proof = input(9);
         let statement = [PodScalar::from(&Fr::from(77u64))];
-        let base = derive_challenges(&ctx, &proof, &statement);
+        let base = derive_challenges(&ctx, &proof, &statement).unwrap();
 
         let mut changed_vk = ctx;
-        changed_vk.transcript_vk_points[0].0[0] ^= 1;
-        assert_ne!(base, derive_challenges(&changed_vk, &proof, &statement));
+        *changed_vk
+            .transcript_vk_points
+            .first_mut()
+            .and_then(|point| point.0.first_mut())
+            .unwrap() ^= 1;
+        assert_ne!(
+            base,
+            derive_challenges(&changed_vk, &proof, &statement).unwrap()
+        );
 
         let mut changed_proof = proof;
-        changed_proof.transcript_points[0].0[0] ^= 1;
-        assert_ne!(base, derive_challenges(&ctx, &changed_proof, &statement));
+        *changed_proof
+            .transcript_points
+            .first_mut()
+            .and_then(|point| point.0.first_mut())
+            .unwrap() ^= 1;
+        assert_ne!(
+            base,
+            derive_challenges(&ctx, &changed_proof, &statement).unwrap()
+        );
 
         let changed_statement = [PodScalar::from(&Fr::from(78u64))];
-        assert_ne!(base, derive_challenges(&ctx, &proof, &changed_statement));
+        assert_ne!(
+            base,
+            derive_challenges(&ctx, &proof, &changed_statement).unwrap()
+        );
 
-        let rho = derive_batch_randomizers(&ctx, &[proof], &statement);
-        let changed_rho = derive_batch_randomizers(&changed_vk, &[proof], &statement);
+        let rho = derive_batch_randomizers(&ctx, &[proof], &statement).unwrap();
+        let changed_rho = derive_batch_randomizers(&changed_vk, &[proof], &statement).unwrap();
         assert_ne!(rho, changed_rho);
 
         // X_2 is pairing-only for the canonical snarkjs inner transcript, but
         // it must be frozen into the outer batch randomizer transcript.
         let mut changed_x_2 = ctx;
-        changed_x_2.x_2.0[0] ^= 1;
-        assert_eq!(base, derive_challenges(&changed_x_2, &proof, &statement));
+        *changed_x_2.x_2.0.first_mut().unwrap() ^= 1;
+        assert_eq!(
+            base,
+            derive_challenges(&changed_x_2, &proof, &statement).unwrap()
+        );
         assert_ne!(
             rho,
-            derive_batch_randomizers(&changed_x_2, &[proof], &statement)
+            derive_batch_randomizers(&changed_x_2, &[proof], &statement).unwrap()
         );
         assert!(rho.iter().all(|value| !value.is_zero()));
     }

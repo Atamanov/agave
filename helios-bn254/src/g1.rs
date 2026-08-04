@@ -61,8 +61,8 @@ impl G1Affine {
         self.y.square() == self.x.square() * self.x + Fp::from_u64(3)
     }
 
-    /// Additive inverse.
-    pub fn neg(self) -> Self {
+    /// Return the additive inverse.
+    fn negate(self) -> Self {
         if self.infinity {
             self
         } else {
@@ -117,7 +117,7 @@ impl G1Projective {
 
     /// EFD add-2007-bl (Jacobian, a = 0).
     #[inline(always)]
-    pub fn add(self, other: Self) -> Self {
+    fn add_complete(self, other: Self) -> Self {
         if self.is_identity() {
             return other;
         }
@@ -170,8 +170,8 @@ impl G1Projective {
         self.add_mixed_fast(other)
     }
 
-    /// Additive inverse.
-    pub fn neg(self) -> Self {
+    /// Return the additive inverse.
+    fn negate(self) -> Self {
         Self {
             x: self.x,
             y: -self.y,
@@ -189,7 +189,9 @@ impl G1Projective {
         if self.is_identity() {
             return G1Affine::identity();
         }
-        let zinv = self.z.invert().unwrap();
+        let Some(zinv) = self.z.invert() else {
+            return G1Affine::identity();
+        };
         let zinv2 = zinv.square();
         G1Affine {
             x: self.x * zinv2,
@@ -198,10 +200,19 @@ impl G1Projective {
         }
     }
 
-    /// wNAF-4 scalar multiplication (variable-time).
+    /// Multiply by a public scalar with width-4 wNAF.
     #[inline]
-    pub fn mul(self, scalar: Fr) -> Self {
+    fn scale(self, scalar: Fr) -> Self {
         crate::wnaf::mul_group::<Self, 4, 4, 257>(self, scalar)
+    }
+}
+
+impl core::ops::Neg for G1Affine {
+    type Output = Self;
+
+    #[inline]
+    fn neg(self) -> Self {
+        self.negate()
     }
 }
 
@@ -209,7 +220,7 @@ impl core::ops::Add for G1Projective {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self {
-        G1Projective::add(self, rhs)
+        self.add_complete(rhs)
     }
 }
 
@@ -217,7 +228,16 @@ impl core::ops::Neg for G1Projective {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        G1Projective::neg(self)
+        self.negate()
+    }
+}
+
+impl core::ops::Mul<Fr> for G1Projective {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, rhs: Fr) -> Self {
+        self.scale(rhs)
     }
 }
 

@@ -30,6 +30,7 @@ use ark_ff::{
 };
 use helios_bn254::{Fp, Fp2, Fp6, Fp12, Fr, G1Affine, G1Projective, G2Affine, consts, pairing};
 use rand::{SeedableRng, rngs::StdRng};
+use std::ops::{Mul, Neg};
 
 const SEED: u64 = 0xc057_a75e_ed11;
 

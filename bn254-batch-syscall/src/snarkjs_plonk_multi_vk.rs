@@ -22,6 +22,7 @@ use {
     },
     ark_bn254::Fr,
     ark_ff::{Field, One, Zero, batch_inversion},
+    core::ops::{Add, Mul, Range, Sub},
     solana_keccak_hasher::hashv,
 };
 
@@ -40,9 +41,7 @@ struct ParsedContext {
 
 struct PreparedProof {
     context_index: usize,
-    public_start: usize,
-    public_end: usize,
-    denominator_start: usize,
+    public_range: Range<usize>,
     vanishing: Fr,
     native: NativeProof,
 }
@@ -68,7 +67,9 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
 
     let mut parsed_contexts = Vec::with_capacity(contexts.len());
     for (index, context) in contexts.iter().enumerate() {
-        if context.context_index() as usize != index {
+        let context_index = usize::try_from(context.context_index())
+            .map_err(|_| AltBn128BatchError::IndexMismatch)?;
+        if context_index != index {
             return Err(AltBn128BatchError::IndexMismatch);
         }
         if context.reserved != [0u8; 4] || context.reduction.reserved != [0u8; 4] {
@@ -90,10 +91,12 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
         }
 
         let domain_size = context.reduction.domain_size();
-        let num_public_inputs = context.reduction.num_public_inputs() as usize;
+        let encoded_public_input_count = context.reduction.num_public_inputs();
+        let num_public_inputs = usize::try_from(encoded_public_input_count)
+            .map_err(|_| AltBn128BatchError::BackendInvariant)?;
         if !domain_size.is_power_of_two()
             || !(MIN_DOMAIN_SIZE..=MAX_DOMAIN_SIZE).contains(&domain_size)
-            || num_public_inputs >= domain_size as usize
+            || u64::from(encoded_public_input_count) >= domain_size
         {
             return Err(AltBn128BatchError::InvalidContext);
         }
@@ -118,14 +121,20 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
     let mut prepared = Vec::with_capacity(inputs.len());
     let mut denominator_count = 0usize;
     for (proof_index, input) in inputs.iter().enumerate() {
-        if input.proof_index() as usize != proof_index {
+        let encoded_proof_index =
+            usize::try_from(input.proof_index()).map_err(|_| AltBn128BatchError::IndexMismatch)?;
+        if encoded_proof_index != proof_index {
             return Err(AltBn128BatchError::IndexMismatch);
         }
-        let context_index = input.context_index() as usize;
+        let context_index = usize::try_from(input.context_index())
+            .map_err(|_| AltBn128BatchError::IndexMismatch)?;
         let context = parsed_contexts
             .get(context_index)
             .ok_or(AltBn128BatchError::IndexMismatch)?;
-        uses[context_index] = uses[context_index]
+        let use_count = uses
+            .get_mut(context_index)
+            .ok_or(AltBn128BatchError::IndexMismatch)?;
+        *use_count = use_count
             .checked_add(1)
             .ok_or(AltBn128BatchError::CapExceeded)?;
 
@@ -145,15 +154,21 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
             *out = encoded.to_fr()?;
         }
         let challenges = derive_challenges(
-            &contexts[context_index].reduction,
+            &contexts
+                .get(context_index)
+                .ok_or(AltBn128BatchError::IndexMismatch)?
+                .reduction,
             &input.proof,
             encoded_statement,
-        );
-        let vanishing = challenges[3].pow([context.domain_size]) - Fr::one();
+        )?;
+        let zeta = challenges
+            .get(3)
+            .copied()
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        let vanishing = zeta.pow([context.domain_size]).sub(Fr::one());
         if vanishing.is_zero() {
             return Err(AltBn128BatchError::DegenerateChallenge);
         }
-        let denominator_start = denominator_count;
         denominator_count = denominator_count
             .checked_add(context.lagrange_count)
             .ok_or(AltBn128BatchError::CapExceeded)?;
@@ -162,9 +177,7 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
         }
         prepared.push(PreparedProof {
             context_index,
-            public_start: public_cursor,
-            public_end,
-            denominator_start,
+            public_range: public_cursor..public_end,
             vanishing,
             native: NativeProof {
                 challenges,
@@ -182,108 +195,121 @@ pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
         return Err(AltBn128BatchError::UnusedContext);
     }
 
-    let seed = batch_digest(contexts, inputs, public_inputs, &prepared);
+    let seed = batch_digest(contexts, inputs, public_inputs, &prepared)?;
     for (index, proof) in prepared.iter_mut().enumerate() {
-        let digest = hashv(&[&seed, b"rho", &(index as u64).to_be_bytes()]).to_bytes();
+        let index = u64::try_from(index).map_err(|_| AltBn128BatchError::BackendInvariant)?;
+        let digest = hashv(&[&seed, b"rho", &index.to_be_bytes()]).to_bytes();
         let mut low = [0u8; 16];
         low.copy_from_slice(&digest[16..]);
-        proof.native.rho = Fr::from(u128::from_be_bytes(low)) + Fr::one();
+        proof.native.rho = Fr::from(u128::from_be_bytes(low)).add(Fr::one());
     }
 
     let mut denominators = Vec::with_capacity(denominator_count);
     for proof in &prepared {
-        let context = &parsed_contexts[proof.context_index];
+        let context = parsed_contexts
+            .get(proof.context_index)
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
         let n = Fr::from(context.domain_size);
-        let zeta = proof.native.challenges[3];
+        let zeta = proof
+            .native
+            .challenges
+            .get(3)
+            .copied()
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
         let mut root = Fr::one();
         for _ in 0..context.lagrange_count {
-            denominators.push(n * (zeta - root));
-            root *= context.omega;
+            denominators.push(n.mul(zeta.sub(root)));
+            root = root.mul(context.omega);
         }
     }
     batch_inversion(&mut denominators);
 
-    let shared_count = PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS * contexts.len();
-    let generator_index = shared_count;
-    let proof_outputs_start = generator_index + 1;
+    let shared_count = PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS
+        .checked_mul(contexts.len())
+        .ok_or(AltBn128BatchError::CapExceeded)?;
     let mut output = vec![PodScalar([0u8; 32]); output_count];
     let mut shared = vec![[Fr::zero(); PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS]; contexts.len()];
     let mut generator = Fr::zero();
 
-    for (proof_index, proof) in prepared.into_iter().enumerate() {
-        let context = &parsed_contexts[proof.context_index];
-        let inverse_end = proof.denominator_start + context.lagrange_count;
+    let (shared_output, remaining_output) = output.split_at_mut(shared_count);
+    let (generator_output, proof_output) = remaining_output
+        .split_first_mut()
+        .ok_or(AltBn128BatchError::BackendInvariant)?;
+    let mut proof_rows = proof_output.chunks_exact_mut(PLONK_PER_PROOF_OUTPUTS);
+    let mut remaining_denominators = denominators.as_slice();
+    for proof in prepared {
+        let context = parsed_contexts
+            .get(proof.context_index)
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        let (inverses, remaining) = remaining_denominators
+            .split_at_checked(context.lagrange_count)
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        remaining_denominators = remaining;
         let reduced = reduce_one(
-            context.domain_size,
             context.omega,
             context.k1,
             context.k2,
             &proof.native,
             proof.vanishing,
-            &denominators[proof.denominator_start..inverse_end],
-        );
+            inverses,
+        )?;
 
-        for (accumulator, coefficient) in
-            shared[proof.context_index].iter_mut().zip(reduced.shared_q)
-        {
-            *accumulator -= proof.native.rho * coefficient;
-        }
-        generator -= proof.native.rho * reduced.generator;
+        let context_shared = shared
+            .get_mut(proof.context_index)
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        reduced.accumulate_shared_q(proof.native.rho, context_shared);
+        generator = generator.sub(reduced.generator_contribution(proof.native.rho));
 
-        let base = proof_outputs_start + proof_index * PLONK_PER_PROOF_OUTPUTS;
-        let per = [
-            proof.native.rho,
-            proof.native.rho * reduced.p_shifted,
-            -(proof.native.rho * reduced.z),
-            -(proof.native.rho * reduced.t_lo),
-            -(proof.native.rho * reduced.t_mid),
-            -(proof.native.rho * reduced.t_hi),
-            -(proof.native.rho * reduced.a),
-            -(proof.native.rho * reduced.b),
-            -(proof.native.rho * reduced.c),
-            -(proof.native.rho * reduced.w_zeta_q),
-            -(proof.native.rho * reduced.w_zeta_omega_q),
-        ];
-        for (slot, scalar) in output[base..base + PLONK_PER_PROOF_OUTPUTS]
-            .iter_mut()
-            .zip(per)
-        {
+        let row = proof_rows
+            .next()
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        for (slot, scalar) in row.iter_mut().zip(reduced.weighted_row(proof.native.rho)) {
             *slot = PodScalar::from(&scalar);
         }
     }
+    if !remaining_denominators.is_empty() || !proof_rows.into_remainder().is_empty() {
+        return Err(AltBn128BatchError::BackendInvariant);
+    }
 
-    for (context_index, coefficients) in shared.into_iter().enumerate() {
-        let base = context_index * PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS;
-        for (slot, scalar) in output[base..base + PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS]
-            .iter_mut()
-            .zip(coefficients)
-        {
+    let mut context_rows = shared_output.chunks_exact_mut(PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS);
+    for (row, coefficients) in (&mut context_rows).zip(shared) {
+        for (slot, scalar) in row.iter_mut().zip(coefficients) {
             *slot = PodScalar::from(&scalar);
         }
     }
-    output[generator_index] = PodScalar::from(&generator);
+    if !context_rows.into_remainder().is_empty() {
+        return Err(AltBn128BatchError::BackendInvariant);
+    }
+    *generator_output = PodScalar::from(&generator);
     Ok(output)
 }
 
-/// Host-only hook used by transcript-binding and omission tests.
-#[doc(hidden)]
-pub fn diagnostic_snarkjs_plonk_multi_vk_batch_digest(
+#[cfg(test)]
+fn diagnostic_snarkjs_plonk_multi_vk_batch_digest(
     contexts: &[PodSnarkjsPlonkMultiVkContext],
     inputs: &[PodSnarkjsPlonkMultiVkInput],
     public_inputs: &[PodScalar],
 ) -> Result<[u8; 32], AltBn128BatchError> {
-    // The production reducer proves every shape/canonicality invariant first.
+    // The reducer validates the complete input before the test reads its digest.
     alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(Version::V0, contexts, inputs, public_inputs)?;
     let mut cursor = 0usize;
     let mut prepared = Vec::with_capacity(inputs.len());
     for input in inputs {
-        let context_index = input.context_index() as usize;
-        let count = contexts[context_index].reduction.num_public_inputs() as usize;
+        let context_index = usize::try_from(input.context_index())
+            .map_err(|_| AltBn128BatchError::BackendInvariant)?;
+        let encoded_count = contexts
+            .get(context_index)
+            .ok_or(AltBn128BatchError::BackendInvariant)?
+            .reduction
+            .num_public_inputs();
+        let count =
+            usize::try_from(encoded_count).map_err(|_| AltBn128BatchError::BackendInvariant)?;
+        let public_end = cursor
+            .checked_add(count)
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
         prepared.push(PreparedProof {
             context_index,
-            public_start: cursor,
-            public_end: cursor + count,
-            denominator_start: 0,
+            public_range: cursor..public_end,
             vanishing: Fr::zero(),
             native: NativeProof {
                 challenges: [Fr::zero(); 6],
@@ -292,9 +318,9 @@ pub fn diagnostic_snarkjs_plonk_multi_vk_batch_digest(
                 rho: Fr::one(),
             },
         });
-        cursor += count;
+        cursor = public_end;
     }
-    Ok(batch_digest(contexts, inputs, public_inputs, &prepared))
+    batch_digest(contexts, inputs, public_inputs, &prepared)
 }
 
 fn batch_digest(
@@ -302,15 +328,54 @@ fn batch_digest(
     inputs: &[PodSnarkjsPlonkMultiVkInput],
     public_inputs: &[PodScalar],
     prepared: &[PreparedProof],
-) -> [u8; 32] {
-    let context_count = (contexts.len() as u64).to_be_bytes();
-    let proof_count = (inputs.len() as u64).to_be_bytes();
-    let public_count = (public_inputs.len() as u64).to_be_bytes();
-    let mut parts: Vec<&[u8]> = Vec::with_capacity(4 + contexts.len() * 17 + inputs.len() * 18);
-    parts.push(DOMAIN);
-    parts.push(&context_count);
-    parts.push(&proof_count);
-    parts.push(&public_count);
+) -> Result<[u8; 32], AltBn128BatchError> {
+    if inputs.len() != prepared.len() {
+        return Err(AltBn128BatchError::BackendInvariant);
+    }
+    let context_count = u64::try_from(contexts.len())
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?
+        .to_be_bytes();
+    let proof_count = u64::try_from(inputs.len())
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?
+        .to_be_bytes();
+    let public_count = u64::try_from(public_inputs.len())
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?
+        .to_be_bytes();
+    let context_parts = contexts.iter().try_fold(4usize, |total, context| {
+        let parts = context
+            .reduction
+            .transcript_vk_points
+            .len()
+            .checked_add(9)
+            .ok_or(AltBn128BatchError::CapExceeded)?;
+        total
+            .checked_add(parts)
+            .ok_or(AltBn128BatchError::CapExceeded)
+    })?;
+    let capacity =
+        inputs
+            .iter()
+            .zip(prepared)
+            .try_fold(context_parts, |total, (input, proof)| {
+                let statement_parts = proof
+                    .public_range
+                    .end
+                    .checked_sub(proof.public_range.start)
+                    .ok_or(AltBn128BatchError::BackendInvariant)?;
+                let proof_parts = input
+                    .proof
+                    .transcript_points
+                    .len()
+                    .checked_add(input.proof.evaluations.len())
+                    .and_then(|value| value.checked_add(statement_parts))
+                    .and_then(|value| value.checked_add(2))
+                    .ok_or(AltBn128BatchError::CapExceeded)?;
+                total
+                    .checked_add(proof_parts)
+                    .ok_or(AltBn128BatchError::CapExceeded)
+            })?;
+    let mut parts: Vec<&[u8]> = Vec::with_capacity(capacity);
+    parts.extend([DOMAIN, &context_count, &proof_count, &public_count]);
     for context in contexts {
         parts.push(&context.context_index_be);
         parts.push(&context.application_context);
@@ -328,7 +393,10 @@ fn batch_digest(
     for (input, proof) in inputs.iter().zip(prepared) {
         parts.push(&input.proof_index_be);
         parts.push(&input.context_index_be);
-        for public in &public_inputs[proof.public_start..proof.public_end] {
+        let statement = public_inputs
+            .get(proof.public_range.clone())
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        for public in statement {
             parts.push(&public.0);
         }
         for point in &input.proof.transcript_points {
@@ -338,7 +406,7 @@ fn batch_digest(
             parts.push(&evaluation.0);
         }
     }
-    hashv(&parts).to_bytes()
+    Ok(hashv(&parts).to_bytes())
 }
 
 #[cfg(test)]
@@ -363,7 +431,7 @@ mod tests {
             transcript_vk_points: core::array::from_fn(|i| {
                 let mut bytes = [0u8; 64];
                 bytes[31] = seed;
-                bytes[63] = i as u8 + 1;
+                bytes[63] = u8::try_from(i).unwrap_or(u8::MAX).saturating_add(1);
                 PodG1Point(bytes)
             }),
             x_2: {
@@ -398,11 +466,14 @@ mod tests {
                 transcript_points: core::array::from_fn(|i| {
                     let mut bytes = [0u8; 64];
                     bytes[31] = seed;
-                    bytes[63] = i as u8 + 1;
+                    bytes[63] = u8::try_from(i).unwrap_or(u8::MAX).saturating_add(1);
                     PodG1Point(bytes)
                 }),
                 evaluations: core::array::from_fn(|i| {
-                    PodScalar::from(&Fr::from(seed as u64 + i as u64 + 11))
+                    let value = u64::from(seed)
+                        .saturating_add(u64::try_from(i).unwrap_or(u64::MAX))
+                        .saturating_add(11);
+                    PodScalar::from(&Fr::from(value))
                 }),
             },
         }

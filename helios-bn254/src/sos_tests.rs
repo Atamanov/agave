@@ -14,7 +14,9 @@ use rand::rngs::StdRng;
 
 use crate::consts::P;
 use crate::fp::Fp;
-use crate::fp::sos::{negp, sos2, sos4, sos6, sos8, sosd2, sosd4, sosd6, sosd8};
+use crate::fp::sos::{
+    Fp2Product, SosProduct, negp, sos2, sos4, sos6, sos8, sosd2, sosd4, sosd6, sosd8,
+};
 use crate::fp2::Fp2;
 use crate::fp2_fast::{f2_from, f2_mul, f2_mul_karatsuba, f2_sqr, f2_sqr_lazy, f2_to};
 use crate::fp6::Fp6;
@@ -153,6 +155,24 @@ fn sos_ref(pairs: &[([u64; 4], [u64; 4])]) -> [u64; 4] {
     acc.0
 }
 
+fn sos_products<const N: usize>(pairs: &[([u64; 4], [u64; 4])]) -> [SosProduct<'_>; N] {
+    core::array::from_fn(|index| SosProduct::new(&pairs[index].0, &pairs[index].1))
+}
+
+fn fp2_products<'a, const N: usize>(
+    left: &'a [([u64; 4], [u64; 4])],
+    right: &'a [([u64; 4], [u64; 4])],
+) -> [Fp2Product<'a>; N] {
+    core::array::from_fn(|index| {
+        Fp2Product::new(
+            &left[index].0,
+            &left[index].1,
+            &right[index].0,
+            &right[index].1,
+        )
+    })
+}
+
 #[test]
 fn kernels_match_reference_random() {
     let mut rng = StdRng::seed_from_u64(0x50505);
@@ -176,44 +196,8 @@ fn kernels_match_reference_random() {
             ),
             sos_ref(&pairs[..4])
         );
-        assert_eq!(
-            sos6(
-                &pairs[0].0,
-                &pairs[0].1,
-                &pairs[1].0,
-                &pairs[1].1,
-                &pairs[2].0,
-                &pairs[2].1,
-                &pairs[3].0,
-                &pairs[3].1,
-                &pairs[4].0,
-                &pairs[4].1,
-                &pairs[5].0,
-                &pairs[5].1
-            ),
-            sos_ref(&pairs[..6])
-        );
-        assert_eq!(
-            sos8(
-                &pairs[0].0,
-                &pairs[0].1,
-                &pairs[1].0,
-                &pairs[1].1,
-                &pairs[2].0,
-                &pairs[2].1,
-                &pairs[3].0,
-                &pairs[3].1,
-                &pairs[4].0,
-                &pairs[4].1,
-                &pairs[5].0,
-                &pairs[5].1,
-                &pairs[6].0,
-                &pairs[6].1,
-                &pairs[7].0,
-                &pairs[7].1
-            ),
-            sos_ref(&pairs[..8])
-        );
+        assert_eq!(sos6(sos_products::<6>(&pairs)), sos_ref(&pairs[..6]));
+        assert_eq!(sos8(sos_products::<8>(&pairs)), sos_ref(&pairs[..8]));
     }
 }
 
@@ -228,20 +212,19 @@ fn kernels_worst_case_accumulation() {
     let mm = [(m, m); 8];
     assert_eq!(sos2(&m, &m, &m, &m), sos_ref(&mm[..2]));
     assert_eq!(sos4(&m, &m, &m, &m, &m, &m, &m, &m), sos_ref(&mm[..4]));
-    assert_eq!(
-        sos6(&m, &m, &m, &m, &m, &m, &m, &m, &m, &m, &m, &m),
-        sos_ref(&mm[..6])
-    );
-    assert_eq!(
-        sos8(
-            &m, &m, &m, &m, &m, &m, &m, &m, &m, &m, &m, &m, &m, &m, &m, &m
-        ),
-        sos_ref(&mm[..8])
-    );
+    assert_eq!(sos6([SosProduct::new(&m, &m); 6]), sos_ref(&mm[..6]));
+    assert_eq!(sos8([SosProduct::new(&m, &m); 8]), sos_ref(&mm[..8]));
     // p-valued rows (= 0 mod p) mixed with maximal rows.
     assert_eq!(sos2(&m, &pm, &m, &m), sos_ref(&[(m, [0; 4]), (m, m)]));
     assert_eq!(
-        sos6(&m, &pm, &m, &pm, &m, &pm, &m, &m, &m, &m, &m, &m),
+        sos6([
+            SosProduct::new(&m, &pm),
+            SosProduct::new(&m, &pm),
+            SosProduct::new(&m, &pm),
+            SosProduct::new(&m, &m),
+            SosProduct::new(&m, &m),
+            SosProduct::new(&m, &m),
+        ]),
         sos_ref(&[
             (m, [0; 4]),
             (m, [0; 4]),
@@ -293,42 +276,56 @@ fn dual_kernels_match_single_lane() {
             )
         );
 
-        let d6 = sosd6(
-            &x[0].0, &x[0].1, &y[0].0, &y[0].1, &x[1].0, &x[1].1, &y[1].0, &y[1].1, &x[2].0,
-            &x[2].1, &y[2].0, &y[2].1,
-        );
+        let d6 = sosd6(fp2_products::<3>(&x, &y));
         assert_eq!(
             d6.0,
-            sos6(
-                &x[0].0, &y[0].0, &x[0].1, &ny[0], &x[1].0, &y[1].0, &x[1].1, &ny[1], &x[2].0,
-                &y[2].0, &x[2].1, &ny[2]
-            )
+            sos6([
+                SosProduct::new(&x[0].0, &y[0].0),
+                SosProduct::new(&x[0].1, &ny[0]),
+                SosProduct::new(&x[1].0, &y[1].0),
+                SosProduct::new(&x[1].1, &ny[1]),
+                SosProduct::new(&x[2].0, &y[2].0),
+                SosProduct::new(&x[2].1, &ny[2]),
+            ])
         );
         assert_eq!(
             d6.1,
-            sos6(
-                &x[0].0, &y[0].1, &x[0].1, &y[0].0, &x[1].0, &y[1].1, &x[1].1, &y[1].0, &x[2].0,
-                &y[2].1, &x[2].1, &y[2].0
-            )
+            sos6([
+                SosProduct::new(&x[0].0, &y[0].1),
+                SosProduct::new(&x[0].1, &y[0].0),
+                SosProduct::new(&x[1].0, &y[1].1),
+                SosProduct::new(&x[1].1, &y[1].0),
+                SosProduct::new(&x[2].0, &y[2].1),
+                SosProduct::new(&x[2].1, &y[2].0),
+            ])
         );
 
-        let d8 = sosd8(
-            &x[0].0, &x[0].1, &y[0].0, &y[0].1, &x[1].0, &x[1].1, &y[1].0, &y[1].1, &x[2].0,
-            &x[2].1, &y[2].0, &y[2].1, &x[3].0, &x[3].1, &y[3].0, &y[3].1,
-        );
+        let d8 = sosd8(fp2_products::<4>(&x, &y));
         assert_eq!(
             d8.0,
-            sos8(
-                &x[0].0, &y[0].0, &x[0].1, &ny[0], &x[1].0, &y[1].0, &x[1].1, &ny[1], &x[2].0,
-                &y[2].0, &x[2].1, &ny[2], &x[3].0, &y[3].0, &x[3].1, &ny[3]
-            )
+            sos8([
+                SosProduct::new(&x[0].0, &y[0].0),
+                SosProduct::new(&x[0].1, &ny[0]),
+                SosProduct::new(&x[1].0, &y[1].0),
+                SosProduct::new(&x[1].1, &ny[1]),
+                SosProduct::new(&x[2].0, &y[2].0),
+                SosProduct::new(&x[2].1, &ny[2]),
+                SosProduct::new(&x[3].0, &y[3].0),
+                SosProduct::new(&x[3].1, &ny[3]),
+            ])
         );
         assert_eq!(
             d8.1,
-            sos8(
-                &x[0].0, &y[0].1, &x[0].1, &y[0].0, &x[1].0, &y[1].1, &x[1].1, &y[1].0, &x[2].0,
-                &y[2].1, &x[2].1, &y[2].0, &x[3].0, &y[3].1, &x[3].1, &y[3].0
-            )
+            sos8([
+                SosProduct::new(&x[0].0, &y[0].1),
+                SosProduct::new(&x[0].1, &y[0].0),
+                SosProduct::new(&x[1].0, &y[1].1),
+                SosProduct::new(&x[1].1, &y[1].0),
+                SosProduct::new(&x[2].0, &y[2].1),
+                SosProduct::new(&x[2].1, &y[2].0),
+                SosProduct::new(&x[3].0, &y[3].1),
+                SosProduct::new(&x[3].1, &y[3].0),
+            ])
         );
     }
 }
@@ -501,14 +498,25 @@ mod leaf_differential {
     use super::{edge_fps, random_fp};
     use crate::fp::Fp;
     use crate::fp::sos::{
-        sos2, sos2_portable, sos4, sos4_portable, sosd2, sosd2_portable, sosd4, sosd4_portable,
-        sosd6, sosd6_portable, sosd8, sosd8_portable,
+        Fp2Product, sos2, sos2_portable, sos4, sos4_portable, sosd2, sosd2_portable, sosd4,
+        sosd4_portable, sosd6, sosd6_portable, sosd8, sosd8_portable,
     };
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
     fn compare_all(f: &[Fp; 16], case: usize) {
         let w: [&[u64; 4]; 16] = core::array::from_fn(|i| &f[i].0);
+        let d6 = [
+            Fp2Product::new(w[0], w[1], w[2], w[3]),
+            Fp2Product::new(w[4], w[5], w[6], w[7]),
+            Fp2Product::new(w[8], w[9], w[10], w[11]),
+        ];
+        let d8 = [
+            d6[0],
+            d6[1],
+            d6[2],
+            Fp2Product::new(w[12], w[13], w[14], w[15]),
+        ];
         assert_eq!(
             sos2(w[0], w[1], w[2], w[3]),
             sos2_portable(w[0], w[1], w[2], w[3]),
@@ -536,46 +544,20 @@ mod leaf_differential {
             sosd4_portable(w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]),
             "sosd4 case {case}",
         );
-        assert_eq!(
-            sosd6(
-                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11],
-            ),
-            sosd6_portable(
-                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11],
-            ),
-            "sosd6 case {case}",
-        );
+        assert_eq!(sosd6(d6), sosd6_portable(d6), "sosd6 case {case}",);
         // Both x86 sosd6 routes are verified on silicon regardless of which
         // one the production dispatch links (HELIOS_SOSD6_ASM).
         assert_eq!(
-            crate::fp::x86_64::sosd6_leaf(
-                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11],
-            ),
-            sosd6_portable(
-                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11],
-            ),
+            crate::fp::x86_64::sosd6_leaf(d6),
+            sosd6_portable(d6),
             "sosd6 asm leaf case {case}",
         );
         assert_eq!(
-            crate::fp::x86_64::sosd6(
-                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11],
-            ),
-            sosd6_portable(
-                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11],
-            ),
+            crate::fp::x86_64::sosd6(d6),
+            sosd6_portable(d6),
             "sosd6 composed case {case}",
         );
-        assert_eq!(
-            sosd8(
-                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11], w[12],
-                w[13], w[14], w[15],
-            ),
-            sosd8_portable(
-                w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11], w[12],
-                w[13], w[14], w[15],
-            ),
-            "sosd8 case {case}",
-        );
+        assert_eq!(sosd8(d8), sosd8_portable(d8), "sosd8 case {case}",);
     }
 
     fn random_case(rng: &mut StdRng) -> [Fp; 16] {
@@ -818,6 +800,8 @@ mod fp12_034_leaf_differential {
 /// accumulators (the production input shape).
 #[cfg(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))]
 mod fp12_sqr_leaf_differential {
+    use core::ops::Mul;
+
     use super::{
         edge_fps, line_shaped_fp12, random_fp12, set_fp12_slot, uniform_fp12, xi_edge_fp2s,
     };
@@ -910,6 +894,8 @@ mod fp12_sqr_leaf_differential {
 /// final exponentiation).
 #[cfg(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))]
 mod fp12_mul_leaf_differential {
+    use core::ops::Mul;
+
     use super::{
         edge_fps, line_shaped_fp12, random_fp12, set_fp12_slot, uniform_fp12, xi_edge_fp2s,
     };

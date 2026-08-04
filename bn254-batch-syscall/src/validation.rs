@@ -4,9 +4,8 @@ use {
     ark_ec::AffineRepr,
 };
 
-/// Stable error taxonomy for both batch syscalls. The syscall boundary
-/// flattens every variant to a nonzero return code; the distinctions exist for
-/// crate users and tests.
+/// Stable error taxonomy for the BN254 batch operations. The syscall boundary
+/// flattens every variant to a nonzero return code.
 #[derive(thiserror::Error, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AltBn128BatchError {
     #[error("input length is not a whole number of elements")]
@@ -35,6 +34,8 @@ pub enum AltBn128BatchError {
     DuplicateContext,
     #[error("atomic PLONK batch contains an unused verifying-key context")]
     UnusedContext,
+    #[error("native backend invariant failed")]
+    BackendInvariant,
     /// On the solana target the runtime reports every rejection as one nonzero
     /// code, so the variants above are not recoverable there.
     #[error("syscall rejected the input")]

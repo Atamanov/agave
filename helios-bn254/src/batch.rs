@@ -37,6 +37,8 @@ use crate::{
 pub const MSM_MAX_POINTS: usize = 2048;
 /// Per-call cap on [`pairing_product_is_one`] pairs.
 pub const PAIRING_MAX_PAIRS: usize = 256;
+/// Per-call cap on [`pairing_map`] pairs.
+pub const PAIRING_MAP_MAX_PAIRS: usize = 16;
 /// Per-call cap on immutable registry targets consumed by
 /// [`trusted_gt_multiexp`].
 pub const TRUSTED_GT_MAX_TARGETS: usize = 16;
@@ -96,21 +98,18 @@ pub struct PodPairingResult(pub [u8; 32]);
 /// Coefficients use the crate's public tower order
 /// `c0.c0.{c0,c1}, c0.c1.{c0,c1}, c0.c2.{c0,c1},
 /// c1.c0.{c0,c1}, c1.c1.{c0,c1}, c1.c2.{c0,c1}`. Each coefficient is a
-/// canonical 32-byte big-endian Fp value. Pairing-map is an output-only
-/// operation: no checked-facade operation accepts caller-supplied GT/Fp12
-/// bytes as arithmetic or equality input.
+/// canonical 32-byte big-endian Fp value. [`pairing_map`] writes this type.
+/// [`TrustedGt::from_canonical_subgroup_bytes`] accepts it only after
+/// canonical encoding and subgroup checks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]
 pub struct GtBytes(pub [u8; GT_BYTES]);
 
-/// An immutable post-final-exponentiation target minted from a checked pair.
+/// An immutable post-final-exponentiation target for a trusted registry.
 ///
-/// The wrapped field value is deliberately private and this type has no byte
-/// decoder. A validator runtime is expected to create these entries while
-/// installing a verification key, bind the original pair and entry identifier
-/// into that key's authenticated digest, and expose only registry identifiers
-/// to programs. The hot operation then resolves those identifiers to this
-/// type; caller-originated GT/Fp12 bytes never cross the syscall boundary.
+/// Construct this value from a checked pair or canonical subgroup bytes. The
+/// runtime must authenticate the owner, source, and registry identifier before
+/// it accepts decoded bytes. Subgroup membership does not prove provenance.
 #[derive(Clone, Debug)]
 pub struct TrustedGt {
     value: Fp12,
@@ -220,7 +219,7 @@ impl PodPairingResult {
     /// True iff the word encodes a passing pairing check.
     #[inline]
     pub fn verdict(&self) -> bool {
-        self.0[31] == 1
+        self == &Self::from_verdict(true)
     }
 }
 
@@ -262,35 +261,25 @@ impl GtBytes {
 }
 
 impl TrustedGt {
-    /// Mint a registry target from one canonical, fully validated G1/G2 pair.
+    /// Create a registry target from one fully validated G1/G2 pair.
     ///
-    /// This performs the expensive pairing and final exponentiation once on
-    /// the registry/install path. Authentication and ownership of the
-    /// resulting registry entry are runtime responsibilities; subgroup
-    /// membership alone does not authenticate a verification-key target.
+    /// This performs one pairing and one final exponentiation. The runtime
+    /// must authenticate the resulting registry entry.
     pub fn from_pair(pair: &PairBytes) -> Result<Self, InputError> {
         pairing_product(core::slice::from_ref(pair)).map(|value| Self { value })
     }
 
-    /// Decode a canonical GT value from an authenticated, immutable registry.
+    /// Decode a canonical target-group value.
     ///
-    /// Every coefficient is checked for canonical Fp encoding and the decoded
-    /// Fp12 value is checked to be a nonzero member of the r-order subgroup.
-    /// This constructor is intentionally not a general caller-byte facade: it
-    /// exists for validator runtimes which persist a pairing-map result in a
-    /// program-owned registry and later resolve only opaque entry identifiers.
-    ///
-    /// # Safety
-    ///
-    /// The caller must have authenticated `bytes` as part of immutable state
-    /// owned by the consuming program, including binding it to the original
-    /// checked G1/G2 pair and opaque identifier. Subgroup membership alone
-    /// does not establish that provenance.
-    pub unsafe fn from_authenticated_registry_bytes(bytes: &GtBytes) -> Result<Self, InputError> {
+    /// This checks canonical Fp encoding, a nonzero value, and r-order subgroup
+    /// membership. The registry must prove owner, source, and identifier
+    /// bindings.
+    pub fn from_canonical_subgroup_bytes(bytes: &GtBytes) -> Result<Self, InputError> {
         let mut coefficients = [Fp::ZERO; 12];
         for (coefficient, encoded) in coefficients.iter_mut().zip(bytes.0.chunks_exact(32)) {
-            let encoded: &[u8; 32] = encoded.try_into().expect("fixed GT coefficient length");
-            *coefficient = Fp::from_bytes_be(encoded).ok_or(InputError::NonCanonical)?;
+            let mut coefficient_bytes = [0u8; 32];
+            coefficient_bytes.copy_from_slice(encoded);
+            *coefficient = Fp::from_bytes_be(&coefficient_bytes).ok_or(InputError::NonCanonical)?;
         }
 
         let value = Fp12::new(
@@ -306,10 +295,7 @@ impl TrustedGt {
             ),
         );
 
-        let scalar_bits: Vec<bool> = (0..256)
-            .map(|bit| ((R[bit / 64] >> (bit % 64)) & 1) != 0)
-            .collect();
-        if value.is_zero() || value.pow_bits(&scalar_bits) != Fp12::ONE {
+        if value.is_zero() || value.pow_limbs(&R) != Fp12::ONE {
             return Err(InputError::NotInSubgroup);
         }
 
@@ -406,11 +392,14 @@ pub fn pairing_product_is_one(pairs: &[PairBytes]) -> Result<bool, InputError> {
 
 /// Return the canonical post-final-exponentiation product of all pairings.
 ///
-/// Inputs, caps, validation order, infinity handling, G2 cache behavior, and
-/// arithmetic dispatch are exactly those of [`pairing_product_is_one`]. The
-/// only extra work is canonical serialization of the trusted GT result. No
-/// inverse conversion exists on this checked facade.
+/// Validation order, infinity handling, G2 caching, and arithmetic dispatch
+/// match [`pairing_product_is_one`] after the smaller
+/// [`PAIRING_MAP_MAX_PAIRS`] cap. Use
+/// [`TrustedGt::from_canonical_subgroup_bytes`] to decode and check the result.
 pub fn pairing_map(pairs: &[PairBytes]) -> Result<GtBytes, InputError> {
+    if pairs.len() > PAIRING_MAP_MAX_PAIRS {
+        return Err(InputError::CapExceeded);
+    }
     pairing_product(pairs).map(|value| GtBytes::from_gt(&value))
 }
 
@@ -600,8 +589,9 @@ pub fn fr_batch_invert(values: &[ScalarBytes]) -> Result<Vec<ScalarBytes>, Input
         field.push(value);
     }
 
-    let mut product_inverse =
-        fr_invert_raw(product).expect("product of nonzero field elements is nonzero");
+    let Some(mut product_inverse) = fr_invert_raw(product) else {
+        return Err(InputError::ZeroInput);
+    };
     let mut output = vec![ScalarBytes([0; 32]); field.len()];
     for i in (0..field.len()).rev() {
         if i == 0 {
@@ -665,12 +655,12 @@ fn decode_fp(bytes: &[u8]) -> Result<Fp, InputError> {
 #[inline]
 fn decode_scalar_raw(bytes: &ScalarBytes) -> Result<[u64; 4], InputError> {
     let bytes = &bytes.0;
-    let limbs = [
-        u64::from_be_bytes(bytes[24..32].try_into().unwrap()),
-        u64::from_be_bytes(bytes[16..24].try_into().unwrap()),
-        u64::from_be_bytes(bytes[8..16].try_into().unwrap()),
-        u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
-    ];
+    let limbs = core::array::from_fn(|index| {
+        let start = 24 - 8 * index;
+        let mut limb = [0u8; 8];
+        limb.copy_from_slice(&bytes[start..start + 8]);
+        u64::from_be_bytes(limb)
+    });
     if limb::gte(&limbs, &R) {
         return Err(InputError::NonCanonical);
     }
@@ -716,6 +706,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pairing_verdict_requires_the_canonical_word() {
+        let mut malformed = PodPairingResult::from_verdict(true);
+        malformed.0[0] = 1;
+        assert!(!malformed.verdict());
+        assert!(PodPairingResult::from_verdict(true).verdict());
+        assert!(!PodPairingResult::from_verdict(false).verdict());
+    }
+
+    #[test]
+    fn pairing_map_has_its_own_cap() {
+        let infinity = PairBytes {
+            g1: G1Bytes([0; G1_BYTES]),
+            g2: G2Bytes([0; G2_BYTES]),
+        };
+        let pairs = [infinity; PAIRING_MAP_MAX_PAIRS + 1];
+        assert_eq!(pairing_map(&pairs), Err(InputError::CapExceeded));
+        assert_eq!(pairing_product_is_one(&pairs), Ok(true));
+    }
+
+    #[test]
     fn be_field_round_trips() {
         for value in [0, 1, 2, u64::MAX] {
             let fp = Fp::from_u64(value);
@@ -733,35 +743,30 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_registry_gt_round_trips_pairing_map() {
+    fn canonical_subgroup_gt_round_trips_pairing_map() {
         let pair = PairBytes {
             g1: G1Bytes::from_affine(&G1Affine::generator()),
             g2: G2Bytes::from_affine(&G2Affine::arkworks_generator()),
         };
         let encoded = pairing_map(core::slice::from_ref(&pair)).unwrap();
-        // SAFETY: this test authenticates `encoded` by deriving it directly
-        // from the checked source pair immediately above.
-        let target = unsafe { TrustedGt::from_authenticated_registry_bytes(&encoded) }.unwrap();
+        let target = TrustedGt::from_canonical_subgroup_bytes(&encoded).unwrap();
         let one = ScalarBytes::from_fr(Fr::ONE);
         assert_eq!(trusted_gt_multiexp(&[target], &[one]).unwrap(), encoded);
     }
 
     #[test]
-    fn authenticated_registry_gt_rejects_noncanonical_and_non_subgroup() {
+    fn canonical_subgroup_gt_rejects_noncanonical_and_non_subgroup() {
         let mut noncanonical = GtBytes([0; GT_BYTES]);
         noncanonical.0[..32].fill(0xff);
-        // SAFETY: the test deliberately exercises the decoder; there is no
-        // caller-controlled syscall path involved.
         assert!(matches!(
-            unsafe { TrustedGt::from_authenticated_registry_bytes(&noncanonical) },
+            TrustedGt::from_canonical_subgroup_bytes(&noncanonical),
             Err(InputError::NonCanonical)
         ));
 
         let mut not_in_subgroup = GtBytes([0; GT_BYTES]);
         not_in_subgroup.0[31] = 2;
-        // SAFETY: as above, this is a direct negative decoder test.
         assert!(matches!(
-            unsafe { TrustedGt::from_authenticated_registry_bytes(&not_in_subgroup) },
+            TrustedGt::from_canonical_subgroup_bytes(&not_in_subgroup),
             Err(InputError::NotInSubgroup)
         ));
     }

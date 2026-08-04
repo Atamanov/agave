@@ -277,7 +277,6 @@ unsafe fn normalize_and_reduce(t: &mut [__m512i; 6]) {
 /// at or above it, twice.  The sum-of-products accumulator can reach just under
 /// `3p` (the scalar sos leaves show the same `(1 + c*n)p` bound for these pair
 /// counts), so a single conditional subtraction is not enough.
-#[cfg_attr(not(test), allow(dead_code))]
 #[inline(always)]
 unsafe fn normalize_and_reduce_sos(t: &mut [__m512i; 6]) {
     unsafe {
@@ -320,7 +319,6 @@ unsafe fn normalize_and_reduce_sos(t: &mut [__m512i; 6]) {
 /// `2 * 5 * (n + 1) * 2^52 < 2^60`, far from wrapping; the pre-normalization
 /// result is below `3p`.  The all-`p-1` edge corpus with `n = 8` exercises the
 /// tightest lane against both bounds.
-#[cfg_attr(not(test), allow(dead_code))]
 #[inline]
 fn mont_sos_mac_8(a: &[[__m512i; 5]], b: &[[__m512i; 5]]) -> [__m512i; 5] {
     debug_assert!(!a.is_empty() && a.len() == b.len() && a.len() <= 8);
@@ -424,7 +422,6 @@ impl FpVec8 {
     /// Operands stay in the radix-52 domain, so a tower routine converts its
     /// inputs once, issues several of these across the eight independent
     /// components it produces, and converts back once.
-    #[cfg_attr(not(test), allow(dead_code))]
     #[inline]
     pub(crate) fn sos_mac(a: &[FpVec8], b: &[FpVec8]) -> Self {
         debug_assert!(!a.is_empty() && a.len() == b.len() && a.len() <= 8);
@@ -442,7 +439,6 @@ impl FpVec8 {
 
     // The mixed-addition formula is all-subtraction; add is kept as part of
     // the differential-gated op set for future batched formulas.
-    #[cfg_attr(not(test), allow(dead_code))]
     #[inline(always)]
     pub(crate) fn add(&self, rhs: &Self) -> Self {
         unsafe {
@@ -492,7 +488,6 @@ impl FpVec8 {
     }
 
     /// The all-zero vector (value 0 in every lane; canonical radix-52).
-    #[cfg_attr(not(test), allow(dead_code))]
     #[inline(always)]
     pub(crate) fn zero() -> Self {
         Self {
@@ -501,14 +496,12 @@ impl FpVec8 {
     }
 
     /// Per-lane additive inverse `p - self` (`0` maps to `0`).
-    #[cfg_attr(not(test), allow(dead_code))]
     #[inline(always)]
     pub(crate) fn neg(&self) -> Self {
         Self::zero().sub(self)
     }
 
     /// Per-lane `2 * self`.
-    #[cfg_attr(not(test), allow(dead_code))]
     #[inline(always)]
     pub(crate) fn double(&self) -> Self {
         self.add(self)
@@ -572,6 +565,8 @@ pub(crate) fn g1_madd_batch8(
 
 #[cfg(test)]
 mod tests {
+    use core::ops::{Add, Mul, Neg};
+
     use super::*;
     use crate::consts::{MONT_ONE, MONT_R2, P};
     use crate::limb;
@@ -815,7 +810,7 @@ mod tests {
     #[test]
     #[ignore = "manual IFMA sos-mac microbenchmark: cargo test --release --features std -- --ignored ifma_sos_mac --nocapture"]
     fn ifma_sos_mac_throughput() {
-        use crate::fp::sos::sos6;
+        use crate::fp::sos::{SosProduct, sos6};
         use std::hint::black_box;
         use std::time::Instant;
 
@@ -846,10 +841,9 @@ mod tests {
         let mut sink = [0u64; 4];
         for _ in 0..reps {
             for l in 0..8 {
-                let r = sos6(
-                    &sa[l][0], &sb[l][0], &sa[l][1], &sb[l][1], &sa[l][2], &sb[l][2], &sa[l][3],
-                    &sb[l][3], &sa[l][4], &sb[l][4], &sa[l][5], &sb[l][5],
-                );
+                let products =
+                    core::array::from_fn(|index| SosProduct::new(&sa[l][index], &sb[l][index]));
+                let r = sos6(products);
                 sink[0] ^= r[0];
             }
             black_box(&sink);

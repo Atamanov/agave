@@ -301,7 +301,7 @@ pub fn miller_loop(p: &G1Affine, q: &G2Affine) -> Fp12 {
     // Final iteration (i = 1) with the two Frobenius additions pipelined in:
     // their G2 adds are f-independent too, so they issue in the same shadow.
     let q1 = mul_by_char(*q);
-    let q2 = mul_by_char(q1).neg();
+    let q2 = -mul_by_char(q1);
     f.square_in_place();
     let l1 = scale_coeffs(&r.add_in_place(f2_from(q1.x), f2_from(q1.y)), p);
     apply_lines(&mut f, &pending);
@@ -377,7 +377,7 @@ pub fn multi_miller_loop(pairs: &[(&G1Affine, &G2Affine)]) -> Fp12 {
 
     for state in &mut states {
         let q1 = mul_by_char(state.q);
-        let q2 = mul_by_char(q1).neg();
+        let q2 = -mul_by_char(q1);
         let coeffs = state.r.add_in_place(f2_from(q1.x), f2_from(q1.y));
         ell(&mut f, &coeffs, state.p);
         let coeffs = state.r.add_in_place(f2_from(q2.x), f2_from(q2.y));
@@ -391,6 +391,7 @@ mod tests {
     use super::*;
     use crate::fr::Fr;
     use crate::g2::G2Projective;
+    use core::ops::Mul;
 
     /// psi acts on G2 as multiplication by p. For BN curves p - r = 6x^2
     /// (p = 36x^4+36x^3+24x^2+6x+1, r = 36x^4+36x^3+18x^2+6x+1), so

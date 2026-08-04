@@ -10,7 +10,9 @@
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::fp::Fp;
-use crate::fp::sos::{sosd4, sosd6};
+use crate::fp::sos::sosd4;
+#[cfg(any(test, not(helios_fp6_active)))]
+use crate::fp::sos::{Fp2Product, sosd6};
 use crate::fp2::Fp2;
 
 /// `c0 + c1 v + c2 v^2`.
@@ -59,16 +61,6 @@ impl Fp6 {
             c0: self.c0.double(),
             c1: self.c1.double(),
             c2: self.c2.double(),
-        }
-    }
-
-    /// Additive inverse.
-    #[inline]
-    pub fn neg(self) -> Self {
-        Self {
-            c0: -self.c0,
-            c1: -self.c1,
-            c2: -self.c2,
         }
     }
 
@@ -231,22 +223,26 @@ impl Fp6 {
     /// component is one 6-product interleaved reduction (36M + 6R total, no
     /// modular add/subs beyond the two xi chains). Reference semantics for
     /// the whole-Fp6 x86 leaf, which computes exactly this in one call.
-    #[cfg_attr(all(helios_fp6_active, not(test)), allow(dead_code))]
+    #[cfg(any(test, not(helios_fp6_active)))]
     #[inline(always)]
     pub(crate) fn mul_sosd6(self, rhs: Self) -> Self {
         let xb1 = rhs.c1.mul_by_nonresidue();
         let xb2 = rhs.c2.mul_by_nonresidue();
-        let (a00, a01) = (&self.c0.c0.0, &self.c0.c1.0);
-        let (a10, a11) = (&self.c1.c0.0, &self.c1.c1.0);
-        let (a20, a21) = (&self.c2.c0.0, &self.c2.c1.0);
-        let (b00, b01) = (&rhs.c0.c0.0, &rhs.c0.c1.0);
-        let (b10, b11) = (&rhs.c1.c0.0, &rhs.c1.c1.0);
-        let (b20, b21) = (&rhs.c2.c0.0, &rhs.c2.c1.0);
-        let (x10, x11) = (&xb1.c0.0, &xb1.c1.0);
-        let (x20, x21) = (&xb2.c0.0, &xb2.c1.0);
-        let r0 = sosd6(a00, a01, b00, b01, a10, a11, x20, x21, a20, a21, x10, x11);
-        let r1 = sosd6(a00, a01, b10, b11, a10, a11, b00, b01, a20, a21, x20, x21);
-        let r2 = sosd6(a00, a01, b20, b21, a10, a11, b10, b11, a20, a21, b00, b01);
+        let r0 = sosd6([
+            Fp2Product::new(&self.c0.c0.0, &self.c0.c1.0, &rhs.c0.c0.0, &rhs.c0.c1.0),
+            Fp2Product::new(&self.c1.c0.0, &self.c1.c1.0, &xb2.c0.0, &xb2.c1.0),
+            Fp2Product::new(&self.c2.c0.0, &self.c2.c1.0, &xb1.c0.0, &xb1.c1.0),
+        ]);
+        let r1 = sosd6([
+            Fp2Product::new(&self.c0.c0.0, &self.c0.c1.0, &rhs.c1.c0.0, &rhs.c1.c1.0),
+            Fp2Product::new(&self.c1.c0.0, &self.c1.c1.0, &rhs.c0.c0.0, &rhs.c0.c1.0),
+            Fp2Product::new(&self.c2.c0.0, &self.c2.c1.0, &xb2.c0.0, &xb2.c1.0),
+        ]);
+        let r2 = sosd6([
+            Fp2Product::new(&self.c0.c0.0, &self.c0.c1.0, &rhs.c2.c0.0, &rhs.c2.c1.0),
+            Fp2Product::new(&self.c1.c0.0, &self.c1.c1.0, &rhs.c1.c0.0, &rhs.c1.c1.0),
+            Fp2Product::new(&self.c2.c0.0, &self.c2.c1.0, &rhs.c0.c0.0, &rhs.c0.c1.0),
+        ]);
         Self {
             c0: Fp2::new(Fp(r0.0), Fp(r0.1)),
             c1: Fp2::new(Fp(r1.0), Fp(r1.1)),
@@ -282,7 +278,11 @@ impl Neg for Fp6 {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        Fp6::neg(self)
+        Self {
+            c0: -self.c0,
+            c1: -self.c1,
+            c2: -self.c2,
+        }
     }
 }
 

@@ -2,6 +2,7 @@
 use helios_bn254::pairing::{final_exponentiation, miller_loop, multi_pairing};
 use helios_bn254::{Fp12, Fr, G1Projective, G2Projective, pairing_product_is_one};
 use std::hint::black_box;
+use std::ops::Mul;
 use std::time::Instant;
 
 fn time<R>(name: &str, iters: u32, mut f: impl FnMut() -> R) {

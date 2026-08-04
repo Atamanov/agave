@@ -154,6 +154,20 @@ fn emit_kernel(spec: &KernelSpec) -> Kernel {
     let bytes = emitter.bytes();
     let rodata_bytes = emitter.rodata_bytes();
     let (body, rodata) = emitter.into_parts();
+    assert_eq!(
+        body.iter().filter(|line| line.contains("jne")).count(),
+        spec.back_edges,
+        "{} back-edge count changed",
+        spec.symbol,
+    );
+    if let Some(max_bytes) = spec.max_bytes {
+        assert!(
+            bytes <= max_bytes,
+            "{} exceeds its {}-byte limit",
+            spec.symbol,
+            max_bytes,
+        );
+    }
     Kernel {
         symbol: spec.symbol,
         schedule_name: spec.schedule_name,
@@ -299,6 +313,7 @@ pub fn render_mont4_x86_64() -> String {
 
 /// (instructions, bytes) per kernel, in `[mul, sqr, sos, sosd2_small,
 /// fp6_mul, fp12_034, fp12_sqr, fp12_mul, cyc_sqr, sosd6]` order.
+#[cfg(test)]
 pub fn kernel_sizes() -> [(usize, usize); 10] {
     kernels().map(|kernel| (kernel.instructions, kernel.bytes))
 }

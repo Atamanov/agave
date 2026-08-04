@@ -9,6 +9,13 @@
 //! Anything else uses the portable tier -- never a silent runtime fallback.
 
 use crate::fp::Fp;
+#[cfg(any(
+    test,
+    not(helios_fp6_active),
+    not(helios_fp12_sqr_active),
+    not(helios_fp12_034_active),
+))]
+use crate::fp::sos::Fp2Product;
 
 // Arithmetic constants remain typed Rust data; the assembly owns only the
 // instruction schedule. `repr(C)` plus the assertions pins the tiny FFI view.
@@ -34,6 +41,14 @@ const _: () = {
 /// Extended table of the fp6 kernel: the mont4 shape plus the xi-scaling
 /// quotient estimate `mu = floor(2^310/p)`. A separate static so the mont4
 /// contract stays untouched.
+#[cfg(any(
+    test,
+    helios_fp6_active,
+    helios_fp12_034_active,
+    helios_fp12_sqr_active,
+    helios_cyc_sqr_active,
+    helios_fp12_mul_active,
+))]
 #[repr(C)]
 struct Fp6MulConstants {
     modulus: [u64; 4],
@@ -41,12 +56,28 @@ struct Fp6MulConstants {
     mu: u64,
 }
 
+#[cfg(any(
+    test,
+    helios_fp6_active,
+    helios_fp12_034_active,
+    helios_fp12_sqr_active,
+    helios_cyc_sqr_active,
+    helios_fp12_mul_active,
+))]
 static FP6_MUL_CONSTANTS: Fp6MulConstants = Fp6MulConstants {
     modulus: crate::consts::P,
     negative_inverse: crate::consts::P_INV,
     mu: crate::consts::P_MU_310,
 };
 
+#[cfg(any(
+    test,
+    helios_fp6_active,
+    helios_fp12_034_active,
+    helios_fp12_sqr_active,
+    helios_cyc_sqr_active,
+    helios_fp12_mul_active,
+))]
 const _: () = {
     assert!(core::mem::size_of::<Fp6MulConstants>() == 6 * core::mem::size_of::<u64>());
     assert!(core::mem::offset_of!(Fp6MulConstants, negative_inverse) == 32);
@@ -88,6 +119,16 @@ const _: () = {
 /// and requires every component < p -- the Fp invariant the mont-shaped
 /// leaves need. `at_most_p: x, y` takes `&[u64; 4]` operands directly and
 /// admits p itself -- the SoS bound (`negp(0) == p` is a legal row).
+#[cfg(any(
+    test,
+    helios_sosd2_active,
+    helios_sosd6_active,
+    helios_fp6_active,
+    helios_fp12_034_active,
+    helios_fp12_sqr_active,
+    helios_cyc_sqr_active,
+    helios_fp12_mul_active,
+))]
 macro_rules! debug_assert_canonical {
     (components($count:literal): $($operand:expr),+ $(,)?) => {{
         // Compile-time guard: each operand's byte size must equal $count
@@ -136,6 +177,7 @@ unsafe extern "C" {
         pair_count: u64,
         constants: *const Mont4Constants,
     );
+    #[cfg(any(test, helios_sosd2_active))]
     fn helios_sosd2_small_x86(
         z: *mut u64,
         x0: *const u64,
@@ -144,21 +186,37 @@ unsafe extern "C" {
         y1: *const u64,
         constants: *const Mont4Constants,
     );
+    #[cfg(any(
+        test,
+        all(
+            helios_sosd6_active,
+            any(
+                not(helios_fp6_active),
+                not(helios_fp12_sqr_active),
+                not(helios_fp12_034_active),
+            ),
+        ),
+    ))]
     fn helios_sosd6_x86(z: *mut u64, stage: *mut u64, constants: *const Mont4Constants);
+    #[cfg(any(test, helios_fp6_active))]
     fn helios_fp6_mul_x86(
         z: *mut u64,
         a: *const u64,
         b: *const u64,
         constants: *const Fp6MulConstants,
     );
+    #[cfg(any(test, helios_fp12_034_active))]
     fn helios_fp12_034_x86(
         z: *mut u64,
         f: *const u64,
         c: *const u64,
         constants: *const Fp6MulConstants,
     );
+    #[cfg(any(test, helios_fp12_sqr_active))]
     fn helios_fp12_sqr_x86(z: *mut u64, f: *const u64, constants: *const Fp6MulConstants);
+    #[cfg(any(test, helios_cyc_sqr_active))]
     fn helios_cyc_sqr_x86(z: *mut u64, f: *const u64, constants: *const Fp6MulConstants);
+    #[cfg(any(test, helios_fp12_mul_active))]
     fn helios_fp12_mul_x86(
         z: *mut u64,
         a: *const u64,
@@ -186,8 +244,8 @@ unsafe extern "C" {
 // Dispatched by default on Intel targets, opt-in elsewhere (build.rs
 // HELIOS_FP12_MUL_ASM: Zen 4's latency chain dislikes the serial staging);
 // always covered by the leaf differential tests.
-#[cfg_attr(not(any(test, helios_fp12_mul_active)), allow(dead_code))]
 #[inline(never)]
+#[cfg(any(test, helios_fp12_mul_active))]
 pub(crate) fn fp12_mul_assign(f: &mut crate::fp12::Fp12, rhs: &crate::fp12::Fp12) {
     debug_assert_canonical!(components(12): &*f, rhs);
     unsafe {
@@ -221,8 +279,8 @@ pub(crate) fn fp12_mul_assign(f: &mut crate::fp12::Fp12, rhs: &crate::fp12::Fp12
 // Dispatched by default on Intel targets, opt-in elsewhere (build.rs
 // HELIOS_FP12_SQR_ASM: -6% Miller on Granite Rapids, neutral on Zen 4);
 // always covered by the leaf differential tests.
-#[cfg_attr(not(any(test, helios_fp12_sqr_active)), allow(dead_code))]
 #[inline(never)]
+#[cfg(any(test, helios_fp12_sqr_active))]
 pub(crate) fn fp12_sqr_assign(f: &mut crate::fp12::Fp12) {
     debug_assert_canonical!(components(12): &*f);
     unsafe {
@@ -258,8 +316,8 @@ pub(crate) fn fp12_sqr_assign(f: &mut crate::fp12::Fp12) {
 // Dispatched by default on every target (build.rs HELIOS_CYC_SQR_ASM=0
 // restores the composed path): the one lazy leaf that wins on both microarchs;
 // always covered by the leaf differential tests.
-#[cfg_attr(not(any(test, helios_cyc_sqr_active)), allow(dead_code))]
 #[inline(never)]
+#[cfg(any(test, helios_cyc_sqr_active))]
 pub(crate) fn cyc_sqr_assign(f: &mut crate::fp12::Fp12) {
     debug_assert_canonical!(components(12): &*f);
     unsafe {
@@ -294,8 +352,8 @@ pub(crate) fn cyc_sqr_assign(f: &mut crate::fp12::Fp12) {
 // Dispatched by default on Intel targets, opt-in elsewhere (build.rs
 // HELIOS_FP12_034_ASM: Zen 4 store ports favor the composed path); always
 // covered by the leaf differential tests.
-#[cfg_attr(not(any(test, helios_fp12_034_active)), allow(dead_code))]
 #[inline(never)]
+#[cfg(any(test, helios_fp12_034_active))]
 pub(crate) fn fp12_034_assign(
     f: &mut crate::fp12::Fp12,
     c0: &crate::fp2::Fp2,
@@ -336,8 +394,8 @@ pub(crate) fn fp12_034_assign(
 /// calls Rust nor unwinds.
 // Dispatched by default (HELIOS_FP6_ASM=0 restores composed); always covered by
 // the leaf differential tests.
-#[cfg_attr(not(any(test, helios_fp6_active)), allow(dead_code))]
 #[inline(never)]
+#[cfg(any(test, helios_fp6_active))]
 pub(crate) fn fp6_mul(a: &crate::fp6::Fp6, b: &crate::fp6::Fp6) -> crate::fp6::Fp6 {
     debug_assert_canonical!(components(6): a, b);
     let mut z = core::mem::MaybeUninit::<crate::fp6::Fp6>::uninit();
@@ -455,11 +513,11 @@ fn sos_leaf<const N: usize>(pairs: &[*const u64; N]) -> [u64; 4] {
 // lane0 = sum x_{i0}*y_{i0} - x_{i1}*y_{i1} (subtraction via negp),
 // lane1 = sum x_{i0}*y_{i1} + x_{i1}*y_{i0}.
 
+#[cfg(any(test, not(helios_cyc_sqr_active)))]
 pub(crate) fn sos2(a0: &[u64; 4], b0: &[u64; 4], a1: &[u64; 4], b1: &[u64; 4]) -> [u64; 4] {
     sos_leaf(&[a0.as_ptr(), b0.as_ptr(), a1.as_ptr(), b1.as_ptr()])
 }
-
-#[allow(clippy::too_many_arguments)]
+#[cfg(any(test, not(helios_cyc_sqr_active)))]
 pub(crate) fn sos4(
     a0: &[u64; 4],
     b0: &[u64; 4],
@@ -499,7 +557,7 @@ pub(crate) fn sos4(
 /// 8-mod-16 aligned as on entry, and neither calls Rust nor unwinds.
 // Dispatched in production only under HELIOS_SOSD2_ASM=1; always covered by
 // the leaf differential tests.
-#[cfg_attr(not(any(test, helios_sosd2_active)), allow(dead_code))]
+#[cfg(any(test, helios_sosd2_active))]
 pub(crate) fn sosd2(
     x0: &[u64; 4],
     x1: &[u64; 4],
@@ -524,8 +582,6 @@ pub(crate) fn sosd2(
         ([z[0], z[1], z[2], z[3]], [z[4], z[5], z[6], z[7]])
     }
 }
-
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn sosd4(
     x00: &[u64; 4],
     x01: &[u64; 4],
@@ -566,22 +622,38 @@ pub(crate) fn sosd4(
 /// the reference implementation the dedicated [`sosd6_leaf`] is measured
 /// against (build.rs `HELIOS_SOSD6_ASM` selects which one `sos::sosd6`
 /// dispatches).
-#[cfg_attr(all(helios_sosd6_active, not(test)), allow(dead_code))]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn sosd6(
-    x00: &[u64; 4],
-    x01: &[u64; 4],
-    y00: &[u64; 4],
-    y01: &[u64; 4],
-    x10: &[u64; 4],
-    x11: &[u64; 4],
-    y10: &[u64; 4],
-    y11: &[u64; 4],
-    x20: &[u64; 4],
-    x21: &[u64; 4],
-    y20: &[u64; 4],
-    y21: &[u64; 4],
-) -> ([u64; 4], [u64; 4]) {
+#[cfg(any(
+    test,
+    all(
+        not(helios_sosd6_active),
+        any(
+            not(helios_fp6_active),
+            not(helios_fp12_sqr_active),
+            not(helios_fp12_034_active),
+        ),
+    ),
+))]
+pub(crate) fn sosd6(products: [Fp2Product<'_>; 3]) -> ([u64; 4], [u64; 4]) {
+    let [
+        Fp2Product {
+            x0: x00,
+            x1: x01,
+            y0: y00,
+            y1: y01,
+        },
+        Fp2Product {
+            x0: x10,
+            x1: x11,
+            y0: y10,
+            y1: y11,
+        },
+        Fp2Product {
+            x0: x20,
+            x1: x21,
+            y0: y20,
+            y1: y21,
+        },
+    ] = products;
     let ny01 = crate::fp::sos::negp(y01);
     let ny11 = crate::fp::sos::negp(y11);
     let ny21 = crate::fp::sos::negp(y21);
@@ -644,22 +716,38 @@ pub(crate) fn sosd6(
 // Dispatched by default on AMD targets, opt-in elsewhere (build.rs
 // HELIOS_SOSD6_ASM: Miller -3.8% on Zen 4, flipping the pairing past mcl);
 // always covered by the leaf differential tests.
-#[cfg_attr(not(any(test, helios_sosd6_active)), allow(dead_code))]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn sosd6_leaf(
-    x00: &[u64; 4],
-    x01: &[u64; 4],
-    y00: &[u64; 4],
-    y01: &[u64; 4],
-    x10: &[u64; 4],
-    x11: &[u64; 4],
-    y10: &[u64; 4],
-    y11: &[u64; 4],
-    x20: &[u64; 4],
-    x21: &[u64; 4],
-    y20: &[u64; 4],
-    y21: &[u64; 4],
-) -> ([u64; 4], [u64; 4]) {
+#[cfg(any(
+    test,
+    all(
+        helios_sosd6_active,
+        any(
+            not(helios_fp6_active),
+            not(helios_fp12_sqr_active),
+            not(helios_fp12_034_active),
+        ),
+    ),
+))]
+pub(crate) fn sosd6_leaf(products: [Fp2Product<'_>; 3]) -> ([u64; 4], [u64; 4]) {
+    let [
+        Fp2Product {
+            x0: x00,
+            x1: x01,
+            y0: y00,
+            y1: y01,
+        },
+        Fp2Product {
+            x0: x10,
+            x1: x11,
+            y0: y10,
+            y1: y11,
+        },
+        Fp2Product {
+            x0: x20,
+            x1: x21,
+            y0: y20,
+            y1: y21,
+        },
+    ] = products;
     debug_assert_canonical!(at_most_p: x00, x01, y00, y01, x10, x11, y10, y11, x20, x21, y20, y21);
     let mut stage = [0u64; 64];
     for (i, x) in [x00, x01, x10, x11, x20, x21].into_iter().enumerate() {
@@ -688,26 +776,34 @@ pub(crate) fn sosd6_leaf(
         ([z[0], z[1], z[2], z[3]], [z[4], z[5], z[6], z[7]])
     }
 }
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn sosd8(
-    x00: &[u64; 4],
-    x01: &[u64; 4],
-    y00: &[u64; 4],
-    y01: &[u64; 4],
-    x10: &[u64; 4],
-    x11: &[u64; 4],
-    y10: &[u64; 4],
-    y11: &[u64; 4],
-    x20: &[u64; 4],
-    x21: &[u64; 4],
-    y20: &[u64; 4],
-    y21: &[u64; 4],
-    x30: &[u64; 4],
-    x31: &[u64; 4],
-    y30: &[u64; 4],
-    y31: &[u64; 4],
-) -> ([u64; 4], [u64; 4]) {
+#[cfg(test)]
+pub(crate) fn sosd8(products: [Fp2Product<'_>; 4]) -> ([u64; 4], [u64; 4]) {
+    let [
+        Fp2Product {
+            x0: x00,
+            x1: x01,
+            y0: y00,
+            y1: y01,
+        },
+        Fp2Product {
+            x0: x10,
+            x1: x11,
+            y0: y10,
+            y1: y11,
+        },
+        Fp2Product {
+            x0: x20,
+            x1: x21,
+            y0: y20,
+            y1: y21,
+        },
+        Fp2Product {
+            x0: x30,
+            x1: x31,
+            y0: y30,
+            y1: y31,
+        },
+    ] = products;
     let ny01 = crate::fp::sos::negp(y01);
     let ny11 = crate::fp::sos::negp(y11);
     let ny21 = crate::fp::sos::negp(y21);

@@ -29,6 +29,7 @@ use {
     },
     ark_bn254::Fr,
     ark_ff::{Field, One, PrimeField, Zero, batch_inversion},
+    core::ops::{Add, Div, Mul, Neg, Sub},
 };
 
 const MIN_DOMAIN_SIZE: u64 = 4;
@@ -59,10 +60,12 @@ pub fn alt_bn128_plonk_batch_reduce(
     }
 
     let domain_size = context.domain_size();
-    let num_public_inputs = context.num_public_inputs() as usize;
+    let encoded_public_input_count = context.num_public_inputs();
+    let num_public_inputs = usize::try_from(encoded_public_input_count)
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?;
     if !domain_size.is_power_of_two()
         || !(MIN_DOMAIN_SIZE..=MAX_DOMAIN_SIZE).contains(&domain_size)
-        || num_public_inputs >= domain_size as usize
+        || u64::from(encoded_public_input_count) >= domain_size
     {
         return Err(AltBn128BatchError::InvalidContext);
     }
@@ -73,11 +76,10 @@ pub fn alt_bn128_plonk_batch_reduce(
         return Err(AltBn128BatchError::LengthMismatch);
     }
     let lagrange_count = num_public_inputs.max(1);
-    if lagrange_count
+    let denominator_count = lagrange_count
         .checked_mul(inputs.len())
-        .ok_or(AltBn128BatchError::CapExceeded)?
-        > FR_MAX_ELEMS
-    {
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    if denominator_count > FR_MAX_ELEMS {
         return Err(AltBn128BatchError::CapExceeded);
     }
 
@@ -89,7 +91,8 @@ pub fn alt_bn128_plonk_batch_reduce(
     // Parse and validate every canonical input before performing the batch
     // inversion or writing any output.
     let mut native = Vec::with_capacity(inputs.len());
-    for (i, input) in inputs.iter().enumerate() {
+    let mut remaining_public_inputs = public_inputs;
+    for input in inputs {
         let challenges =
             core::array::from_fn(|j| Fr::from_be_bytes_mod_order(&input.challenge_digests[j]));
         let mut evaluations = [Fr::zero(); PLONK_EVALUATIONS];
@@ -100,9 +103,11 @@ pub fn alt_bn128_plonk_batch_reduce(
         if rho.is_zero() {
             return Err(AltBn128BatchError::ZeroRandomizer);
         }
-        let start = i * num_public_inputs;
-        let end = start + num_public_inputs;
-        let statement = public_inputs[start..end]
+        let (statement, remaining) = remaining_public_inputs
+            .split_at_checked(num_public_inputs)
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        remaining_public_inputs = remaining;
+        let statement = statement
             .iter()
             .map(PodScalar::to_fr)
             .collect::<Result<Vec<_>, _>>()?;
@@ -118,18 +123,18 @@ pub fn alt_bn128_plonk_batch_reduce(
     // batch, exactly the old verifier split but entirely native.
     let n = Fr::from(domain_size);
     let mut vanishings = Vec::with_capacity(native.len());
-    let mut denominators = Vec::with_capacity(native.len() * lagrange_count);
+    let mut denominators = Vec::with_capacity(denominator_count);
     for proof in &native {
         let zeta = proof.challenges[3];
-        let vanishing = zeta.pow([domain_size]) - Fr::one();
+        let vanishing = zeta.pow([domain_size]).sub(Fr::one());
         if vanishing.is_zero() {
             return Err(AltBn128BatchError::DegenerateChallenge);
         }
         vanishings.push(vanishing);
         let mut root = Fr::one();
         for _ in 0..lagrange_count {
-            denominators.push(n * (zeta - root));
-            root *= omega;
+            denominators.push(n.mul(zeta.sub(root)));
+            root = root.mul(omega);
         }
     }
     // zeta outside the exact-order domain makes every denominator nonzero.
@@ -137,38 +142,25 @@ pub fn alt_bn128_plonk_batch_reduce(
 
     let mut output = vec![PodScalar([0u8; 32]); output_count];
     let mut shared = [Fr::zero(); PLONK_SHARED_OUTPUTS];
-    for (i, (proof, vanishing)) in native.into_iter().zip(vanishings).enumerate() {
-        let inv_start = i * lagrange_count;
-        let inverses = &denominators[inv_start..inv_start + lagrange_count];
-        let reduced = reduce_one(domain_size, omega, k1, k2, &proof, vanishing, inverses);
+    let (shared_output, per_proof_output) = output.split_at_mut(PLONK_SHARED_OUTPUTS);
+    let mut proof_rows = per_proof_output.chunks_exact_mut(PLONK_PER_PROOF_OUTPUTS);
+    for (((proof, vanishing), inverses), row) in native
+        .into_iter()
+        .zip(vanishings)
+        .zip(denominators.chunks_exact(lagrange_count))
+        .zip(&mut proof_rows)
+    {
+        let reduced = reduce_one(omega, k1, k2, &proof, vanishing, inverses)?;
 
-        for (accumulator, coefficient) in shared[..8].iter_mut().zip(reduced.shared_q) {
-            *accumulator -= proof.rho * coefficient;
-        }
-        shared[8] -= proof.rho * reduced.generator;
-
-        let base = PLONK_SHARED_OUTPUTS + i * PLONK_PER_PROOF_OUTPUTS;
-        let per = [
-            proof.rho,
-            proof.rho * reduced.p_shifted,
-            -(proof.rho * reduced.z),
-            -(proof.rho * reduced.t_lo),
-            -(proof.rho * reduced.t_mid),
-            -(proof.rho * reduced.t_hi),
-            -(proof.rho * reduced.a),
-            -(proof.rho * reduced.b),
-            -(proof.rho * reduced.c),
-            -(proof.rho * reduced.w_zeta_q),
-            -(proof.rho * reduced.w_zeta_omega_q),
-        ];
-        for (slot, scalar) in output[base..base + PLONK_PER_PROOF_OUTPUTS]
-            .iter_mut()
-            .zip(per)
-        {
+        reduced.accumulate_shared(proof.rho, &mut shared)?;
+        for (slot, scalar) in row.iter_mut().zip(reduced.weighted_row(proof.rho)) {
             *slot = PodScalar::from(&scalar);
         }
     }
-    for (slot, scalar) in output[..PLONK_SHARED_OUTPUTS].iter_mut().zip(shared) {
+    if !proof_rows.into_remainder().is_empty() {
+        return Err(AltBn128BatchError::BackendInvariant);
+    }
+    for (slot, scalar) in shared_output.iter_mut().zip(shared) {
         *slot = PodScalar::from(&scalar);
     }
     Ok(output)
@@ -187,7 +179,7 @@ pub(crate) fn validate_context(
         || k2.is_zero()
         || k1.pow([domain_size]) == one
         || k2.pow([domain_size]) == one
-        || (k2 / k1).pow([domain_size]) == one
+        || k2.div(k1).pow([domain_size]) == one
     {
         return Err(AltBn128BatchError::InvalidContext);
     }
@@ -209,59 +201,128 @@ pub(crate) struct Reduced {
     pub(crate) p_shifted: Fr,
 }
 
-#[allow(clippy::too_many_arguments)]
+impl Reduced {
+    pub(crate) fn accumulate_shared_q(&self, rho: Fr, shared: &mut [Fr; 8]) {
+        for (accumulator, coefficient) in shared.iter_mut().zip(self.shared_q) {
+            *accumulator = accumulator.sub(rho.mul(coefficient));
+        }
+    }
+
+    pub(crate) fn generator_contribution(&self, rho: Fr) -> Fr {
+        rho.mul(self.generator)
+    }
+
+    pub(crate) fn accumulate_shared(
+        &self,
+        rho: Fr,
+        shared: &mut [Fr; PLONK_SHARED_OUTPUTS],
+    ) -> Result<(), AltBn128BatchError> {
+        let shared_q: &mut [Fr; 8] = shared
+            .get_mut(..8)
+            .and_then(|slice| slice.try_into().ok())
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        self.accumulate_shared_q(rho, shared_q);
+        let generator = shared
+            .last_mut()
+            .ok_or(AltBn128BatchError::BackendInvariant)?;
+        *generator = generator.sub(self.generator_contribution(rho));
+        Ok(())
+    }
+
+    pub(crate) fn weighted_row(&self, rho: Fr) -> [Fr; PLONK_PER_PROOF_OUTPUTS] {
+        [
+            rho,
+            rho.mul(self.p_shifted),
+            rho.mul(self.z).neg(),
+            rho.mul(self.t_lo).neg(),
+            rho.mul(self.t_mid).neg(),
+            rho.mul(self.t_hi).neg(),
+            rho.mul(self.a).neg(),
+            rho.mul(self.b).neg(),
+            rho.mul(self.c).neg(),
+            rho.mul(self.w_zeta_q).neg(),
+            rho.mul(self.w_zeta_omega_q).neg(),
+        ]
+    }
+}
+
 pub(crate) fn reduce_one(
-    _domain_size: u64,
     omega: Fr,
     k1: Fr,
     k2: Fr,
     proof: &NativeProof,
     vanishing: Fr,
     denominator_inverses: &[Fr],
-) -> Reduced {
+) -> Result<Reduced, AltBn128BatchError> {
     let [beta, gamma, alpha, zeta, v, u] = proof.challenges;
     let [a_ev, b_ev, c_ev, s1_ev, s2_ev, zw_ev] = proof.evaluations;
 
     let mut lagrange = Vec::with_capacity(denominator_inverses.len());
     let mut root = Fr::one();
     for inverse in denominator_inverses {
-        lagrange.push(root * vanishing * inverse);
-        root *= omega;
+        lagrange.push(root.mul(vanishing).mul(*inverse));
+        root = root.mul(omega);
     }
-    let l1 = lagrange[0];
-    let pi = -proof
+    let l1 = lagrange
+        .first()
+        .copied()
+        .ok_or(AltBn128BatchError::BackendInvariant)?;
+    let pi = proof
         .public_inputs
         .iter()
         .zip(&lagrange)
-        .map(|(input, basis)| *input * basis)
-        .sum::<Fr>();
+        .map(|(input, basis)| input.mul(basis))
+        .sum::<Fr>()
+        .neg();
 
-    let alpha_sq = alpha * alpha;
-    let perm_a = a_ev + beta * s1_ev + gamma;
-    let perm_b = b_ev + beta * s2_ev + gamma;
-    let r0 = pi - l1 * alpha_sq - alpha * perm_a * perm_b * (c_ev + gamma) * zw_ev;
+    let alpha_sq = alpha.mul(alpha);
+    let perm_a = a_ev.add(beta.mul(s1_ev)).add(gamma);
+    let perm_b = b_ev.add(beta.mul(s2_ev)).add(gamma);
+    let r0 = pi.sub(l1.mul(alpha_sq)).sub(
+        alpha
+            .mul(perm_a)
+            .mul(perm_b)
+            .mul(c_ev.add(gamma))
+            .mul(zw_ev),
+    );
 
-    let beta_zeta = beta * zeta;
+    let beta_zeta = beta.mul(zeta);
     let z = alpha
-        * (a_ev + beta_zeta + gamma)
-        * (b_ev + k1 * beta_zeta + gamma)
-        * (c_ev + k2 * beta_zeta + gamma)
-        + l1 * alpha_sq
-        + u;
-    let s_sigma3 = -(alpha * beta * zw_ev * perm_a * perm_b);
-    let zeta_n = vanishing + Fr::one();
-    let t_lo = -vanishing;
-    let t_mid = -(vanishing * zeta_n);
-    let t_hi = -(vanishing * zeta_n * zeta_n);
+        .mul(a_ev.add(beta_zeta).add(gamma))
+        .mul(b_ev.add(k1.mul(beta_zeta)).add(gamma))
+        .mul(c_ev.add(k2.mul(beta_zeta)).add(gamma))
+        .add(l1.mul(alpha_sq))
+        .add(u);
+    let s_sigma3 = alpha.mul(beta).mul(zw_ev).mul(perm_a).mul(perm_b).neg();
+    let zeta_n = vanishing.add(Fr::one());
+    let t_lo = vanishing.neg();
+    let t_mid = vanishing.mul(zeta_n).neg();
+    let t_hi = vanishing.mul(zeta_n).mul(zeta_n).neg();
 
-    let v2 = v * v;
-    let v3 = v2 * v;
-    let v4 = v3 * v;
-    let v5 = v4 * v;
-    let e_scalar = -r0 + v * a_ev + v2 * b_ev + v3 * c_ev + v4 * s1_ev + v5 * s2_ev + u * zw_ev;
+    let v2 = v.mul(v);
+    let v3 = v2.mul(v);
+    let v4 = v3.mul(v);
+    let v5 = v4.mul(v);
+    let e_scalar = r0
+        .neg()
+        .add(v.mul(a_ev))
+        .add(v2.mul(b_ev))
+        .add(v3.mul(c_ev))
+        .add(v4.mul(s1_ev))
+        .add(v5.mul(s2_ev))
+        .add(u.mul(zw_ev));
 
-    Reduced {
-        shared_q: [a_ev * b_ev, a_ev, b_ev, c_ev, Fr::one(), v4, v5, s_sigma3],
+    Ok(Reduced {
+        shared_q: [
+            a_ev.mul(b_ev),
+            a_ev,
+            b_ev,
+            c_ev,
+            Fr::one(),
+            v4,
+            v5,
+            s_sigma3,
+        ],
         z,
         t_lo,
         t_mid,
@@ -270,10 +331,10 @@ pub(crate) fn reduce_one(
         b: v2,
         c: v3,
         w_zeta_q: zeta,
-        w_zeta_omega_q: u * zeta * omega,
-        generator: -e_scalar,
+        w_zeta_omega_q: u.mul(zeta).mul(omega),
+        generator: e_scalar.neg(),
         p_shifted: u,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -296,21 +357,30 @@ mod tests {
     }
 
     fn input(seed: u64) -> PodPlonkReductionInput {
+        let offset = |index: usize, base: u64| {
+            seed.saturating_add(u64::try_from(index).unwrap_or(u64::MAX))
+                .saturating_add(base)
+        };
         let challenge_digests =
-            core::array::from_fn(|i| PodScalar::from(&Fr::from(seed + i as u64 + 2)).0);
+            core::array::from_fn(|i| PodScalar::from(&Fr::from(offset(i, 2))).0);
         PodPlonkReductionInput {
             challenge_digests,
-            evaluations: core::array::from_fn(|i| PodScalar::from(&Fr::from(seed + i as u64 + 11))),
-            rho: PodScalar::from(&Fr::from(seed + 1)),
+            evaluations: core::array::from_fn(|i| PodScalar::from(&Fr::from(offset(i, 11)))),
+            rho: PodScalar::from(&Fr::from(seed.saturating_add(1))),
         }
     }
 
     #[test]
     fn valid_shapes_are_deterministic_and_canonical() {
         for n in 1usize..=5 {
-            let inputs: Vec<_> = (0..n).map(|i| input(i as u64 + 1)).collect();
+            let inputs: Vec<_> = (0..n)
+                .map(|i| input(u64::try_from(i).unwrap().checked_add(1).unwrap()))
+                .collect();
             let public_inputs: Vec<_> = (0..n)
-                .map(|i| PodScalar::from(&Fr::from(i as u64 + 101)))
+                .map(|i| {
+                    let value = u64::try_from(i).unwrap().checked_add(101).unwrap();
+                    PodScalar::from(&Fr::from(value))
+                })
                 .collect();
             let first =
                 alt_bn128_plonk_batch_reduce(Version::V0, &context(1), &inputs, &public_inputs)

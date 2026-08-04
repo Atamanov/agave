@@ -68,34 +68,69 @@ impl G2Affine {
     /// mcl BN_SNARK1 test point Q from `test/bn_test.cpp`.
     pub fn test_generator() -> Self {
         Self {
-            x: Fp2::from_str_pair(
-                "15267802884793550383558706039165621050290089775961208824303765753922461897946",
-                "9034493566019742339402378670461897774509967669562610788113215988055021632533",
-            )
-            .unwrap(),
-            y: Fp2::from_str_pair(
-                "644888581738283025171396578091639672120333224302184904896215738366765861164",
-                "20532875081203448695448744255224543661959516361327385779878476709582931298750",
-            )
-            .unwrap(),
+            x: Fp2::new(
+                Fp::from_raw_canonical([
+                    0x100e6e76d6bec9d2,
+                    0x491255994abb2e17,
+                    0x22916082eef30290,
+                    0x00459ddbf464df80,
+                ]),
+                Fp::from_raw_canonical([
+                    0x2203ed44b7b27af5,
+                    0x847ca4a5495f4048,
+                    0xf31ff3391f735b96,
+                    0x1eb59afea81229c4,
+                ]),
+            ),
+            y: Fp2::new(
+                Fp::from_raw_canonical([
+                    0x4cb7b4e3566c14c2,
+                    0x555b3fb11cfdff8e,
+                    0xf4aca466b9568138,
+                    0x2ae2c107eaaa802f,
+                ]),
+                Fp::from_raw_canonical([
+                    0x583ed080cf8a8d10,
+                    0xdb9c9c9cd110553b,
+                    0xa32755b864a2bdb9,
+                    0x13bb40d6f4efbded,
+                ]),
+            ),
             infinity: false,
         }
     }
 
     /// Standard G2 generator used by arkworks (for cross-checks).
     pub fn arkworks_generator() -> Self {
-        // From ark-bn254 G2_GENERATOR
         Self {
-            x: Fp2::from_str_pair(
-                "10857046999023057135944570762232829481370756359578518086990519993285655852781",
-                "11559732032986387107991004021392285783925812861821192530917403151452391805634",
-            )
-            .unwrap(),
-            y: Fp2::from_str_pair(
-                "8495653923123431417604973247489272438418190587263600148770280649306958101930",
-                "4082367875863433681332203403145435568316851327593401208105741076214120093531",
-            )
-            .unwrap(),
+            x: Fp2::new(
+                Fp::from_raw_canonical([
+                    0x8e83b5d102bc2026,
+                    0xdceb1935497b0172,
+                    0xfbb8264797811adf,
+                    0x19573841af96503b,
+                ]),
+                Fp::from_raw_canonical([
+                    0xafb4737da84c6140,
+                    0x6043dd5a5802d8c4,
+                    0x09e950fc52a02f86,
+                    0x14fef0833aea7b6b,
+                ]),
+            ),
+            y: Fp2::new(
+                Fp::from_raw_canonical([
+                    0x619dfa9d886be9f6,
+                    0xfe7fd297f59e9b78,
+                    0xff9e1a62231b7dfe,
+                    0x28fd7eebae9e4206,
+                ]),
+                Fp::from_raw_canonical([
+                    0x64095b56c71856ee,
+                    0xdc57f922327d3cbb,
+                    0x55f935be33351076,
+                    0x0da4a0e693fd6482,
+                ]),
+            ),
             infinity: false,
         }
     }
@@ -122,12 +157,12 @@ impl G2Affine {
         }
 
         let s = mul_by_bn_x(*self);
-        let lhs = s.add_mixed(*self).add(psi(s)).add(psi_squared(s));
+        let lhs = s.add_mixed(*self) + psi(s) + psi_squared(s);
         lhs.equals_projective(&psi(psi_squared(s.double())))
     }
 
-    /// Additive inverse.
-    pub fn neg(self) -> Self {
+    /// Return the additive inverse.
+    fn negate(self) -> Self {
         if self.infinity {
             self
         } else {
@@ -177,7 +212,7 @@ impl G2Projective {
 
     /// EFD add-2007-bl over Fp2.
     #[inline(always)]
-    pub fn add(self, other: Self) -> Self {
+    fn add_complete(self, other: Self) -> Self {
         if self.is_identity() {
             return other;
         }
@@ -217,8 +252,8 @@ impl G2Projective {
         self.add_mixed_fast(other)
     }
 
-    /// Additive inverse.
-    pub fn neg(self) -> Self {
+    /// Return the additive inverse.
+    fn negate(self) -> Self {
         Self {
             x: self.x,
             y: -self.y,
@@ -236,7 +271,9 @@ impl G2Projective {
         if self.is_identity() {
             return G2Affine::identity();
         }
-        let zinv = self.z.invert().unwrap();
+        let Some(zinv) = self.z.invert() else {
+            return G2Affine::identity();
+        };
         let zinv2 = zinv.square();
         G2Affine {
             x: self.x * zinv2,
@@ -245,9 +282,9 @@ impl G2Projective {
         }
     }
 
-    /// wNAF-4 scalar multiplication (variable-time).
+    /// Multiply by a public scalar with width-4 wNAF.
     #[inline]
-    pub fn mul(self, scalar: Fr) -> Self {
+    fn scale(self, scalar: Fr) -> Self {
         crate::wnaf::mul_group::<Self, 4, 4, 257>(self, scalar)
     }
 
@@ -260,7 +297,7 @@ impl G2Projective {
             for bit in (0..64).rev() {
                 acc = acc.double();
                 if (word >> bit) & 1 == 1 {
-                    acc = acc.add(self);
+                    acc = acc + self;
                 }
             }
         }
@@ -357,7 +394,7 @@ fn mul_by_bn_x(point: G2Affine) -> G2Projective {
             0, -1, 0, 0, 0, 1,
         ]
     ));
-    let negated = point.neg();
+    let negated = -point;
     let mut acc = point.to_curve();
     for &digit in NAF.iter() {
         acc = acc.double();
@@ -370,11 +407,20 @@ fn mul_by_bn_x(point: G2Affine) -> G2Projective {
     acc
 }
 
+impl core::ops::Neg for G2Affine {
+    type Output = Self;
+
+    #[inline]
+    fn neg(self) -> Self {
+        self.negate()
+    }
+}
+
 impl core::ops::Add for G2Projective {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self {
-        G2Projective::add(self, rhs)
+        self.add_complete(rhs)
     }
 }
 
@@ -382,7 +428,16 @@ impl core::ops::Neg for G2Projective {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        G2Projective::neg(self)
+        self.negate()
+    }
+}
+
+impl core::ops::Mul<Fr> for G2Projective {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, rhs: Fr) -> Self {
+        self.scale(rhs)
     }
 }
 
@@ -395,6 +450,7 @@ impl From<G2Affine> for G2Projective {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::ops::Mul;
     use rand::rngs::StdRng;
     use rand::{RngCore, SeedableRng};
 

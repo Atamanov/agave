@@ -89,6 +89,7 @@ impl FrameLayout {
 
     /// A view sharing `outer`'s storage at `delta` bytes in (deliberate
     /// overlap; the cursor does not move).
+    #[cfg(test)]
     pub const fn union_at(self, outer: FrameSlot, delta: i32, size: i32) -> FrameSlot {
         assert!(
             0 <= delta && delta + size <= outer.size,
@@ -104,6 +105,12 @@ impl FrameLayout {
     pub const fn size(self) -> i32 {
         assert!(self.cursor > 0 && self.cursor % 8 == 0);
         self.cursor
+    }
+}
+
+impl Default for FrameLayout {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -167,5 +174,11 @@ impl TableLayout {
     /// Total table size in bytes.
     pub const fn bytes(self) -> i32 {
         self.cursor
+    }
+}
+
+impl Default for TableLayout {
+    fn default() -> Self {
+        Self::new()
     }
 }

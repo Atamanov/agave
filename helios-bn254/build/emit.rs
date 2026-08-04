@@ -49,6 +49,7 @@ impl Emitter {
         self.bytes
     }
 
+    #[cfg(test)]
     pub fn into_lines(self) -> Vec<String> {
         self.lines
     }

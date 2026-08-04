@@ -72,6 +72,7 @@ mod tests {
     use super::*;
     use crate::Fr;
     use crate::g2::G2Projective;
+    use core::ops::{Mul, Neg};
 
     fn assert_matches_individual_product(g1: &[G1Affine], g2: &[G2Affine]) {
         let refs: Vec<_> = g1.iter().zip(g2).collect();

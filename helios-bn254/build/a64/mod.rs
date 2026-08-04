@@ -2,6 +2,7 @@
 //! the ported mont4 leaf schedule, and the file renderer.
 
 pub mod emit;
+#[cfg(test)]
 pub mod interp;
 pub mod machine;
 pub mod render;

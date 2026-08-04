@@ -1,6 +1,6 @@
 [package]
 name = "solana-bn254-batch-syscall"
-description = "Solana alt_bn128 G1 MSM and boolean multi-pairing check syscalls"
+description = "Solana BN254 batch syscall interfaces and native backends"
 documentation = "https://docs.rs/solana-bn254-batch-syscall"
 version = { workspace = true }
 authors = { workspace = true }
@@ -11,9 +11,18 @@ edition = { workspace = true }
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+no-default-features = true
+features = ["agave-unstable-api", "backend-b1-arkworks"]
 
 [features]
+# B1 remains the fallback when a workspace dependency disables default features.
+default = ["backend-b1-arkworks"]
 agave-unstable-api = []
+backend-b1-arkworks = []
+backend-b2-arkworks-optimized = []
+backend-b3-mcl = ["dep:solana-bn254-mcl-sys"]
+backend-b4-helios = ["dep:helios-bn254", "helios-bn254/std", "helios-bn254/deny-ifma"]
+backend-b5-helios-ifma = ["dep:helios-bn254", "helios-bn254/std", "helios-bn254/force-ifma"]
 
 [dependencies]
 bytemuck = { workspace = true, features = ["min_const_generics"] }
@@ -24,6 +33,8 @@ thiserror = { workspace = true }
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
 ark-ec = { version = "0.5", default-features = false }
 ark-ff = { version = "0.5", default-features = false }
+helios-bn254 = { workspace = true, optional = true }
+solana-bn254-mcl-sys = { workspace = true, optional = true }
 solana-keccak-hasher = { workspace = true, features = ["sha3"] }
 
 [target.'cfg(target_os = "solana")'.dependencies]

@@ -34,24 +34,14 @@ pub fn alt_bn128_fr_lincomb(
     // sum_of_products array API; a[i] then b[i] decode in order, so the first
     // non-canonical element faults at the same position as the naive path.
     let mut acc = Fr::zero();
-    let mut ai = a.iter();
-    let mut bi = b.iter();
-    loop {
+    for (a, b) in a.chunks(16).zip(b.chunks(16)) {
         let mut xs = [Fr::zero(); 16];
         let mut ys = [Fr::zero(); 16];
-        let mut k = 0;
-        while k < 16 {
-            let (Some(x), Some(y)) = (ai.next(), bi.next()) else {
-                break;
-            };
-            xs[k] = x.to_fr()?;
-            ys[k] = y.to_fr()?;
-            k += 1;
+        for ((x_out, y_out), (x, y)) in xs.iter_mut().zip(&mut ys).zip(a.iter().zip(b)) {
+            *x_out = x.to_fr()?;
+            *y_out = y.to_fr()?;
         }
-        if k == 0 {
-            break;
-        }
-        acc += Fr::sum_of_products(&xs, &ys);
+        acc = core::ops::Add::add(acc, Fr::sum_of_products(&xs, &ys));
     }
     Ok(PodScalar::from(&acc))
 }

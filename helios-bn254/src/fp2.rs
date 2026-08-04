@@ -62,15 +62,6 @@ impl Fp2 {
         }
     }
 
-    /// Additive inverse.
-    #[inline]
-    pub fn neg(self) -> Self {
-        Self {
-            c0: -self.c0,
-            c1: -self.c1,
-        }
-    }
-
     /// `self^2`.
     #[inline(always)]
     pub fn square(self) -> Self {
@@ -150,10 +141,9 @@ impl Fp2 {
         }
         // Complex method: n = sqrt(norm), l0 = sqrt((a +/- n)/2), l1 = b/(2*l0).
         let n = self.norm().sqrt()?;
-        let inv2 = Fp::from_u64(2).invert().unwrap();
-        let l0 = ((self.c0 + n) * inv2)
+        let l0 = ((self.c0 + n) * Fp::INV_TWO)
             .sqrt()
-            .or_else(|| ((self.c0 - n) * inv2).sqrt())?;
+            .or_else(|| ((self.c0 - n) * Fp::INV_TWO).sqrt())?;
         let l1 = self.c1 * l0.double().invert()?;
         let cand = Self::new(l0, l1);
         if cand.square() == self {
@@ -220,7 +210,10 @@ impl Neg for Fp2 {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        Fp2::neg(self)
+        Self {
+            c0: -self.c0,
+            c1: -self.c1,
+        }
     }
 }
 

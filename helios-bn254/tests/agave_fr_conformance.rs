@@ -1,4 +1,4 @@
-mod agave_fixtures;
+pub mod agave_fixtures;
 
 use agave_fixtures::{bytes, fr_modulus, scalar};
 use helios_bn254::{FR_MAX_ELEMS, InputError, ScalarBytes, fr_batch_invert, fr_lincomb};

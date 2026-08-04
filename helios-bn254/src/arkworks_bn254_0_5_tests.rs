@@ -165,12 +165,9 @@ struct AdaptedMigration {
     waiver: &'static str,
 }
 
-// Adapted dwarfs the marker variants, but the manifest is a const-built
-// static table: boxing is unavailable and the size is irrelevant.
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy, Debug)]
 enum MigrationStatus {
-    Adapted(AdaptedMigration),
+    Adapted(&'static AdaptedMigration),
     Covered(&'static str),
     PendingApi(&'static str),
     Inapplicable(&'static str),
@@ -1582,24 +1579,24 @@ fn g2_affine_to_helios(point: ArkG2Affine) -> G2Affine {
 }
 
 trait HeliosCurveGroup: Copy {
-    fn identity() -> Self;
-    fn double(self) -> Self;
-    fn add(self, other: Self) -> Self;
+    fn group_identity() -> Self;
+    fn group_double(self) -> Self;
+    fn group_add(self, other: Self) -> Self;
 }
 
 macro_rules! impl_helios_curve_group {
     ($group:ty) => {
         impl HeliosCurveGroup for $group {
-            fn identity() -> Self {
+            fn group_identity() -> Self {
                 <$group>::identity()
             }
 
-            fn double(self) -> Self {
+            fn group_double(self) -> Self {
                 <$group>::double(self)
             }
 
-            fn add(self, other: Self) -> Self {
-                <$group>::add(self, other)
+            fn group_add(self, other: Self) -> Self {
+                core::ops::Add::add(self, other)
             }
         }
     };
@@ -1611,12 +1608,12 @@ impl_helios_curve_group!(G2Projective);
 /// Independent test-side double-and-add for template claims that Ark expresses
 /// through configurable wNAF or batch-preprocessing facades.
 fn mul_group_words<G: HeliosCurveGroup>(base: G, words: [u64; 4]) -> G {
-    let mut acc = G::identity();
+    let mut acc = G::group_identity();
     for word in words.iter().rev() {
         for bit in (0..64).rev() {
-            acc = acc.double();
+            acc = acc.group_double();
             if (word >> bit) & 1 == 1 {
-                acc = acc.add(base);
+                acc = acc.group_add(base);
             }
         }
     }
@@ -2339,6 +2336,13 @@ const G2_DIRECT: &str = "ark-bn254-0.5.0/src/curves/g2.rs";
 use MigrationStatus::{Adapted, Covered, Inapplicable, PendingApi};
 
 macro_rules! case {
+    ($id:literal, $source:ident, Adapted($migration:path)) => {
+        UpstreamCase {
+            id: $id,
+            source: $source,
+            status: Adapted(&$migration),
+        }
+    };
     ($id:literal, $source:ident, $status:expr) => {
         UpstreamCase {
             id: $id,
@@ -3048,13 +3052,11 @@ fn upstream_manifest_is_complete_and_unique() {
             .filter(|case| {
                 matches!(
                     case.status,
-                    Adapted(AdaptedMigration {
-                        executable: ExecutableMigration {
-                            execution: UpstreamExecution::Inert { .. },
-                            ..
-                        },
-                        ..
-                    })
+                    Adapted(migration)
+                        if matches!(
+                            migration.executable.execution,
+                            UpstreamExecution::Inert { .. }
+                        )
                 )
             })
             .count(),

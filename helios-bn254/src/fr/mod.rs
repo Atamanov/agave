@@ -56,16 +56,6 @@ impl Fr {
         Self(limb::add_mod(&self.0, &self.0, &MOD))
     }
 
-    /// Additive inverse.
-    #[inline]
-    pub fn neg(self) -> Self {
-        if self.is_zero() {
-            self
-        } else {
-            Self(limb::sub_noborrow(&MOD, &self.0))
-        }
-    }
-
     /// Variable-time inversion for public inputs.
     ///
     /// This uses binary extended GCD. Do not call it with secret values.
@@ -110,12 +100,7 @@ impl Fr {
     /// Canonical big-endian scalar encoding to Montgomery form.
     #[inline]
     pub fn from_bytes_be(bytes: &[u8; 32]) -> Option<Self> {
-        let limbs = [
-            u64::from_be_bytes(bytes[24..32].try_into().unwrap()),
-            u64::from_be_bytes(bytes[16..24].try_into().unwrap()),
-            u64::from_be_bytes(bytes[8..16].try_into().unwrap()),
-            u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
-        ];
+        let limbs = limb::limbs_from_be_bytes(bytes);
         if limb::gte(&limbs, &MOD) {
             return None;
         }
@@ -185,9 +170,8 @@ pub(crate) fn invert_raw(value: [u64; 4]) -> Option<[u64; 4]> {
     invert_raw_kaliski(value)
 }
 
-/// Bernstein-Yang divsteps62 path of [`invert_raw`]: the unselected per-arch
-/// alternate, kept compiled and differentially tested on every target.
-#[cfg_attr(not(test), allow(dead_code))]
+/// Bernstein-Yang divsteps62 reference for [`invert_raw`].
+#[cfg(test)]
 pub(crate) fn invert_raw_divsteps(value: [u64; 4]) -> Option<[u64; 4]> {
     limb::invert_mod_vartime(&value, &MOD, R_INV)
 }
@@ -382,7 +366,11 @@ impl Neg for Fr {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        Fr::neg(self)
+        if self.is_zero() {
+            self
+        } else {
+            Self(limb::sub_noborrow(&MOD, &self.0))
+        }
     }
 }
 

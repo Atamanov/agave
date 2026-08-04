@@ -56,6 +56,7 @@ pub fn render_mont4_aarch64() -> String {
 }
 
 /// (instructions, bytes) for the kernel.
+#[cfg(test)]
 pub fn kernel_size() -> (usize, usize) {
     let mut emitter = EmitterA64::new();
     mont4(&mut emitter);

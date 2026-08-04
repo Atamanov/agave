@@ -17,8 +17,60 @@
 //! u < p + X/R <= p*(1 + T*p/R) < p*(1 + 0.1891*T): one conditional
 //! subtraction reaches [0, p) for T <= 4, two for T <= 10.
 
-use crate::consts::{P, P_INV};
-use crate::limb::{gt, sub_mod, sub_noborrow};
+use crate::consts::P;
+#[cfg(any(test, not(helios_sosd2_active)))]
+use crate::consts::P_INV;
+#[cfg(any(test, not(helios_sosd2_active)))]
+use crate::limb::sub_mod;
+use crate::limb::{gt, sub_noborrow};
+
+#[cfg(any(
+    test,
+    not(helios_fp6_active),
+    not(helios_fp12_sqr_active),
+    not(helios_fp12_034_active),
+))]
+type Limbs = [u64; 4];
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) struct SosProduct<'a> {
+    left: &'a Limbs,
+    right: &'a Limbs,
+}
+
+#[cfg(test)]
+impl<'a> SosProduct<'a> {
+    pub(crate) const fn new(left: &'a Limbs, right: &'a Limbs) -> Self {
+        Self { left, right }
+    }
+}
+
+#[cfg(any(
+    test,
+    not(helios_fp6_active),
+    not(helios_fp12_sqr_active),
+    not(helios_fp12_034_active),
+))]
+#[derive(Clone, Copy)]
+pub(crate) struct Fp2Product<'a> {
+    pub(crate) x0: &'a Limbs,
+    pub(crate) x1: &'a Limbs,
+    pub(crate) y0: &'a Limbs,
+    pub(crate) y1: &'a Limbs,
+}
+
+#[cfg(any(
+    test,
+    not(helios_fp6_active),
+    not(helios_fp12_sqr_active),
+    not(helios_fp12_034_active),
+))]
+impl<'a> Fp2Product<'a> {
+    pub(crate) const fn new(x0: &'a Limbs, x1: &'a Limbs, y0: &'a Limbs, y1: &'a Limbs) -> Self {
+        Self { x0, x1, y0, y1 }
+    }
+}
 
 /// `p - x` for `x in [0, p]`; feeds subtracted terms into a sum of products.
 /// Maps 0 to p, which the kernels accept (operand bound is <= p).
@@ -30,6 +82,7 @@ pub fn negp(x: &[u64; 4]) -> [u64; 4] {
 
 // Four limbs times one word is five limbs; one carry chain so the carry stays
 // in flags (same shape as fp/portable.rs).
+#[cfg(any(test, not(helios_sosd2_active)))]
 macro_rules! mul_word {
     ($b:expr, $a:expr) => {{
         let b = $b;
@@ -49,6 +102,7 @@ macro_rules! mul_word {
 
 // Accumulate a five-limb row; the carry cannot leave the fifth limb while the
 // in-round peak stays below 2^320 (T <= 4).
+#[cfg(any(test, not(helios_sosd2_active)))]
 macro_rules! acc_row5 {
     ($t0:ident, $t1:ident, $t2:ident, $t3:ident, $t4:ident, $row:expr) => {{
         let (r0, r1, r2, r3, r4) = $row;
@@ -67,6 +121,10 @@ macro_rules! acc_row5 {
 }
 
 // Six-limb accumulator variant; the row carry spills into the sixth limb.
+#[cfg(any(
+    test,
+    not(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))
+))]
 macro_rules! acc_row6 {
     ($t0:ident, $t1:ident, $t2:ident, $t3:ident, $t4:ident, $t5:ident, $row:expr) => {{
         let (r0, r1, r2, r3, r4) = $row;
@@ -88,6 +146,7 @@ macro_rules! acc_row6 {
 
 // One CIOS round over source limb $j: accumulate a_i[j]*b_i for every product,
 // cancel the low limb with q*p, shift the accumulator one limb right.
+#[cfg(any(test, not(helios_sosd2_active)))]
 macro_rules! round5 {
     ($t0:ident, $t1:ident, $t2:ident, $t3:ident, $t4:ident, $j:expr, $(($a:expr, $b:expr)),+) => {{
         $(acc_row5!($t0, $t1, $t2, $t3, $t4, mul_word!($b, $a[$j]));)+
@@ -102,6 +161,10 @@ macro_rules! round5 {
     }};
 }
 
+#[cfg(any(
+    test,
+    not(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))
+))]
 macro_rules! round6 {
     ($t0:ident, $t1:ident, $t2:ident, $t3:ident, $t4:ident, $t5:ident, $j:expr,
      $(($a:expr, $b:expr)),+) => {{
@@ -118,6 +181,7 @@ macro_rules! round6 {
     }};
 }
 
+#[cfg(any(test, not(helios_sosd2_active)))]
 macro_rules! debug_assert_operands {
     ($($x:expr),+) => {
         $(debug_assert!(!gt($x, &P), "SoS operand exceeds p");)+
@@ -133,10 +197,7 @@ macro_rules! debug_assert_operands {
 // Per-lane accumulation order and bounds are identical to the sosT kernels.
 
 /// Dual-lane Fp2 product: `(x0 + x1u)*(y0 + y1u)`, T = 2 per lane.
-#[cfg_attr(
-    all(helios_mont4_x86_64_adx, not(feature = "force-portable"), not(test)),
-    allow(dead_code)
-)]
+#[cfg(any(test, not(helios_sosd2_active)))]
 #[inline(never)]
 pub(crate) fn sosd2_portable(
     x0: &[u64; 4],
@@ -166,12 +227,11 @@ pub(crate) fn sosd2_portable(
 }
 
 /// Dual-lane sum of two Fp2 products, T = 4 per lane.
-#[cfg_attr(
-    all(helios_mont4_x86_64_adx, not(feature = "force-portable"), not(test)),
-    allow(dead_code)
-)]
+#[cfg(any(
+    test,
+    not(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))
+))]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn sosd4_portable(
     x00: &[u64; 4],
     x01: &[u64; 4],
@@ -229,26 +289,32 @@ pub(crate) fn sosd4_portable(
 }
 
 /// Dual-lane sum of three Fp2 products, T = 6 per lane.
-#[cfg_attr(
-    all(helios_mont4_x86_64_adx, not(feature = "force-portable"), not(test)),
-    allow(dead_code)
-)]
+#[cfg(any(
+    test,
+    not(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))
+))]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn sosd6_portable(
-    x00: &[u64; 4],
-    x01: &[u64; 4],
-    y00: &[u64; 4],
-    y01: &[u64; 4],
-    x10: &[u64; 4],
-    x11: &[u64; 4],
-    y10: &[u64; 4],
-    y11: &[u64; 4],
-    x20: &[u64; 4],
-    x21: &[u64; 4],
-    y20: &[u64; 4],
-    y21: &[u64; 4],
-) -> ([u64; 4], [u64; 4]) {
+pub(crate) fn sosd6_portable(products: [Fp2Product<'_>; 3]) -> ([u64; 4], [u64; 4]) {
+    let [
+        Fp2Product {
+            x0: x00,
+            x1: x01,
+            y0: y00,
+            y1: y01,
+        },
+        Fp2Product {
+            x0: x10,
+            x1: x11,
+            y0: y10,
+            y1: y11,
+        },
+        Fp2Product {
+            x0: x20,
+            x1: x21,
+            y0: y20,
+            y1: y21,
+        },
+    ] = products;
     debug_assert_operands!(x00, x01, y00, y01, x10, x11, y10, y11, x20, x21, y20, y21);
     let ny01 = negp(y01);
     let ny11 = negp(y11);
@@ -306,30 +372,35 @@ pub(crate) fn sosd6_portable(
 }
 
 /// Dual-lane sum of four Fp2 products, T = 8 per lane.
-#[cfg_attr(
-    all(helios_mont4_x86_64_adx, not(feature = "force-portable"), not(test)),
-    allow(dead_code)
-)]
+#[cfg(test)]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn sosd8_portable(
-    x00: &[u64; 4],
-    x01: &[u64; 4],
-    y00: &[u64; 4],
-    y01: &[u64; 4],
-    x10: &[u64; 4],
-    x11: &[u64; 4],
-    y10: &[u64; 4],
-    y11: &[u64; 4],
-    x20: &[u64; 4],
-    x21: &[u64; 4],
-    y20: &[u64; 4],
-    y21: &[u64; 4],
-    x30: &[u64; 4],
-    x31: &[u64; 4],
-    y30: &[u64; 4],
-    y31: &[u64; 4],
-) -> ([u64; 4], [u64; 4]) {
+pub(crate) fn sosd8_portable(products: [Fp2Product<'_>; 4]) -> ([u64; 4], [u64; 4]) {
+    let [
+        Fp2Product {
+            x0: x00,
+            x1: x01,
+            y0: y00,
+            y1: y01,
+        },
+        Fp2Product {
+            x0: x10,
+            x1: x11,
+            y0: y10,
+            y1: y11,
+        },
+        Fp2Product {
+            x0: x20,
+            x1: x21,
+            y0: y20,
+            y1: y21,
+        },
+        Fp2Product {
+            x0: x30,
+            x1: x31,
+            y0: y30,
+            y1: y31,
+        },
+    ] = products;
     debug_assert_operands!(
         x00, x01, y00, y01, x10, x11, y10, y11, x20, x21, y20, y21, x30, x31, y30, y31
     );
@@ -394,10 +465,10 @@ pub(crate) fn sosd8_portable(
 }
 
 /// `(a0*b0 + a1*b1)*R^{-1} mod p`, canonical output. Final value < 1.379p.
-#[cfg_attr(
-    all(helios_mont4_x86_64_adx, not(feature = "force-portable"), not(test)),
-    allow(dead_code)
-)]
+#[cfg(any(
+    test,
+    not(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))
+))]
 #[inline(never)]
 pub(crate) fn sos2_portable(
     a0: &[u64; 4],
@@ -418,12 +489,11 @@ pub(crate) fn sos2_portable(
 }
 
 /// `(sum_{i<4} a_i*b_i)*R^{-1} mod p`, canonical. Final value < 1.757p.
-#[cfg_attr(
-    all(helios_mont4_x86_64_adx, not(feature = "force-portable"), not(test)),
-    allow(dead_code)
-)]
+#[cfg(any(
+    test,
+    not(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))
+))]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn sos4_portable(
     a0: &[u64; 4],
     b0: &[u64; 4],
@@ -492,23 +562,35 @@ pub(crate) fn sos4_portable(
 
 /// `(sum_{i<6} a_i*b_i)*R^{-1} mod p`, canonical. Six-limb accumulator; final
 /// value < 2.135p, two conditional subtractions.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
-pub fn sos6(
-    a0: &[u64; 4],
-    b0: &[u64; 4],
-    a1: &[u64; 4],
-    b1: &[u64; 4],
-    a2: &[u64; 4],
-    b2: &[u64; 4],
-    a3: &[u64; 4],
-    b3: &[u64; 4],
-    a4: &[u64; 4],
-    b4: &[u64; 4],
-    a5: &[u64; 4],
-    b5: &[u64; 4],
-) -> [u64; 4] {
+pub fn sos6(products: [SosProduct<'_>; 6]) -> [u64; 4] {
+    let [
+        SosProduct {
+            left: a0,
+            right: b0,
+        },
+        SosProduct {
+            left: a1,
+            right: b1,
+        },
+        SosProduct {
+            left: a2,
+            right: b2,
+        },
+        SosProduct {
+            left: a3,
+            right: b3,
+        },
+        SosProduct {
+            left: a4,
+            right: b4,
+        },
+        SosProduct {
+            left: a5,
+            right: b5,
+        },
+    ] = products;
     debug_assert_operands!(a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5);
     let (mut t0, mut t1, mut t2, mut t3, mut t4, mut t5) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     round6!(
@@ -581,27 +663,43 @@ pub fn sos6(
 /// `(sum_{i<8} a_i*b_i)*R^{-1} mod p`, canonical. Six-limb accumulator; between
 /// rounds u < 9p < 2^260, in-round peak < 9p*2^64 < 2^324; final value
 /// < p*(1 + 8*0.1891) < 2.513p, two conditional subtractions.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
-pub fn sos8(
-    a0: &[u64; 4],
-    b0: &[u64; 4],
-    a1: &[u64; 4],
-    b1: &[u64; 4],
-    a2: &[u64; 4],
-    b2: &[u64; 4],
-    a3: &[u64; 4],
-    b3: &[u64; 4],
-    a4: &[u64; 4],
-    b4: &[u64; 4],
-    a5: &[u64; 4],
-    b5: &[u64; 4],
-    a6: &[u64; 4],
-    b6: &[u64; 4],
-    a7: &[u64; 4],
-    b7: &[u64; 4],
-) -> [u64; 4] {
+pub fn sos8(products: [SosProduct<'_>; 8]) -> [u64; 4] {
+    let [
+        SosProduct {
+            left: a0,
+            right: b0,
+        },
+        SosProduct {
+            left: a1,
+            right: b1,
+        },
+        SosProduct {
+            left: a2,
+            right: b2,
+        },
+        SosProduct {
+            left: a3,
+            right: b3,
+        },
+        SosProduct {
+            left: a4,
+            right: b4,
+        },
+        SosProduct {
+            left: a5,
+            right: b5,
+        },
+        SosProduct {
+            left: a6,
+            right: b6,
+        },
+        SosProduct {
+            left: a7,
+            right: b7,
+        },
+    ] = products;
     debug_assert_operands!(
         a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7
     );
@@ -688,10 +786,10 @@ pub fn sos8(
 // implementation. Purely compile-time -- no runtime dispatch exists.
 
 macro_rules! dispatch_sos {
-    ($(fn $name:ident / $portable:ident ($($arg:ident),+) -> $ret:ty;)+) => {
+    ($($(#[$meta:meta])* fn $name:ident / $portable:ident ($($arg:ident),+) -> $ret:ty;)+) => {
         $(
+            $(#[$meta])*
             #[inline(always)]
-            #[allow(clippy::too_many_arguments)]
             pub fn $name($($arg: &[u64; 4]),+) -> $ret {
                 #[cfg(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))]
                 {
@@ -724,7 +822,9 @@ pub fn sosd2(x0: &[u64; 4], x1: &[u64; 4], y0: &[u64; 4], y1: &[u64; 4]) -> ([u6
 }
 
 dispatch_sos! {
+    #[cfg(any(test, not(helios_cyc_sqr_active)))]
     fn sos2 / sos2_portable (a0, b0, a1, b1) -> [u64; 4];
+    #[cfg(any(test, not(helios_cyc_sqr_active)))]
     fn sos4 / sos4_portable (a0, b0, a1, b1, a2, b2, a3, b3) -> [u64; 4];
     fn sosd4 / sosd4_portable (x00, x01, y00, y01, x10, x11, y10, y11) -> ([u64; 4], [u64; 4]);
 }
@@ -737,24 +837,16 @@ dispatch_sos! {
 /// both lanes' carry chains and computes the `p - y` images in-kernel
 /// (default off pending measurement; see build.rs).
 #[inline(always)]
-#[allow(clippy::too_many_arguments)]
-pub fn sosd6(
-    x00: &[u64; 4],
-    x01: &[u64; 4],
-    y00: &[u64; 4],
-    y01: &[u64; 4],
-    x10: &[u64; 4],
-    x11: &[u64; 4],
-    y10: &[u64; 4],
-    y11: &[u64; 4],
-    x20: &[u64; 4],
-    x21: &[u64; 4],
-    y20: &[u64; 4],
-    y21: &[u64; 4],
-) -> ([u64; 4], [u64; 4]) {
+#[cfg(any(
+    test,
+    not(helios_fp6_active),
+    not(helios_fp12_sqr_active),
+    not(helios_fp12_034_active),
+))]
+pub fn sosd6(products: [Fp2Product<'_>; 3]) -> ([u64; 4], [u64; 4]) {
     #[cfg(helios_sosd6_active)]
     {
-        crate::fp::x86_64::sosd6_leaf(x00, x01, y00, y01, x10, x11, y10, y11, x20, x21, y20, y21)
+        crate::fp::x86_64::sosd6_leaf(products)
     }
     // Activation implies the ADX tier without force-portable, so the two
     // conditions below split the remaining space exactly.
@@ -764,47 +856,25 @@ pub fn sosd6(
         not(helios_sosd6_active)
     ))]
     {
-        crate::fp::x86_64::sosd6(x00, x01, y00, y01, x10, x11, y10, y11, x20, x21, y20, y21)
+        crate::fp::x86_64::sosd6(products)
     }
     #[cfg(not(all(helios_mont4_x86_64_adx, not(feature = "force-portable"))))]
     {
-        sosd6_portable(x00, x01, y00, y01, x10, x11, y10, y11, x20, x21, y20, y21)
+        sosd6_portable(products)
     }
 }
 
 /// Dual-lane sum of four Fp2 products. No production caller since the Fp12
 /// square dropped to 6-product rows; kept for the kernel differential tests.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 #[inline(always)]
-#[allow(clippy::too_many_arguments)]
-pub fn sosd8(
-    x00: &[u64; 4],
-    x01: &[u64; 4],
-    y00: &[u64; 4],
-    y01: &[u64; 4],
-    x10: &[u64; 4],
-    x11: &[u64; 4],
-    y10: &[u64; 4],
-    y11: &[u64; 4],
-    x20: &[u64; 4],
-    x21: &[u64; 4],
-    y20: &[u64; 4],
-    y21: &[u64; 4],
-    x30: &[u64; 4],
-    x31: &[u64; 4],
-    y30: &[u64; 4],
-    y31: &[u64; 4],
-) -> ([u64; 4], [u64; 4]) {
+pub fn sosd8(products: [Fp2Product<'_>; 4]) -> ([u64; 4], [u64; 4]) {
     #[cfg(all(helios_mont4_x86_64_adx, not(feature = "force-portable")))]
     {
-        crate::fp::x86_64::sosd8(
-            x00, x01, y00, y01, x10, x11, y10, y11, x20, x21, y20, y21, x30, x31, y30, y31,
-        )
+        crate::fp::x86_64::sosd8(products)
     }
     #[cfg(not(all(helios_mont4_x86_64_adx, not(feature = "force-portable"))))]
     {
-        sosd8_portable(
-            x00, x01, y00, y01, x10, x11, y10, y11, x20, x21, y20, y21, x30, x31, y30, y31,
-        )
+        sosd8_portable(products)
     }
 }

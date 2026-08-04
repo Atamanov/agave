@@ -1,96 +1,29 @@
-//! Variable-time BN254 (`alt_bn128` / mcl `BN_SNARK1`) arithmetic for proof
-//! verification.
+//! Variable-time BN254 arithmetic for proof verification.
 //!
-//! Curve parameters match Solana's `alt_bn128` syscalls, arkworks
-//! `ark-bn254`, and herumi/mcl `CurveParam BN_SNARK1`. The production entry
-//! point is the [`batch`] byte facade: Agave-shaped G1 MSM, boolean
-//! pairing-product check, Fr linear combination, and Fr batch inversion over
-//! canonical big-endian bytes, with consensus-stable validation order
-//! and error taxonomy. The typed tower underneath ([`Fp`], [`Fr`], [`Fp12`],
-//! [`G1Affine`], [`G2Affine`], [`pairing()`]) is exported for tests, benches,
-//! and embedders that already hold validated points.
+//! The [`batch`] facade implements the Agave byte ABI. It validates canonical
+//! fields, curve membership, G2 subgroup membership, limits, and error order.
+//! The typed field and curve APIs require already validated public values.
 //!
-//! # Security model
+//! # Security
 //!
-//! Every algorithm here is **variable-time by design**: running time, branch
-//! pattern, and memory access depend on input values. That is the right trade
-//! for the sole intended workload: verifying proofs over public inputs,
-//! where every byte is already public.
+//! Execution time and memory access depend on input values. Use this crate only
+//! with public verifier data. Do not use it with secret keys, scalars, or
+//! witnesses. The crate has differential and conformance tests, but it has no
+//! external security audit.
 //!
-//! **Strictly for verification.** Never use this crate for signatures, key
-//! material, witness processing, or any secret-dependent computation; its
-//! timing will leak the secret.
+//! # Build selection
 //!
-//! Curve types are plain structs with public fields, so safe code can build
-//! off-curve or off-subgroup points. The [`batch`] facade is the checked
-//! boundary: it validates canonicity, curve membership, and (for G2) subgroup
-//! membership before any arithmetic.
-//!
-//! # Audit status
-//!
-//! **Not yet audited.** An audit is planned; until it lands, use at your own
-//! risk. Current evidence is differential testing against arkworks 0.5 and
-//! mcl golden vectors plus Agave fixture conformance. Useful, but not a
-//! substitute for an audit.
-//!
-//! # Performance
-//!
-//! Quick-mode Criterion medians, single thread, same host and flags per row.
-//! The Apple M4 rows and the Zen 4 phase splits were measured 2026-07-18; the
-//! Zen 4 full-pairing row was remeasured 2026-07-24 on-box (EPYC 9354, the
-//! default AMD build with the sosd6 leaf), where helios now edges mcl.
-//! Diagnostic only: the strict three-run CI-gated protocol (repository
-//! `PERFORMANCE.md`) is still pending. Single-pairing phase split, in us:
-//!
-//! | Host | Phase | helios | mcl | arkworks 0.5 |
-//! |---|---|---:|---:|---:|
-//! | Apple M4 | full pairing | 219.6 | 252.1 | 287.6 |
-//! | Apple M4 | Miller loop | 106.3 | 109.2 | 131.6 |
-//! | Apple M4 | final exponentiation | 112.9 | 139.0 | 151.1 |
-//! | x86 Zen 4 | full pairing | 409.5 | 414.1 | 428.8 |
-//! | x86 Zen 4 | Miller loop | 174.2 | 143.8 | 205.8 |
-//! | x86 Zen 4 | final exponentiation | 190.6 | 177.2 | 222.6 |
-//!
-//! On the 31-row end-to-end Agave workload scoreboard (byte facade, versus
-//! both mcl and arkworks 0.5): Apple M4 26/31 strict wins, the five open rows
-//! within measurement noise (ratios 1.003-1.018); x86 Zen 4 27/31 at the
-//! 2026-07-18 snapshot, its widest open row the single pairing (1.146), which
-//! has since flipped to a win on the sosd6-default AMD build (409-410 vs mcl
-//! 414.1, on-box EPYC 9354, 2026-07-24); the other open rows sit from 1.022.
-//! Fr lincomb runs up to 4.4x faster than mcl and 12x faster than arkworks;
-//! the G2 subgroup check 2.7x faster than mcl; Fr batch inversion 1.4-1.7x
-//! versus mcl. Full tables live in the repository under
-//! `docs/handout/CAMPAIGN-RESULTS.md`.
-//!
-//! # Platform tiers
-//!
-//! | Tier | Active when | Scope |
-//! |---|---|---|
-//! | Portable Rust | any target; always under `force-portable` | everything |
-//! | AArch64 Apple leaf | `aarch64-apple-*` targets | one 68-instruction Montgomery-multiply leaf |
-//! | x86-64 ADX | x86-64 Linux with `bmi2`+`adx` target features | the full generated tower: 10 schedule-DSL kernels (mont mul/sqr, sos, sosd2, sosd6, fp6 mul, fp12 034/sqr/mul, cyc sqr; asm rendered at build time, interpreter-verified) |
-//! | AVX-512 IFMA | `avx512f`+`avx512ifma` target features | radix-52 8-way batched Montgomery multiply in the MSM bucket phase, plus the 8-wide multi-pairing batch check |
-//!
-//! Tier selection is a compile-time property of the target; there is no
-//! runtime dispatch and no silent fallback. `HELIOS_AVX512_IFMA=1` forces the
-//! IFMA tier (the build fails if the target cannot honour it) and `=0` denies
-//! it.
-//!
-//! # Features and portability
-//!
-//! - Default build is `no_std + alloc`; `std` is opt-in and pulls only the
-//!   test/timing harness (run the test suite with `--features std`).
-//! - `force-portable`: compile the portable Rust field kernel even where an
-//!   assembly tier exists; an explicit benchmark/test tier, never a fallback.
-//! - MSRV 1.97.1, edition 2024, matching the target Agave toolchain.
+//! Backend selection occurs at build time. `force-portable` selects portable
+//! Rust. `deny-ifma` prevents AVX-512 IFMA selection. `force-ifma` requires the
+//! IFMA target features. The default build uses `no_std` with `alloc`.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
-#![allow(clippy::many_single_char_names)]
-// The preserved low-level API predates the typed batch facade and exposes
-// inherent `add`/`mul`/`neg` spellings. Keep it source-compatible while new
-// public work targets the Agave-named facade rather than extending this API.
-#![allow(clippy::should_implement_trait)]
+
+#[cfg(all(feature = "deny-ifma", feature = "force-ifma"))]
+compile_error!("deny-ifma and force-ifma cannot be enabled together");
+#[cfg(all(feature = "force-portable", feature = "force-ifma"))]
+compile_error!("force-portable and force-ifma cannot be enabled together");
 
 extern crate alloc;
 
@@ -125,11 +58,11 @@ mod arkworks_bn254_0_5_tests;
 
 pub use batch::{
     AltBn128BatchError, FR_MAX_ELEMS, G1_BYTES, G1Bytes, G2_BYTES, G2Bytes, GT_BYTES, GtBytes,
-    InputError, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAX_PAIRS, PairBytes, PodG1G2Pair, PodG1Point,
-    PodG2Point, PodGt, PodPairingResult, PodScalar, SCALAR_BYTES, ScalarBytes,
-    TRUSTED_GT_MAX_TARGETS, TrustedGt, Version, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb,
-    alt_bn128_g1_msm, alt_bn128_pairing_check, alt_bn128_pairing_map, fr_batch_invert, fr_lincomb,
-    g1_msm, pairing_map, pairing_product_is_one, trusted_gt_multiexp,
+    InputError, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS, PairBytes,
+    PodG1G2Pair, PodG1Point, PodG2Point, PodGt, PodPairingResult, PodScalar, SCALAR_BYTES,
+    ScalarBytes, TRUSTED_GT_MAX_TARGETS, TrustedGt, Version, alt_bn128_fr_batch_invert,
+    alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check, alt_bn128_pairing_map,
+    fr_batch_invert, fr_lincomb, g1_msm, pairing_map, pairing_product_is_one, trusted_gt_multiexp,
 };
 // Compile README examples as doctests without duplicating them in crate docs.
 #[cfg(doctest)]
@@ -148,6 +81,7 @@ pub use pairing::{Gt, multi_pairing, pairing};
 #[cfg(test)]
 mod mcl_vectors {
     use super::*;
+    use core::ops::{Mul, Neg};
 
     /// Golden pairing from herumi/mcl `test/bn_test.cpp` `BN_SNARK1` entry.
     #[test]

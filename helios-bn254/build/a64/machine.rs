@@ -87,6 +87,7 @@ impl Reg {
         }
     }
 
+    #[cfg(test)]
     pub const fn index(self) -> usize {
         match self {
             Reg::X0 => 0,
@@ -117,6 +118,7 @@ impl Reg {
         }
     }
 
+    #[cfg(test)]
     pub const fn is_callee_saved(self) -> bool {
         matches!(self, Reg::X19 | Reg::X20 | Reg::X21 | Reg::X22 | Reg::X23)
     }

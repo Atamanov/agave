@@ -20,6 +20,17 @@ pub const fn sbb(a: u64, b: u64, borrow: u64) -> (u64, u64) {
     (d2, (b1 as u64) + (b2 as u64))
 }
 
+/// Convert one fixed-width big-endian integer to little-endian limbs.
+pub(crate) fn limbs_from_be_bytes(bytes: &[u8; 32]) -> [u64; 4] {
+    let mut limbs = [0u64; 4];
+    for (limb, chunk) in limbs.iter_mut().rev().zip(bytes.chunks_exact(8)) {
+        let mut encoded = [0u8; 8];
+        encoded.copy_from_slice(chunk);
+        *limb = u64::from_be_bytes(encoded);
+    }
+    limbs
+}
+
 /// `a * b + c + carry` -> (lo, hi) with full 128-bit product accumulated.
 #[inline(always)]
 pub fn mac(a: u64, b: u64, c: u64, carry: u64) -> (u64, u64) {

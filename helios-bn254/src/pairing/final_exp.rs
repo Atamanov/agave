@@ -17,7 +17,9 @@ pub fn final_exponentiation(f: &Fp12) -> Fp12 {
 
     // Easy: f^{(p^6-1)(p^2+1)}
     let mut f1 = f.conjugate(); // f^{p^6}
-    let f2 = f.invert().unwrap();
+    let Some(f2) = f.invert() else {
+        return Fp12::ZERO;
+    };
     let mut r = f1 * f2; // f^{p^6-1}
     f1 = r;
     r = r.frobenius_map_squared(); // f^{(p^6-1)p^2}
@@ -58,6 +60,7 @@ fn exp_by_neg_x(f: Fp12) -> Fp12 {
 mod tests {
     use crate::batch::{G1Bytes, G2Bytes, PairBytes, pairing_product_is_one};
     use crate::{Fr, G1Affine, G2Affine};
+    use core::ops::{Mul, Neg};
 
     /// Full validated path (bytes in, verdict out) over pair sets whose GT
     /// products cancel to one, with infinity pairs mixed in: the shapes most

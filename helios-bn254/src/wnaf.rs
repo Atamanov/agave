@@ -242,12 +242,12 @@ macro_rules! impl_wnaf_group {
 
             #[inline(always)]
             fn add(self, other: Self) -> Self {
-                <$group>::add(self, other)
+                core::ops::Add::add(self, other)
             }
 
             #[inline(always)]
             fn neg(self) -> Self {
-                <$group>::neg(self)
+                core::ops::Neg::neg(self)
             }
         }
     };

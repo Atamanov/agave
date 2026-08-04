@@ -21,6 +21,7 @@ use helios_bn254::{
     alt_bn128_g1_msm, alt_bn128_pairing_check, consts, fr_batch_invert, fr_lincomb, g1_msm,
     pairing_product_is_one,
 };
+use std::ops::{Mul, Neg};
 
 /// Pinned digest of the whole battery. Derive a new value only for an
 /// intentional consensus-visible change: run the test, read the computed

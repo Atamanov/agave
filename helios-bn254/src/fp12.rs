@@ -11,6 +11,8 @@
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::fp::Fp;
+#[cfg(any(test, not(helios_fp12_sqr_active), not(helios_fp12_034_active),))]
+use crate::fp::sos::Fp2Product;
 use crate::fp2::Fp2;
 use crate::fp6::Fp6;
 
@@ -73,15 +75,6 @@ impl Fp12 {
         }
     }
 
-    /// Additive inverse.
-    #[inline]
-    pub fn neg(self) -> Self {
-        Self {
-            c0: -self.c0,
-            c1: -self.c1,
-        }
-    }
-
     /// `(a + b*w)^2 = (a^2 + v*b^2) + 2ab*w`, complex squaring through the
     /// shared product `ab`: with `s = a + b`, `t = a + v*b`, the result is
     /// `(s*t - ab - v*ab) + 2ab*w`. Each Fp component of `ab` and `s*t` is a
@@ -125,7 +118,7 @@ impl Fp12 {
     /// only way down from the 8-product rows.
     /// Reference semantics for the whole-op lazy x86 leaf, which computes
     /// exactly this value with 36 products + 12 reductions.
-    #[cfg_attr(all(helios_fp12_sqr_active, not(test)), allow(dead_code))]
+    #[cfg(any(test, not(helios_fp12_sqr_active)))]
     #[inline(always)]
     pub(crate) fn square_in_place_sos(&mut self) {
         use crate::fp::sos::sosd6;
@@ -163,12 +156,36 @@ impl Fp12 {
         // ab = a*b, schoolbook with xi folded: ab0 = a0*b0 + a1*(xib2) +
         // a2*(xib1), ab1 = a0*b1 + a1*b0 + a2*(xib2), ab2 = a0*b2 + a1*b1 +
         // a2*b0. Same rows over (s, t) for s*t.
-        let ab0 = sosd6(a00, a01, b00, b01, a10, a11, h0, h1, a20, a21, y0, y1);
-        let ab1 = sosd6(a00, a01, b10, b11, a10, a11, b00, b01, a20, a21, h0, h1);
-        let ab2 = sosd6(a00, a01, b20, b21, a10, a11, b10, b11, a20, a21, b00, b01);
-        let st0 = sosd6(s00, s01, t00, t01, s10, s11, w0, w1, s20, s21, u0, u1);
-        let st1 = sosd6(s00, s01, t10, t11, s10, s11, t00, t01, s20, s21, w0, w1);
-        let st2 = sosd6(s00, s01, t20, t21, s10, s11, t10, t11, s20, s21, t00, t01);
+        let ab0 = sosd6([
+            Fp2Product::new(a00, a01, b00, b01),
+            Fp2Product::new(a10, a11, h0, h1),
+            Fp2Product::new(a20, a21, y0, y1),
+        ]);
+        let ab1 = sosd6([
+            Fp2Product::new(a00, a01, b10, b11),
+            Fp2Product::new(a10, a11, b00, b01),
+            Fp2Product::new(a20, a21, h0, h1),
+        ]);
+        let ab2 = sosd6([
+            Fp2Product::new(a00, a01, b20, b21),
+            Fp2Product::new(a10, a11, b10, b11),
+            Fp2Product::new(a20, a21, b00, b01),
+        ]);
+        let st0 = sosd6([
+            Fp2Product::new(s00, s01, t00, t01),
+            Fp2Product::new(s10, s11, w0, w1),
+            Fp2Product::new(s20, s21, u0, u1),
+        ]);
+        let st1 = sosd6([
+            Fp2Product::new(s00, s01, t10, t11),
+            Fp2Product::new(s10, s11, t00, t01),
+            Fp2Product::new(s20, s21, w0, w1),
+        ]);
+        let st2 = sosd6([
+            Fp2Product::new(s00, s01, t20, t21),
+            Fp2Product::new(s10, s11, t10, t11),
+            Fp2Product::new(s20, s21, t00, t01),
+        ]);
 
         let ab0 = Fp2::new(Fp(ab0.0), Fp(ab0.1));
         let ab1 = Fp2::new(Fp(ab1.0), Fp(ab1.1));
@@ -225,22 +242,43 @@ impl Fp12 {
         // res0 = a^2 + v*b^2, with a^2 = (a0^2 + xi*2a1a2) + (2a0a1 + xia2^2)v +
         // (a1^2 + 2a0a2)v^2 and v*b^2 = xi(b1^2 + 2b0b2) + (b0^2 + xi*2b1b2)v +
         // (2b0b1 + xib2^2)v^2.
-        let r00 = sosd8(
-            a00, a01, a00, a01, x0, x1, a20, a21, y0, y1, b10, b11, z0, z1, b20, b21,
-        );
-        let r01 = sosd8(
-            d0, d1, a10, a11, e0, e1, a20, a21, b00, b01, b00, b01, f0, f1, b20, b21,
-        );
-        let r02 = sosd8(
-            a10, a11, a10, a11, d0, d1, a20, a21, g0, g1, b10, b11, h0, h1, b20, b21,
-        );
+        let r00 = sosd8([
+            Fp2Product::new(a00, a01, a00, a01),
+            Fp2Product::new(x0, x1, a20, a21),
+            Fp2Product::new(y0, y1, b10, b11),
+            Fp2Product::new(z0, z1, b20, b21),
+        ]);
+        let r01 = sosd8([
+            Fp2Product::new(d0, d1, a10, a11),
+            Fp2Product::new(e0, e1, a20, a21),
+            Fp2Product::new(b00, b01, b00, b01),
+            Fp2Product::new(f0, f1, b20, b21),
+        ]);
+        let r02 = sosd8([
+            Fp2Product::new(a10, a11, a10, a11),
+            Fp2Product::new(d0, d1, a20, a21),
+            Fp2Product::new(g0, g1, b10, b11),
+            Fp2Product::new(h0, h1, b20, b21),
+        ]);
 
         // res1 = (2a)*b, schoolbook with xi folded: r10 = 2a0*b0 + 2a1*(xib2) +
         // 2a2*(xib1), r11 = 2a0*b1 + 2a1*b0 + 2a2*(xib2), r12 = 2a0*b2 +
         // 2a1*b1 + 2a2*b0.
-        let r10 = sosd6(d0, d1, b00, b01, da10, da11, h0, h1, da20, da21, y0, y1);
-        let r11 = sosd6(d0, d1, b10, b11, da10, da11, b00, b01, da20, da21, h0, h1);
-        let r12 = sosd6(d0, d1, b20, b21, da10, da11, b10, b11, da20, da21, b00, b01);
+        let r10 = sosd6([
+            Fp2Product::new(d0, d1, b00, b01),
+            Fp2Product::new(da10, da11, h0, h1),
+            Fp2Product::new(da20, da21, y0, y1),
+        ]);
+        let r11 = sosd6([
+            Fp2Product::new(d0, d1, b10, b11),
+            Fp2Product::new(da10, da11, b00, b01),
+            Fp2Product::new(da20, da21, h0, h1),
+        ]);
+        let r12 = sosd6([
+            Fp2Product::new(d0, d1, b20, b21),
+            Fp2Product::new(da10, da11, b10, b11),
+            Fp2Product::new(da20, da21, b00, b01),
+        ]);
 
         self.c0 = Fp6::new(
             Fp2::new(Fp(r00.0), Fp(r00.1)),
@@ -258,7 +296,7 @@ impl Fp12 {
     /// Fp6 leaf or SoS dispatch, 108 products + 18 reductions total).
     /// Reference semantics for the whole-op lazy x86 leaf, which computes
     /// exactly this value with 54 products + 12 reductions.
-    #[cfg_attr(all(helios_fp12_mul_active, not(test)), allow(dead_code))]
+    #[cfg(any(test, not(helios_fp12_mul_active)))]
     #[inline(always)]
     pub(crate) fn mul_composed(self, rhs: Self) -> Self {
         let a = self.c0;
@@ -287,6 +325,7 @@ impl Fp12 {
 
     /// SoS Fp4 square: `(r0 + r1*y)^2` with `y^2 = xi`, i.e.
     /// `t0 = r0^2 + xir1^2 = r0*r0 + (xir1)*r1`, `t1 = 2r0r1 = (2r0)*r1`.
+    #[cfg(any(test, not(helios_cyc_sqr_active)))]
     #[inline(always)]
     fn fp4_square_sos(r0: Fp2, r1: Fp2) -> (Fp2, Fp2) {
         // Single-lane kernels: the dual variants spill their two accumulator
@@ -333,7 +372,7 @@ impl Fp12 {
     /// leaves plus the single-width z-combines. Reference semantics for the
     /// whole-op lazy x86 leaf, which computes exactly this value with 18
     /// products + 12 reductions.
-    #[cfg_attr(all(helios_cyc_sqr_active, not(test)), allow(dead_code))]
+    #[cfg(any(test, not(helios_cyc_sqr_active)))]
     #[inline(always)]
     pub(crate) fn cyclotomic_square_composed(self) -> Self {
         // Mapping (arkworks): r0=c0.c0, r4=c0.c1, r3=c0.c2, r2=c1.c0, r1=c1.c1, r5=c1.c2
@@ -496,7 +535,7 @@ impl Fp12 {
     /// Composed `mul_by_034`: six sosd6 dispatches over the row lists in
     /// [`Self::mul_by_034`]'s doc. Reference semantics for the whole-op x86
     /// leaf, which computes exactly this in one call.
-    #[cfg_attr(all(helios_fp12_034_active, not(test)), allow(dead_code))]
+    #[cfg(any(test, not(helios_fp12_034_active)))]
     #[inline(always)]
     pub(crate) fn mul_by_034_assign_sosd6(&mut self, c0: Fp2, c3: Fp2, c4: Fp2) {
         use crate::fp::sos::sosd6;
@@ -513,12 +552,36 @@ impl Fp12 {
         let (c40, c41) = (&c4.c0.0, &c4.c1.0);
         let (x30, x31) = (&x3.c0.0, &x3.c1.0);
         let (x40, x41) = (&x4.c0.0, &x4.c1.0);
-        let r00 = sosd6(a00, a01, c00, c01, b10, b11, x40, x41, b20, b21, x30, x31);
-        let r01 = sosd6(a10, a11, c00, c01, b00, b01, c30, c31, b20, b21, x40, x41);
-        let r02 = sosd6(a20, a21, c00, c01, b00, b01, c40, c41, b10, b11, c30, c31);
-        let r10 = sosd6(a00, a01, c30, c31, a20, a21, x40, x41, b00, b01, c00, c01);
-        let r11 = sosd6(a00, a01, c40, c41, a10, a11, c30, c31, b10, b11, c00, c01);
-        let r12 = sosd6(a10, a11, c40, c41, a20, a21, c30, c31, b20, b21, c00, c01);
+        let r00 = sosd6([
+            Fp2Product::new(a00, a01, c00, c01),
+            Fp2Product::new(b10, b11, x40, x41),
+            Fp2Product::new(b20, b21, x30, x31),
+        ]);
+        let r01 = sosd6([
+            Fp2Product::new(a10, a11, c00, c01),
+            Fp2Product::new(b00, b01, c30, c31),
+            Fp2Product::new(b20, b21, x40, x41),
+        ]);
+        let r02 = sosd6([
+            Fp2Product::new(a20, a21, c00, c01),
+            Fp2Product::new(b00, b01, c40, c41),
+            Fp2Product::new(b10, b11, c30, c31),
+        ]);
+        let r10 = sosd6([
+            Fp2Product::new(a00, a01, c30, c31),
+            Fp2Product::new(a20, a21, x40, x41),
+            Fp2Product::new(b00, b01, c00, c01),
+        ]);
+        let r11 = sosd6([
+            Fp2Product::new(a00, a01, c40, c41),
+            Fp2Product::new(a10, a11, c30, c31),
+            Fp2Product::new(b10, b11, c00, c01),
+        ]);
+        let r12 = sosd6([
+            Fp2Product::new(a10, a11, c40, c41),
+            Fp2Product::new(a20, a21, c30, c31),
+            Fp2Product::new(b20, b21, c00, c01),
+        ]);
         self.c0 = Fp6::new(
             Fp2::new(Fp(r00.0), Fp(r00.1)),
             Fp2::new(Fp(r01.0), Fp(r01.1)),
@@ -587,6 +650,20 @@ impl Fp12 {
         acc
     }
 
+    /// `self^e` for little-endian 64-bit limbs.
+    pub(crate) fn pow_limbs(self, limbs: &[u64]) -> Self {
+        let mut acc = Self::ONE;
+        for limb in limbs.iter().rev() {
+            for bit in (0..64).rev() {
+                acc = acc.square();
+                if limb & (1 << bit) != 0 {
+                    acc *= self;
+                }
+            }
+        }
+        acc
+    }
+
     /// `x = 4965661367192848881` via signed 4-bit windows over Granger-Scott
     /// cyclotomic squares: 63 squares + 16 full muls, vs 62 + 24 for the plain
     /// NAF ladder. Valid on cyclotomic-subgroup elements (use after easy part).
@@ -613,7 +690,7 @@ impl Fp12 {
     /// (HW 24) the 23 decompressions plus the inversion outweigh the 6->4 Fp2
     /// muls saved per square, so this measures slower than `pow_x`; kept for
     /// evaluation. Degenerate inputs fall back to the Granger-Scott ladder.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     fn pow_x_karabina(self) -> Self {
         let mut rec = [(Compressed::ZERO, false); X_NAF_TAIL_NONZERO];
         let mut den = [Fp2::ZERO; X_NAF_TAIL_NONZERO];
@@ -665,6 +742,7 @@ impl Fp12 {
 
     /// Granger-Scott square-and-multiply ladder over the NAF of x.
     /// Reference path; fallback for inputs Karabina decompression cannot handle.
+    #[cfg(test)]
     fn pow_x_naf(self) -> Self {
         let mut acc = Self::ONE;
         for &d in X_NAF.iter().rev() {
@@ -712,6 +790,7 @@ pub(crate) const X_W4: &[i8] = &[
 ];
 
 /// Nonzero NAF digits above position 0; each records one compressed value.
+#[cfg(test)]
 const X_NAF_TAIL_NONZERO: usize = {
     let mut n = 0;
     let mut i = 1;
@@ -728,6 +807,7 @@ const X_NAF_TAIL_NONZERO: usize = {
 /// in the Fp4-pair basis `alpha = (g0 + g1 w) + (g2 + g3 w)s + (g4 + g5 w)s^2`:
 /// g2 = c1.c0, g3 = c0.c2, g4 = c0.c1, g5 = c1.c2.
 /// Formulas require cyclotomic-subgroup membership.
+#[cfg(test)]
 #[derive(Clone, Copy)]
 struct Compressed {
     g2: Fp2,
@@ -736,6 +816,7 @@ struct Compressed {
     g5: Fp2,
 }
 
+#[cfg(test)]
 impl Compressed {
     const ZERO: Self = Self {
         g2: Fp2::ZERO,
@@ -1082,7 +1163,10 @@ impl Neg for Fp12 {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        Fp12::neg(self)
+        Self {
+            c0: -self.c0,
+            c1: -self.c1,
+        }
     }
 }
 

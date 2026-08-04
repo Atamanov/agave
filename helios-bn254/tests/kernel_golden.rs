@@ -8,7 +8,7 @@
 //! rewrites the snapshots, and the change then shows in `git diff`.
 
 #[path = "../build/mod.rs"]
-mod kernelgen;
+pub mod kernelgen;
 
 use std::fs;
 use std::path::PathBuf;

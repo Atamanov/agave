@@ -1,14 +1,21 @@
 #![cfg(feature = "agave-unstable-api")]
-#![allow(clippy::arithmetic_side_effects)]
+
+/// The batch syscall ABI version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Version {
+    /// The initial canonical byte ABI.
+    V0,
+}
 
 pub use crate::{
     encoding::{
         FQ12_BYTES, FR_MAX_ELEMS, G1_BYTES, G2_BYTES, MSM_MAX_POINTS, PAIR_BYTES,
-        PAIRING_MAX_PAIRS, PLONK_CHALLENGES, PLONK_EVALUATIONS, PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS,
-        PLONK_PER_PROOF_OUTPUTS, PLONK_REDUCE_MAX_PROOFS, PLONK_SHARED_OUTPUTS, SCALAR_BYTES,
-        SNARKJS_PLONK_PROOF_POINTS, SNARKJS_PLONK_VK_POINTS, plonk_reduction_output_count,
-        plonk_reduction_shape, snarkjs_plonk_multi_vk_output_count, snarkjs_plonk_multi_vk_shape,
-        unpack_plonk_reduction_shape, unpack_snarkjs_plonk_multi_vk_shape,
+        PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS, PLONK_CHALLENGES, PLONK_EVALUATIONS,
+        PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS, PLONK_PER_PROOF_OUTPUTS, PLONK_REDUCE_MAX_PROOFS,
+        PLONK_SHARED_OUTPUTS, SCALAR_BYTES, SNARKJS_PLONK_PROOF_POINTS, SNARKJS_PLONK_VK_POINTS,
+        plonk_reduction_output_count, plonk_reduction_shape, snarkjs_plonk_multi_vk_output_count,
+        snarkjs_plonk_multi_vk_shape, unpack_plonk_reduction_shape,
+        unpack_snarkjs_plonk_multi_vk_shape,
     },
     pod::{
         PodG1G2Pair, PodG1Point, PodG2Point, PodGtElement, PodPairingResult,
@@ -28,23 +35,60 @@ pub use crate::syscalls::{
 };
 #[cfg(not(target_os = "solana"))]
 pub use crate::{
-    fr::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
-    msm::alt_bn128_g1_msm,
-    pairing::{alt_bn128_pairing_check, alt_bn128_pairing_map},
-    plonk::alt_bn128_plonk_batch_reduce,
-    snarkjs_plonk::{alt_bn128_snarkjs_plonk_batch_reduce, diagnostic_snarkjs_plonk_challenges},
-    snarkjs_plonk_multi_vk::{
-        alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
-        diagnostic_snarkjs_plonk_multi_vk_batch_digest,
+    backend::{
+        alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+        alt_bn128_pairing_map,
     },
+    plonk::alt_bn128_plonk_batch_reduce,
+    snarkjs_plonk::alt_bn128_snarkjs_plonk_batch_reduce,
+    snarkjs_plonk_multi_vk::alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
 };
 
+#[cfg(not(target_os = "solana"))]
+pub(crate) mod backend;
+mod backend_selection;
 pub(crate) mod encoding;
-#[cfg(not(target_os = "solana"))]
+#[cfg(all(
+    not(target_os = "solana"),
+    any(
+        feature = "backend-b1-arkworks",
+        not(any(
+            feature = "backend-b2-arkworks-optimized",
+            feature = "backend-b3-mcl",
+            feature = "backend-b4-helios",
+            feature = "backend-b5-helios-ifma"
+        )),
+        test
+    )
+))]
 pub(crate) mod fr;
-#[cfg(not(target_os = "solana"))]
+#[cfg(all(
+    not(target_os = "solana"),
+    any(
+        feature = "backend-b1-arkworks",
+        not(any(
+            feature = "backend-b2-arkworks-optimized",
+            feature = "backend-b3-mcl",
+            feature = "backend-b4-helios",
+            feature = "backend-b5-helios-ifma"
+        )),
+        test
+    )
+))]
 pub(crate) mod msm;
-#[cfg(not(target_os = "solana"))]
+#[cfg(all(
+    not(target_os = "solana"),
+    any(
+        feature = "backend-b1-arkworks",
+        not(any(
+            feature = "backend-b2-arkworks-optimized",
+            feature = "backend-b3-mcl",
+            feature = "backend-b4-helios",
+            feature = "backend-b5-helios-ifma"
+        )),
+        test
+    )
+))]
 pub(crate) mod pairing;
 #[cfg(not(target_os = "solana"))]
 pub(crate) mod plonk;
@@ -57,11 +101,6 @@ pub(crate) mod snarkjs_plonk_multi_vk;
 pub(crate) mod syscalls;
 pub(crate) mod validation;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Version {
-    V0,
-}
-
 #[cfg(test)]
 pub(crate) mod test_utils {
     use {
@@ -70,19 +109,19 @@ pub(crate) mod test_utils {
         ark_ec::{AffineRepr, CurveGroup, PrimeGroup},
         ark_ff::{BigInteger, PrimeField, UniformRand, Zero},
         ark_std::rand::{SeedableRng, rngs::StdRng},
+        core::ops::{AddAssign, Mul, Neg},
     };
 
-    // fixed seed for reproducibility, mirroring the bench fixtures
     pub fn rng() -> StdRng {
         StdRng::seed_from_u64(0xa17b428)
     }
 
     pub fn random_g1(rng: &mut StdRng) -> G1Affine {
-        (G1Projective::generator() * Fr::rand(rng)).into_affine()
+        G1Projective::generator().mul(Fr::rand(rng)).into_affine()
     }
 
     pub fn random_g2(rng: &mut StdRng) -> G2Affine {
-        (G2Projective::generator() * Fr::rand(rng)).into_affine()
+        G2Projective::generator().mul(Fr::rand(rng)).into_affine()
     }
 
     pub fn g1_bytes(point: &G1Affine) -> [u8; G1_BYTES] {
@@ -135,10 +174,7 @@ pub(crate) mod test_utils {
         }
     }
 
-    /// Deterministic G2 point on the twist curve but outside the r-order
-    /// subgroup: the twist cofactor is ~2^254, so nearly every curve point
-    /// qualifies; the asserts fail loud if the found point is not the
-    /// negative test it claims to be.
+    /// Returns a deterministic on-curve G2 point outside the scalar subgroup.
     pub fn non_subgroup_g2() -> G2Affine {
         for k in 0u64.. {
             let x = Fq2::new(Fq::from(k), Fq::zero());
@@ -152,28 +188,27 @@ pub(crate) mod test_utils {
         unreachable!("BN254 twist has non-subgroup points with small x");
     }
 
-    /// n real pairs over a shared G2 whose pairing product is the identity:
-    /// (s_1 P, Q) ... (s_{n-1} P, Q), (-(s_1 + ... + s_{n-1}) P, Q).
+    /// Returns `n` pairs over one G2 point whose pairing product is the identity.
     pub fn telescoping_pairs(rng: &mut StdRng, n: usize) -> Vec<u8> {
         assert!(n >= 2, "telescoping construction needs at least two pairs");
         let p = G1Projective::generator();
-        let q = (G2Projective::generator() * Fr::rand(rng)).into_affine();
+        let q = G2Projective::generator().mul(Fr::rand(rng)).into_affine();
         let mut sum = Fr::zero();
-        let mut out = Vec::with_capacity(n * PAIR_BYTES);
-        for _ in 0..n - 1 {
+        let mut out = Vec::with_capacity(n.checked_mul(PAIR_BYTES).unwrap());
+        for _ in (0..n).take(n.saturating_sub(1)) {
             let s = Fr::rand(rng);
-            sum += s;
-            out.extend_from_slice(&pair_bytes(&(p * s).into_affine(), &q));
+            sum.add_assign(s);
+            out.extend_from_slice(&pair_bytes(&p.mul(s).into_affine(), &q));
         }
-        out.extend_from_slice(&pair_bytes(&(p * (-sum)).into_affine(), &q));
+        out.extend_from_slice(&pair_bytes(&p.mul(sum.neg()).into_affine(), &q));
         out
     }
 
     pub fn decode_hex(hex: &str) -> Vec<u8> {
         assert!(hex.len().is_multiple_of(2));
-        (0..hex.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        hex.as_bytes()
+            .chunks_exact(2)
+            .map(|pair| u8::from_str_radix(core::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect()
     }
 }

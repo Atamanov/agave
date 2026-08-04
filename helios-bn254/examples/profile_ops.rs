@@ -9,6 +9,7 @@
 
 use std::hint::black_box;
 use std::io::{self, Write};
+use std::ops::Mul;
 use std::time::{Duration, Instant};
 
 use helios_bn254::pairing::{final_exponentiation, miller_loop};

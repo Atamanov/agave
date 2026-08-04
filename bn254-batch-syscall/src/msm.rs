@@ -41,10 +41,9 @@ pub fn alt_bn128_g1_msm(
     // arkworks' best single-scalar path is the GLV endomorphism mul; its MSM
     // (Pippenger) carries fixed setup that only pays off across many points, so
     // route n == 1 to glv_mul and larger n to the library MSM.
-    let sum = if bases.len() == 1 {
-        G1Config::glv_mul_projective(bases[0].into_group(), exponents[0])
-    } else {
-        G1Projective::msm_unchecked(&bases, &exponents)
+    let sum = match (bases.as_slice(), exponents.as_slice()) {
+        ([base], [exponent]) => G1Config::glv_mul_projective(base.into_group(), *exponent),
+        _ => G1Projective::msm_unchecked(&bases, &exponents),
     };
     Ok(PodG1Point::from(&sum.into_affine()))
 }
@@ -76,8 +75,8 @@ mod tests {
     }
 
     fn random_input(rng: &mut ark_std::rand::rngs::StdRng, n: usize) -> (Vec<u8>, Vec<u8>) {
-        let mut points = Vec::with_capacity(n * G1_BYTES);
-        let mut scalars = Vec::with_capacity(n * SCALAR_BYTES);
+        let mut points = Vec::new();
+        let mut scalars = Vec::new();
         for _ in 0..n {
             points.extend_from_slice(&g1_bytes(&random_g1(rng)));
             scalars.extend_from_slice(&fr_bytes(&Fr::rand(rng)));

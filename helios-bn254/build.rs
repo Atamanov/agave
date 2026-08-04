@@ -10,7 +10,11 @@
 #[path = "build/mod.rs"]
 mod kernelgen;
 
-use std::path::{Path, PathBuf};
+use std::{
+    error::Error,
+    io,
+    path::{Path, PathBuf},
+};
 
 /// The generated kernels, rendered on every build (host-independent and
 /// deterministic). `[(file name, text)]`.
@@ -24,10 +28,12 @@ fn generated_kernels() -> [(&'static str, String); 2] {
     ]
 }
 
-fn write_kernel(directory: &Path, name: &str, text: &str) -> PathBuf {
+fn write_kernel(directory: &Path, name: &str, text: &str) -> io::Result<PathBuf> {
     let path = directory.join(name);
-    std::fs::write(&path, text).unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
-    path
+    std::fs::write(&path, text).map_err(|error| {
+        io::Error::new(error.kind(), format!("write {}: {error}", path.display()))
+    })?;
+    Ok(path)
 }
 
 /// Whether the CPU this build targets is Intel: an explicit Intel
@@ -212,8 +218,8 @@ const LEAF_TOGGLES: &[Toggle] = &[
 ];
 
 impl Toggle {
-    fn resolves_on(&self) -> bool {
-        match std::env::var(self.env).ok().as_deref() {
+    fn resolves_on(&self) -> Result<bool, String> {
+        let enabled = match std::env::var(self.env).ok().as_deref() {
             Some("1") => true,
             Some("0") => false,
             None => match self.default {
@@ -221,15 +227,18 @@ impl Toggle {
                 ToggleDefault::On => true,
                 ToggleDefault::Vendor(probe) => probe(),
             },
-            Some(other) => panic!(
-                "{}={other:?} is not recognized; use {}",
-                self.env, self.values
-            ),
-        }
+            Some(other) => {
+                return Err(format!(
+                    "{}={other:?} is not recognized. Use {}",
+                    self.env, self.values
+                ));
+            }
+        };
+        Ok(enabled)
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo::rustc-check-cfg=cfg(helios_mont4_x86_64_adx)");
     println!("cargo::rustc-check-cfg=cfg(helios_x86_intel)");
     println!("cargo::rustc-check-cfg=cfg(helios_avx512_ifma)");
@@ -248,83 +257,92 @@ fn main() {
     let has = |feature: &str| features.split(',').any(|entry| entry == feature);
     let adx_tier = arch == "x86_64" && os == "linux" && has("bmi2") && has("adx");
     let force_portable = std::env::var_os("CARGO_FEATURE_FORCE_PORTABLE").is_some();
+    let deny_ifma = std::env::var_os("CARGO_FEATURE_DENY_IFMA").is_some();
+    let force_ifma = std::env::var_os("CARGO_FEATURE_FORCE_IFMA").is_some();
+    if deny_ifma && force_ifma {
+        return Err("deny-ifma and force-ifma cannot be enabled together".into());
+    }
+    if force_portable && force_ifma {
+        return Err("force-portable and force-ifma cannot be enabled together".into());
+    }
 
-    // Full per-leaf activation: the toggle resolves on AND the ADX tier
-    // exists AND force-portable is off. A toggle value is validated on every
-    // target so a typo cannot pass silently off-tier.
+    // A leaf requires its toggle, the ADX tier, and non-portable mode.
+    // Validate explicit values on every target.
     for toggle in LEAF_TOGGLES {
-        let on = toggle.resolves_on();
+        let on = toggle.resolves_on().map_err(io::Error::other)?;
         if on && adx_tier && !force_portable {
             println!("cargo:rustc-cfg={}", toggle.cfg);
         }
     }
 
-    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"));
+    let out_dir = PathBuf::from(
+        std::env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR for the build script")?,
+    );
     let kernels = generated_kernels();
 
-    // Inspection path: HELIOS_DUMP_ASM=<absolute dir> also writes every
-    // generated kernel there, whatever the target gates select.
+    // The inspection path writes all kernels, independent of target gates.
     if let Some(dump) = std::env::var_os("HELIOS_DUMP_ASM") {
         let dump = PathBuf::from(dump);
-        assert!(
-            dump.is_absolute(),
-            "HELIOS_DUMP_ASM must be an absolute directory path"
-        );
-        std::fs::create_dir_all(&dump)
-            .unwrap_or_else(|error| panic!("create {}: {error}", dump.display()));
+        if !dump.is_absolute() {
+            return Err("HELIOS_DUMP_ASM must be an absolute directory path".into());
+        }
+        std::fs::create_dir_all(&dump).map_err(|error| {
+            io::Error::new(error.kind(), format!("create {}: {error}", dump.display()))
+        })?;
         for (name, text) in &kernels {
-            write_kernel(&dump, name, text);
+            write_kernel(&dump, name, text)?;
         }
     }
 
     let [(aarch64_name, aarch64_text), (x86_name, x86_text)] = &kernels;
 
     if arch == "aarch64" && vendor == "apple" {
-        // Schedule-DSL port of the hand-scheduled CIOS leaf (best measured
-        // mont on M4); assembles byte-identical to the former checked-in file.
-        let path = write_kernel(&out_dir, aarch64_name, aarch64_text);
+        // The generated AArch64 kernel is the verified CIOS schedule.
+        let path = write_kernel(&out_dir, aarch64_name, aarch64_text)?;
         cc::Build::new().file(path).compile("helios_mont4_asm");
     }
 
-    // Generated schedule-DSL leaves (ADR 0001). Compile-time gate mirroring
-    // the AArch64 tier: the kernels exist exactly when this cfg is emitted,
-    // so backend selection and linking can never disagree. Builds without
-    // bmi2+adx in the target features (the plain x86-64 baseline) stay on
-    // the portable tier -- there is no runtime dispatch to fall back through.
+    // The x86 kernel contains BMI2 and ADX instructions and has no runtime
+    // fallback.
     if adx_tier {
-        let path = write_kernel(&out_dir, x86_name, x86_text);
+        let path = write_kernel(&out_dir, x86_name, x86_text)?;
         cc::Build::new().file(path).compile("helios_mont4_asm");
         println!("cargo:rustc-cfg=helios_mont4_x86_64_adx");
-        // Tuning hint, not a tier: Intel vendor on the ADX tier. Intel
-        // converts widening products to cycles nearly 1:1, so consumers pick
-        // shapes that trade products for modular add/subs (the Karatsuba Fp2
-        // mul); no kernels or linking depend on it.
+        // This tuning hint does not select a backend or change linking.
         if target_cpu_is_intel() {
             println!("cargo:rustc-cfg=helios_x86_intel");
         }
     }
 
-    // AVX-512 IFMA batch tier. Same compile-time contract as the ADX gate:
-    // the kernels exist exactly when avx512f+avx512ifma are target features,
-    // so there is no runtime dispatch to fall back through.
-    // HELIOS_AVX512_IFMA=1 forces the tier (build fails clearly if the target
-    // cannot honor it); =0 denies it for forced-scalar A/B runs.
+    // The IFMA tier has no runtime fallback. Value 1 requires IFMA target
+    // features. Value 0 forbids IFMA.
     let ifma_env = std::env::var("HELIOS_AVX512_IFMA").ok();
+    if let Some(other) = ifma_env
+        .as_deref()
+        .filter(|value| !matches!(*value, "0" | "1"))
+    {
+        return Err(format!(
+            "HELIOS_AVX512_IFMA={other:?} is not recognized. Use 1 to force or 0 to deny"
+        )
+        .into());
+    }
     let ifma_available = arch == "x86_64" && has("avx512f") && has("avx512ifma");
-    match ifma_env.as_deref() {
-        Some("1") if !ifma_available => panic!(
-            "HELIOS_AVX512_IFMA=1 forces the IFMA tier, but avx512f+avx512ifma \
-             are not in the target features; refusing to build a binary that \
-             would silently dispatch elsewhere"
-        ),
-        Some("0") => {}
-        // Any unrecognized value (true/yes/on/...) must fail loudly: treating
-        // it as auto would silently build the scalar tier under a believed
-        // force, exactly the misdispatch the =1 arm exists to prevent.
-        Some(other) if other != "1" => {
-            panic!("HELIOS_AVX512_IFMA={other:?} is not recognized; use 1 (force) or 0 (deny)")
+    match (deny_ifma, force_ifma, ifma_env.as_deref()) {
+        (true, _, Some("1")) => return Err("deny-ifma rejects HELIOS_AVX512_IFMA=1".into()),
+        (true, _, _) => {}
+        (_, true, Some("0")) => return Err("force-ifma rejects HELIOS_AVX512_IFMA=0".into()),
+        (_, true, _) if !ifma_available => {
+            return Err("force-ifma requires avx512f and avx512ifma target features".into());
         }
-        _ if ifma_available => println!("cargo:rustc-cfg=helios_avx512_ifma"),
+        (_, true, _) => println!("cargo:rustc-cfg=helios_avx512_ifma"),
+        (_, _, Some("1")) if !ifma_available => {
+            return Err(
+                "HELIOS_AVX512_IFMA=1 requires avx512f and avx512ifma target features".into(),
+            );
+        }
+        (_, _, Some("0")) => {}
+        (_, _, _) if ifma_available => println!("cargo:rustc-cfg=helios_avx512_ifma"),
         _ => {}
     }
+    Ok(())
 }

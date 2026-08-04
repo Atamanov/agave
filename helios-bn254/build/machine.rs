@@ -80,6 +80,7 @@ impl Reg {
         self.index() >= 8
     }
 
+    #[cfg(test)]
     pub const fn is_callee_saved(self) -> bool {
         matches!(
             self,

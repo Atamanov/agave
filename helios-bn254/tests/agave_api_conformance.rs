@@ -1,4 +1,4 @@
-mod agave_fixtures;
+pub mod agave_fixtures;
 
 use core::mem::{align_of, offset_of, size_of};
 use helios_bn254::{

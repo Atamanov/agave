@@ -1,4 +1,4 @@
-mod agave_fixtures;
+pub mod agave_fixtures;
 
 use agave_fixtures::{
     fq_modulus, g1_generator, g1_negative_generator, g1_off_curve, g2_generator,

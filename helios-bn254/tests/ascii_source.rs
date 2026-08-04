@@ -38,7 +38,7 @@ fn all_source_is_ascii() {
     let crates_root = manifest.parent().expect("crates/ root").to_path_buf();
     let mut files = Vec::new();
     walk(&manifest, &mut files);
-    walk(&crates_root.join("solana-bn254-batch-syscall"), &mut files);
+    walk(&crates_root.join("bn254-batch-syscall"), &mut files);
     files.sort();
 
     let mut offenders = Vec::new();

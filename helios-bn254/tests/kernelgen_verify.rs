@@ -12,7 +12,7 @@
 //! gated on determinism: generating twice must produce identical text.
 
 #[path = "../build/mod.rs"]
-mod kernelgen;
+pub mod kernelgen;
 
 use kernelgen::{
     BN254_MU, BN254_P, BN254_P_INV, interpret_cyc_sqr, interpret_fp6_mul, interpret_fp12_034,

@@ -2,6 +2,7 @@
 //! `cargo +1.97.1 test --release -p helios-bn254 sos_micro -- --ignored --nocapture`
 
 use std::hint::black_box;
+use std::ops::Mul;
 use std::time::Instant;
 
 use rand::RngCore;

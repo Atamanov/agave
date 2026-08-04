@@ -9,12 +9,9 @@
 //! interprets and verifies the same schedules. Never part of the production
 //! dependency graph.
 
-// Each consumer uses only half of the modules: the build script emits, the
-// test harness interprets. The other half is dead code in that consumer.
-#![allow(dead_code)]
-
 pub mod a64;
 pub mod emit;
+#[cfg(test)]
 pub mod interp;
 pub mod layout;
 pub mod machine;
@@ -23,6 +20,7 @@ pub mod schedule;
 
 /// BN254 base-field modulus, little-endian limbs. Kept here only for the
 /// schedule tests; the kernels read the modulus from their constants table.
+#[cfg(test)]
 pub const BN254_P: [u64; 4] = [
     0x3c208c16d87cfd47,
     0x97816a916871ca8d,
@@ -31,14 +29,17 @@ pub const BN254_P: [u64; 4] = [
 ];
 
 /// `-p^-1 mod 2^64` for BN254.
+#[cfg(test)]
 pub const BN254_P_INV: u64 = 0x87d20782e4866389;
 
 /// `floor(2^310 / p)` for BN254: the fp6 kernel's xi-scaling quotient
 /// estimate (`q = floor(E*mu/2^58)` for `E = floor(value/2^252)`). Pinned
 /// against the production `consts::P_MU_310` by the constants test.
+#[cfg(test)]
 pub const BN254_MU: u64 = 0x015291d18988e812;
 
 /// Execute the x86-64 mul schedule in the interpreter for one input pair.
+#[cfg(test)]
 pub fn interpret_mont4_mul(x: [u64; 4], y: [u64; 4], p: [u64; 4], p_inv: u64) -> [u64; 4] {
     let mut machine = interp::Interp::call_frame(x, y, p, p_inv);
     schedule::mont4_mul(&mut machine);
@@ -47,6 +48,7 @@ pub fn interpret_mont4_mul(x: [u64; 4], y: [u64; 4], p: [u64; 4], p_inv: u64) ->
 
 /// Execute the x86-64 sqr schedule in the interpreter. `y` is unused by the
 /// kernel; pass the same synthetic frame to keep the ABI identical.
+#[cfg(test)]
 pub fn interpret_mont4_sqr(x: [u64; 4], p: [u64; 4], p_inv: u64) -> [u64; 4] {
     let mut machine = interp::Interp::call_frame(x, x, p, p_inv);
     schedule::mont4_sqr(&mut machine);
@@ -54,6 +56,7 @@ pub fn interpret_mont4_sqr(x: [u64; 4], p: [u64; 4], p_inv: u64) -> [u64; 4] {
 }
 
 /// Execute the AArch64 mul schedule in the interpreter for one input pair.
+#[cfg(test)]
 pub fn interpret_mont4_a64(x: [u64; 4], y: [u64; 4], p: [u64; 4], p_inv: u64) -> [u64; 4] {
     let mut machine = a64::interp::InterpA64::call_frame(x, y, p, p_inv);
     a64::schedule::mont4(&mut machine);
@@ -62,6 +65,7 @@ pub fn interpret_mont4_a64(x: [u64; 4], y: [u64; 4], p: [u64; 4], p_inv: u64) ->
 
 /// Execute the rolled x86-64 SoS schedule in the interpreter for one
 /// `(a_i, b_i)` pair list (`1..=10` pairs, operands at most p).
+#[cfg(test)]
 pub fn interpret_sos(pairs: &[([u64; 4], [u64; 4])], p: [u64; 4], p_inv: u64) -> [u64; 4] {
     let mut machine = interp::Interp::sos_frame(pairs, p, p_inv);
     schedule::sos_rolled(&mut machine);
@@ -72,6 +76,7 @@ pub fn interpret_sos(pairs: &[([u64; 4], [u64; 4])], p: [u64; 4], p_inv: u64) ->
 /// lanes of `sum_{i<3} x_i * y_i` over Fp2 (operands at most p), exactly
 /// the portable `sosd6`. `xs` is (x00, x01, x10, x11, x20, x21), `ys`
 /// likewise.
+#[cfg(test)]
 pub fn interpret_sosd6(
     xs: &[[u64; 4]; 6],
     ys: &[[u64; 4]; 6],
@@ -86,6 +91,7 @@ pub fn interpret_sosd6(
 /// Execute the whole-Fp6 multiply schedule in the interpreter: `a * b` in
 /// `Fp6 = Fp2[v]/(v^3 - (9+u))`, operands and result as six canonical Fp
 /// values in `repr(C)` order (c0.re, c0.im, c1.re, c1.im, c2.re, c2.im).
+#[cfg(test)]
 pub fn interpret_fp6_mul(
     a: &[[u64; 4]; 6],
     b: &[[u64; 4]; 6],
@@ -103,6 +109,7 @@ pub fn interpret_fp6_mul(
 /// result as twelve canonical Fp values in `repr(C)` Fp12 order; `c` is the
 /// three sparse coefficients c0, c3, c4 as (re, im) pairs. With `alias` the
 /// kernel runs in place (`z == f`), the production shape.
+#[cfg(test)]
 pub fn interpret_fp12_034(
     f: &[[u64; 4]; 12],
     c: &[[u64; 4]; 6],
@@ -120,6 +127,7 @@ pub fn interpret_fp12_034(
 /// `Fp12 = Fp6[w]/(w^2 - v)`, operand and result as twelve canonical Fp
 /// values in `repr(C)` Fp12 order. With `alias` the kernel runs in place
 /// (`z == f`).
+#[cfg(test)]
 pub fn interpret_fp12_sqr(
     f: &[[u64; 4]; 12],
     p: [u64; 4],
@@ -136,6 +144,7 @@ pub fn interpret_fp12_sqr(
 /// Granger-Scott square of `f` in `Fp12 = Fp6[w]/(w^2 - v)`, operand and
 /// result as twelve canonical Fp values in `repr(C)` Fp12 order. With
 /// `alias` the kernel runs in place (`z == f`), the production pow_x shape.
+#[cfg(test)]
 pub fn interpret_cyc_sqr(
     f: &[[u64; 4]; 12],
     p: [u64; 4],
@@ -152,6 +161,7 @@ pub fn interpret_cyc_sqr(
 /// `Fp12 = Fp6[w]/(w^2 - v)`, operands and result as twelve canonical Fp
 /// values in `repr(C)` Fp12 order. `alias` selects the output pointer:
 /// 0 = distinct z, 1 = `z == a` (the production shape), 2 = `z == b`.
+#[cfg(test)]
 pub fn interpret_fp12_mul(
     a: &[[u64; 4]; 12],
     b: &[[u64; 4]; 12],
@@ -172,6 +182,7 @@ pub fn interpret_fp12_mul(
 
 /// Execute the rolled dual-lane sosd2 schedule in the interpreter: returns
 /// `((x0*y0 + x1*(p - y1))/R, (x0*y1 + x1*y0)/R) mod p` (operands at most p).
+#[cfg(test)]
 pub fn interpret_sosd2_small(
     x0: [u64; 4],
     x1: [u64; 4],

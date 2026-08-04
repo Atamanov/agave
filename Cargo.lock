@@ -70,7 +70,7 @@ dependencies = [
  "agave-votor",
  "agave-votor-messages",
  "bitvec",
- "criterion",
+ "criterion 0.8.2",
  "qualifier_attr",
  "rayon",
  "solana-bls-signatures",
@@ -316,7 +316,7 @@ version = "4.1.2"
 dependencies = [
  "agave-transaction-view",
  "bincode",
- "criterion",
+ "criterion 0.8.2",
  "solana-hash 4.3.0",
  "solana-instruction",
  "solana-keypair",
@@ -2042,6 +2042,32 @@ dependencies = [
 
 [[package]]
 name = "criterion"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"
+dependencies = [
+ "anes",
+ "cast",
+ "ciborium",
+ "clap 4.5.31",
+ "criterion-plot 0.5.0",
+ "is-terminal",
+ "itertools 0.10.5",
+ "num-traits",
+ "once_cell",
+ "oorandom",
+ "plotters",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tinytemplate",
+ "walkdir",
+]
+
+[[package]]
+name = "criterion"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "950046b2aa2492f9a536f5f4f9a3de7b9e2476e575e05bd6c333371add4d98f3"
@@ -2051,7 +2077,7 @@ dependencies = [
  "cast",
  "ciborium",
  "clap 4.5.31",
- "criterion-plot",
+ "criterion-plot 0.8.2",
  "itertools 0.13.0",
  "num-traits",
  "oorandom",
@@ -2063,6 +2089,16 @@ dependencies = [
  "serde_json",
  "tinytemplate",
  "walkdir",
+]
+
+[[package]]
+name = "criterion-plot"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
+dependencies = [
+ "cast",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -3393,6 +3429,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "helios-bn254"
+version = "0.1.0"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "bytemuck",
+ "cc",
+ "criterion 0.5.1",
+ "hex",
+ "rand 0.8.6",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3971,6 +4021,17 @@ checksum = "dbc5ebe9c3a1a7a5127f920a418f7585e9e758e911d0466ed004f393b0e380b2"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "is-terminal"
+version = "0.4.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
+dependencies = [
+ "hermit-abi",
+ "libc",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -6934,7 +6995,7 @@ dependencies = [
  "bincode",
  "blake3",
  "bv",
- "criterion",
+ "criterion 0.8.2",
  "dashmap",
  "itertools 0.14.0",
  "log",
@@ -7257,7 +7318,9 @@ dependencies = [
  "ark-std 0.5.0",
  "bytemuck",
  "bytemuck_derive",
+ "helios-bn254",
  "solana-bn254",
+ "solana-bn254-mcl-sys",
  "solana-define-syscall 4.0.1",
  "solana-keccak-hasher",
  "thiserror 2.0.18",
@@ -7273,6 +7336,18 @@ dependencies = [
  "ark-std 0.5.0",
  "solana-bn254-batch-syscall",
  "solana-keccak-hasher",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "solana-bn254-mcl-sys"
+version = "4.1.2"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "ark-std 0.5.0",
+ "cc",
  "thiserror 2.0.18",
 ]
 
@@ -7299,7 +7374,7 @@ dependencies = [
  "ark-ec 0.5.0",
  "ark-ff 0.5.0",
  "ark-std 0.5.0",
- "criterion",
+ "criterion 0.8.2",
  "solana-bn254-batch-syscall",
  "solana-keccak-hasher",
  "thiserror 2.0.18",
@@ -7320,7 +7395,7 @@ version = "4.1.2"
 dependencies = [
  "assert_matches",
  "bincode",
- "criterion",
+ "criterion 0.8.2",
  "qualifier_attr",
  "rand 0.9.4",
  "shuttle",
@@ -7772,7 +7847,7 @@ version = "4.1.2"
 dependencies = [
  "agave-feature-set",
  "bincode",
- "criterion",
+ "criterion 0.8.2",
  "rand 0.9.4",
  "solana-borsh",
  "solana-builtins-default-costs",
@@ -7817,7 +7892,7 @@ name = "solana-compute-budget-program-bench"
 version = "4.1.2"
 dependencies = [
  "agave-feature-set",
- "criterion",
+ "criterion 0.8.2",
  "solana-compute-budget",
  "solana-compute-budget-instruction",
  "solana-compute-budget-interface",
@@ -7892,7 +7967,7 @@ dependencies = [
  "bitvec",
  "bytes",
  "chrono",
- "criterion",
+ "criterion 0.8.2",
  "crossbeam-channel",
  "dashmap",
  "futures 0.3.32",
@@ -8178,7 +8253,7 @@ dependencies = [
  "agave-reserved-account-keys",
  "agave-votor-messages",
  "assert_matches",
- "criterion",
+ "criterion 0.8.2",
  "crossbeam-channel",
  "dlopen2",
  "log",
@@ -8570,7 +8645,7 @@ dependencies = [
  "bincode",
  "bs58",
  "bv",
- "criterion",
+ "criterion 0.8.2",
  "crossbeam-channel",
  "flate2",
  "indexmap 2.14.0",
@@ -8827,7 +8902,7 @@ dependencies = [
  "blake3",
  "bs58",
  "bytemuck",
- "criterion",
+ "criterion 0.8.2",
  "rand 0.9.4",
  "rand_chacha 0.9.0",
  "solana-lattice-hash",
@@ -8866,7 +8941,7 @@ dependencies = [
  "bzip2",
  "chrono",
  "chrono-humanize",
- "criterion",
+ "criterion 0.8.2",
  "crossbeam-channel",
  "dashmap",
  "eager",
@@ -9318,7 +9393,7 @@ dependencies = [
  "assert_matches",
  "bincode",
  "core_affinity",
- "criterion",
+ "criterion 0.8.2",
  "crossbeam-channel",
  "log",
  "qualifier_attr",
@@ -10044,7 +10119,7 @@ dependencies = [
  "bincode",
  "bitvec",
  "bytemuck",
- "criterion",
+ "criterion 0.8.2",
  "crossbeam-channel",
  "dashmap",
  "imbl",
@@ -10173,7 +10248,7 @@ dependencies = [
  "agave-feature-set",
  "agave-reserved-account-keys",
  "agave-transaction-view",
- "criterion",
+ "criterion 0.8.2",
  "rand 0.9.4",
  "solana-compute-budget",
  "solana-compute-budget-instruction",
@@ -10793,7 +10868,7 @@ dependencies = [
  "assert_matches",
  "bincode",
  "bytemuck",
- "criterion",
+ "criterion 0.8.2",
  "libsecp256k1",
  "num-traits",
  "solana-account 4.3.0",
@@ -10875,7 +10950,7 @@ version = "4.1.2"
 dependencies = [
  "assert_matches",
  "bincode",
- "criterion",
+ "criterion 0.8.2",
  "log",
  "solana-account 4.3.0",
  "solana-bincode",
@@ -11520,7 +11595,7 @@ dependencies = [
  "agave-logger",
  "assert_matches",
  "bincode",
- "criterion",
+ "criterion 0.8.2",
  "log",
  "qualifier_attr",
  "solana-account 4.3.0",
@@ -11565,7 +11640,7 @@ name = "solana-zk-elgamal-proof-program"
 version = "4.1.2"
 dependencies = [
  "bytemuck",
- "criterion",
+ "criterion 0.8.2",
  "curve25519-dalek 4.1.3",
  "solana-instruction",
  "solana-program-runtime",

@@ -1,11 +1,11 @@
 [package]
 name = "helios-bn254"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-rust-version.workspace = true
-description = "Agave-aligned, variable-time BN254 batch arithmetic with portable Rust, AArch64, x86-64 ADX, and AVX-512 IFMA backends"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/helios/helios-bn254"
+rust-version = "1.95.0"
+description = "Variable-time BN254 batch arithmetic with portable and native backends"
 readme = "README.md"
 homepage = "https://github.com/helios/helios-bn254"
 documentation = "https://docs.rs/helios-bn254"
@@ -13,17 +13,15 @@ keywords = ["bn254", "pairing", "zk", "elliptic-curve", "cryptography"]
 categories = ["cryptography", "no-std"]
 
 [features]
-# no_std + alloc by default: this drops into on-chain and syscall contexts.
-# `std` is opt-in and only pulls the test/timing harness; run the test suite
-# with `--features std`.
+# The default build uses no_std with alloc.
 default = []
 std = []
-# Compile the portable Rust field kernel even on AArch64. This is an explicit
-# benchmark/test tier; it never silently selects assembly.
 force-portable = []
+deny-ifma = []
+force-ifma = []
 
 [dependencies]
-bytemuck = { workspace = true }
+bytemuck = { version = "1.25", default-features = false, features = ["derive", "min_const_generics"] }
 
 [build-dependencies]
 cc = "1.0"
@@ -32,9 +30,9 @@ cc = "1.0"
 ark-bn254 = "=0.5.0"
 ark-ec = "=0.5.0"
 ark-ff = { version = "=0.5.0", features = ["asm"] }
-criterion = { workspace = true }
-hex = { workspace = true }
-rand = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+hex = "0.4"
+rand = "=0.8.6"
 
 [[bench]]
 name = "pairing"
@@ -53,5 +51,5 @@ name = "gt_map_scenarios"
 harness = false
 
 [package.metadata.docs.rs]
-all-features = true
+features = ["std", "deny-ifma"]
 rustdoc-args = ["--cfg", "docsrs"]

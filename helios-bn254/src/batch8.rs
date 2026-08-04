@@ -9,9 +9,12 @@
 //! production batch-verify entry (8-wide Miller loops, one shared scalar
 //! final exponentiation); `pairing8`/`final_exp8` stay as the 8-wide oracle.
 
+use core::ops::Neg;
+
 use crate::consts::ATE_LOOP_COUNT;
 use crate::fp::Fp;
 use crate::fp::avx512ifma::FpVec8;
+#[cfg(test)]
 use crate::fp12::X_W4;
 use crate::pairing::miller::{mul_by_char, twist_b_f2};
 use crate::{Fp2, Fp6, Fp12, G1Affine, G2Affine};
@@ -133,8 +136,7 @@ pub(crate) struct Fp6x8 {
 }
 
 impl Fp6x8 {
-    // Differential-test loader; production lanes are built by miller8.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     fn load(v: &[Fp6; 8]) -> Self {
         Self {
             c0: Fp2x8::load(&core::array::from_fn(|i| v[i].c0)),
@@ -166,8 +168,7 @@ impl Fp6x8 {
         }
     }
 
-    // Only the pairing8/final_exp8 test oracle reaches this (via conjugate).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[inline(always)]
     fn neg(&self) -> Self {
         Self {
@@ -195,8 +196,7 @@ impl Fp6x8 {
     /// scalar `sosd6` lazy reduction, lane-parallel), so an Fp6 mul costs
     /// six `sos_mac(6)` instead of the eighteen `sos_mac(2)` a composed Fp2
     /// product tree would pay -- a third of the Montgomery reductions.
-    // Only the pairing8/final_exp8 test oracle reaches this (via Fp12x8::mul).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[inline(always)]
     fn mul(&self, o: &Self) -> Self {
         let x1 = o.c1.mul_by_nonresidue();
@@ -233,8 +233,7 @@ pub(crate) struct Fp12x8 {
 }
 
 impl Fp12x8 {
-    // Differential-test loader; production lanes are built by miller8.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn load(v: &[Fp12; 8]) -> Self {
         Self {
             c0: Fp6x8::load(&core::array::from_fn(|i| v[i].c0)),
@@ -247,8 +246,7 @@ impl Fp12x8 {
         core::array::from_fn(|i| Fp12::new(c0[i], c1[i]))
     }
 
-    // Only the pairing8/final_exp8 test oracle reaches this.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[inline(always)]
     fn conjugate(&self) -> Self {
         Self {
@@ -259,9 +257,7 @@ impl Fp12x8 {
 
     /// Karatsuba over Fp6: `c0 = a0 b0 + v a1 b1`,
     /// `c1 = (a0+a1)(b0+b1) - a0 b0 - a1 b1`.
-    // Only the pairing8/final_exp8 test oracle reaches this; the production
-    // batch multiplies through the scalar tower after miller8.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[inline(always)]
     fn mul(&self, o: &Self) -> Self {
         let t0 = self.c0.mul(&o.c0);
@@ -458,7 +454,7 @@ pub(crate) fn miller8(p: &[G1Affine; 8], q: &[G2Affine; 8]) -> Fp12x8 {
         let tb = twist_b_f2();
         Fp2x8::broadcast(Fp2::new(Fp(tb.0), Fp(tb.1)))
     };
-    let inv2 = FpVec8::load(&[Fp::from_u64(2).invert().expect("2 invertible"); 8]);
+    let inv2 = FpVec8::load(&[Fp::INV_TWO; 8]);
 
     // Frobenius endpoints, computed scalar-side per lane.
     let q1: [G2Affine; 8] = core::array::from_fn(|i| mul_by_char(q[i]));
@@ -500,17 +496,13 @@ pub(crate) fn miller8(p: &[G1Affine; 8], q: &[G2Affine; 8]) -> Fp12x8 {
     f
 }
 
-// --- Layer 3: final exponentiation ----------------------------------------
-//
-// The 8-wide final exponentiation and everything only it reaches are the
-// pairing8 reference oracle: production batches share one scalar final exp
-// over the Miller product (multi_pairing8), so this layer is test-only and
-// carries per-item cfg_attr(not(test), allow(dead_code)).
+// The full eight-lane pairing is a differential test oracle. Production uses
+// one scalar final exponentiation for the combined Miller product.
 
 /// SoS Fp4 square `(r0 + r1 y)^2`, `y^2 = xi`: `t0 = r0^2 + xi r1^2`,
 /// `t1 = (r0+r1)^2 - r0^2 - r1^2 = 2 r0 r1`.  Three Fp2 squares and no Fp2
 /// mul: both outputs reuse the component squares.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 #[inline(always)]
 fn fp4_square8(r0: &Fp2x8, r1: &Fp2x8) -> (Fp2x8, Fp2x8) {
     let s0 = r0.square();
@@ -524,7 +516,7 @@ impl Fp12x8 {
     /// Apply a scalar Fp12 map per lane (store, map, load). Used for the
     /// constant-heavy Frobenius maps and the one-time inversion, which are cold
     /// (a handful of calls per pairing, none in the pow_x hot loop).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[inline]
     fn map_scalar(&self, f: impl Fn(Fp12) -> Fp12) -> Self {
         let s = self.store();
@@ -533,7 +525,7 @@ impl Fp12x8 {
 
     /// Granger-Scott cyclotomic square (valid after the easy part). Mirrors the
     /// scalar `cyclotomic_square`; `fp4_square8` replaces the scalar SoS kernels.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[inline(always)]
     fn cyclotomic_square(&self) -> Self {
         let r0 = self.c0.c0;
@@ -568,7 +560,7 @@ impl Fp12x8 {
 
     /// `self^x`, `x = BN_X`, over signed 4-bit windows of cyclotomic squares
     /// (mirrors the scalar `pow_x`).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     fn pow_x(&self) -> Self {
         let x2 = self.cyclotomic_square();
         let x3 = x2.mul(self);
@@ -588,7 +580,7 @@ impl Fp12x8 {
 
     /// `f^{-x}`; X is positive for BN_SNARK1, so this is the unitary inverse of
     /// `f^x`.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     #[inline]
     fn exp_by_neg_x(&self) -> Self {
         self.pow_x().conjugate()
@@ -598,7 +590,7 @@ impl Fp12x8 {
 /// 8-wide final exponentiation `f^{(p^12-1)/r}`: easy part then the
 /// Fuentes-Castaneda hard part, mirroring the scalar `final_exponentiation`.
 /// The inversion and Frobenius maps run scalar-side per lane (cold path).
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn final_exp8(f: &Fp12x8) -> Fp12x8 {
     // Easy: f^{(p^6-1)(p^2+1)}.
     let f1 = f.conjugate();
@@ -630,7 +622,7 @@ pub(crate) fn final_exp8(f: &Fp12x8) -> Fp12x8 {
 }
 
 /// 8-wide full pairing: `miller8` then `final_exp8`.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn pairing8(p: &[G1Affine; 8], q: &[G2Affine; 8]) -> Fp12x8 {
     final_exp8(&miller8(p, q))
 }
@@ -663,6 +655,7 @@ pub(crate) fn multi_pairing8(pairs: &[(G1Affine, G2Affine)]) -> Fp12 {
 mod tests {
     use super::*;
     use crate::fp::Fp;
+    use core::ops::Mul;
 
     fn residue(state: &mut u64) -> Fp {
         use crate::limb;

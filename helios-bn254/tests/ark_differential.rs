@@ -1,4 +1,4 @@
-mod agave_fixtures;
+pub mod agave_fixtures;
 
 use agave_fixtures::{
     fq_modulus, fr_modulus, g1_generator, g1_off_curve, g2_non_subgroup, g2_off_curve, pair, scalar,
@@ -10,9 +10,9 @@ use ark_bn254::{
 use ark_ec::{AffineRepr, CurveGroup, PrimeGroup, VariableBaseMSM, pairing::Pairing};
 use ark_ff::{BigInteger, Field, One, PrimeField, UniformRand, Zero};
 use helios_bn254::{
-    FR_MAX_ELEMS, G1Bytes, G2Bytes, GtBytes, InputError, MSM_MAX_POINTS, PAIRING_MAX_PAIRS,
-    PairBytes, ScalarBytes, TRUSTED_GT_MAX_TARGETS, TrustedGt, fr_batch_invert, fr_lincomb, g1_msm,
-    pairing_map, pairing_product_is_one, trusted_gt_multiexp,
+    FR_MAX_ELEMS, G1Bytes, G2Bytes, GtBytes, InputError, MSM_MAX_POINTS, PAIRING_MAP_MAX_PAIRS,
+    PAIRING_MAX_PAIRS, PairBytes, ScalarBytes, TRUSTED_GT_MAX_TARGETS, TrustedGt, fr_batch_invert,
+    fr_lincomb, g1_msm, pairing_map, pairing_product_is_one, trusted_gt_multiexp,
 };
 use rand::{SeedableRng, rngs::StdRng};
 
@@ -230,11 +230,15 @@ fn pairing_products_match_arkworks() {
             Ok(expected == ArkFq12::one()),
             "n={n}"
         );
-        assert_eq!(
-            pairing_map(&pairs),
-            Ok(fq12_be(&expected)),
-            "GT bytes n={n}"
-        );
+        if n <= PAIRING_MAP_MAX_PAIRS {
+            assert_eq!(
+                pairing_map(&pairs),
+                Ok(fq12_be(&expected)),
+                "GT bytes n={n}"
+            );
+        } else {
+            assert_eq!(pairing_map(&pairs), Err(InputError::CapExceeded), "n={n}");
+        }
     }
 
     // Independent bilinear identity: e([a]P,Q) * e(-P,[a]Q) = 1.
@@ -312,7 +316,7 @@ fn trusted_gt_multiexp_matches_ark_and_pairing_map() {
         };
         assert_eq!(
             pairing_map(&[dynamic]),
-            trusted_gt_multiexp(&[edge_target.clone()], &[scalar_be(&exponent)]),
+            trusted_gt_multiexp(core::slice::from_ref(&edge_target), &[scalar_be(&exponent)]),
             "canonical GT edge exponent {exponent}"
         );
     }
@@ -326,7 +330,7 @@ fn trusted_gt_multiexp_matches_ark_and_pairing_map() {
         };
         assert_eq!(
             pairing_map(&[dynamic]),
-            trusted_gt_multiexp(&[edge_target.clone()], &[scalar_be(&exponent)]),
+            trusted_gt_multiexp(core::slice::from_ref(&edge_target), &[scalar_be(&exponent)]),
             "canonical GT single bit {bit}"
         );
     }
@@ -374,7 +378,11 @@ fn trusted_gt_multiexp_matches_ark_and_pairing_map() {
     let wrong_target = TrustedGt::from_pair(&wrong).unwrap();
     assert_ne!(
         pairing_map(&[dynamic]).unwrap(),
-        trusted_gt_multiexp(&[wrong_target.clone()], &[scalar_be(&exponent)]).unwrap()
+        trusted_gt_multiexp(
+            core::slice::from_ref(&wrong_target),
+            &[scalar_be(&exponent)]
+        )
+        .unwrap()
     );
 }
 
@@ -383,11 +391,11 @@ fn trusted_gt_multiexp_pins_shape_and_validation() {
     let valid_pair = pair(g1_generator(), G2Bytes([0; 128]));
     let trusted = TrustedGt::from_pair(&valid_pair).unwrap();
     assert_eq!(
-        trusted_gt_multiexp(&[trusted.clone()], &[]),
+        trusted_gt_multiexp(core::slice::from_ref(&trusted), &[]),
         Err(InputError::LengthMismatch)
     );
     assert_eq!(
-        trusted_gt_multiexp(&[trusted.clone()], &[ScalarBytes([0xff; 32])]),
+        trusted_gt_multiexp(core::slice::from_ref(&trusted), &[ScalarBytes([0xff; 32])]),
         Err(InputError::NonCanonical)
     );
     assert_eq!(
