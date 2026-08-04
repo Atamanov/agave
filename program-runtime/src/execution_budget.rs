@@ -200,6 +200,31 @@ pub struct SVMTransactionExecutionCost {
     pub bls12_381_one_pair_cost: u64,
     /// Incremental number of compute units consumed per pair in a bls12_381 pairing.
     pub bls12_381_additional_pair_cost: u64,
+    /// Base number of compute units consumed by an alt_bn128 G1 MSM.
+    pub alt_bn128_g1_msm_base_cost: u64,
+    /// Per-point compute units for an alt_bn128 G1 MSM, before the
+    /// size-bucketed discount applied at the syscall (Pippenger is sublinear).
+    pub alt_bn128_g1_msm_per_point_cost: u64,
+    /// Base number of compute units consumed by an alt_bn128 pairing check
+    /// (covers the shared final exponentiation).
+    pub alt_bn128_pairing_check_base_cost: u64,
+    /// Per-pair compute units for an alt_bn128 pairing check: parse,
+    /// validation minus the subgroup check, G2 preparation, and the miller
+    /// loop share.
+    pub alt_bn128_pairing_check_per_pair_cost: u64,
+    /// Compute units for one alt_bn128 G2 subgroup membership check, priced
+    /// separately so the surcharge stays auditable and reusable by any future
+    /// G2-input syscall.
+    pub alt_bn128_g2_subgroup_check_cost: u64,
+    /// Base compute units for an alt_bn128 scalar-field inner product.
+    pub alt_bn128_fr_lincomb_base_cost: u64,
+    /// Per-term compute units for an alt_bn128 scalar-field inner product.
+    pub alt_bn128_fr_lincomb_per_term_cost: u64,
+    /// Base compute units for an alt_bn128 scalar-field batch inverse, covering
+    /// the single field inversion the whole batch shares.
+    pub alt_bn128_fr_batch_invert_base_cost: u64,
+    /// Per-term compute units for an alt_bn128 scalar-field batch inverse.
+    pub alt_bn128_fr_batch_invert_per_term_cost: u64,
 }
 
 impl Default for SVMTransactionExecutionCost {
@@ -256,6 +281,29 @@ impl Default for SVMTransactionExecutionCost {
             bls12_381_g2_validate_cost: 1_968,
             bls12_381_one_pair_cost: 25_445,
             bls12_381_additional_pair_cost: 13_023,
+            // Bench-derived: criterion 95%-CI upper bound / 33 ns per CU on an AMD
+            // Ryzen 5 7500F (Zen 4) at the x86-64-v2 shipping profile, arkworks 0.5
+            // backend. MSM per-point is the n=1 anchor + 10%; the syscall scales it
+            // by a floor(log2 n)-bucketed discount so the model upper-bounds
+            // measured CU at every grid point. Pairing: base + per_pair * n fit over
+            // n in {1,2,3,4,8,16} with a distinct G2 per pair, the worst case a
+            // shared-G2 fold cannot discount; the G2 subgroup component is measured
+            // standalone.
+            alt_bn128_g1_msm_base_cost: 100,
+            alt_bn128_g1_msm_per_point_cost: 3_322,
+            alt_bn128_pairing_check_base_cost: 17_246,
+            alt_bn128_pairing_check_per_pair_cost: 5_741,
+            alt_bn128_g2_subgroup_check_cost: 3_595,
+            // Scalar-field syscalls, same bench harness and 33 ns per CU. Both
+            // are linear; per_term is the ceil of the measured per-element CU
+            // slope, base a defensive floor that also covers the one field
+            // inversion batch invert shares. base + per_term * n upper-bounds
+            // measured CU at every grid point n in {1,16,64,256,1024,2048}
+            // (lincomb slope ~1.7 CU, batch invert ~2.1 CU per term).
+            alt_bn128_fr_lincomb_base_cost: 100,
+            alt_bn128_fr_lincomb_per_term_cost: 2,
+            alt_bn128_fr_batch_invert_base_cost: 100,
+            alt_bn128_fr_batch_invert_per_term_cost: 3,
         }
     }
 }

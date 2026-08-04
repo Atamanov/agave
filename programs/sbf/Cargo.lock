@@ -6193,6 +6193,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-bn254-batch-syscall"
+version = "4.1.2"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "bytemuck",
+ "bytemuck_derive",
+ "solana-define-syscall 4.0.1",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "solana-borsh"
 version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8426,6 +8439,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-sbf-rust-alt-bn128-batch"
+version = "4.1.2"
+dependencies = [
+ "solana-bn254",
+ "solana-bn254-batch-syscall",
+ "solana-msg",
+ "solana-program-entrypoint",
+]
+
+[[package]]
 name = "solana-sbf-rust-alt-bn128-compression"
 version = "4.1.2"
 dependencies = [
@@ -9576,6 +9599,7 @@ dependencies = [
  "solana-blake3-hasher",
  "solana-bls12-381-syscall",
  "solana-bn254",
+ "solana-bn254-batch-syscall",
  "solana-clock",
  "solana-cpi",
  "solana-curve25519 4.0.0",

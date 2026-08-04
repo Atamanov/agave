@@ -1,0 +1,34 @@
+[package]
+name = "solana-bn254-groth16-batch"
+description = "Reference batched Groth16 verifier over the alt_bn128 batch syscalls"
+documentation = "https://docs.rs/solana-bn254-groth16-batch"
+version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+edition = { workspace = true }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+agave-unstable-api = []
+# exposes the trapdoor fixture prover in `test_utils` to dependent test
+# suites; never part of the verification API
+test-fixtures = ["dep:ark-std"]
+
+[dependencies]
+ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
+ark-ec = { version = "0.5", default-features = false }
+ark-ff = { version = "0.5", default-features = false }
+ark-std = { version = "0.5", default-features = false, optional = true }
+solana-bn254-batch-syscall = { workspace = true }
+solana-keccak-hasher = { workspace = true, features = ["sha3"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+ark-std = { version = "0.5", default-features = false }
+
+[lints]
+workspace = true
