@@ -1,5 +1,6 @@
 //! Alt_bn128 batch syscalls tests: `sol_alt_bn128_g1_msm`,
-//! `sol_alt_bn128_pairing_check`, `sol_alt_bn128_fr_lincomb`, and
+//! `sol_alt_bn128_pairing_check`, `sol_alt_bn128_pairing_map`,
+//! `sol_alt_bn128_fr_lincomb`, and
 //! `sol_alt_bn128_fr_batch_invert`.
 
 use {
@@ -7,6 +8,7 @@ use {
     solana_bn254_batch_syscall::{
         PodG1G2Pair, PodG1Point, PodScalar, Version, alt_bn128_fr_batch_invert,
         alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+        alt_bn128_pairing_map,
     },
     solana_msg::msg,
     solana_program_entrypoint::{custom_heap_default, custom_panic_default},
@@ -80,9 +82,18 @@ fn g1_msm_rejects_empty_input() {
 
 fn pairing_check_verdicts() {
     let true_pairs = hex(TRUE_PAIRS);
+    let mut gt_identity = [0u8; 384];
+    gt_identity[31] = 1;
     assert!(
         alt_bn128_pairing_check(Version::V0, &pairs(&true_pairs)).unwrap(),
         "known-good vector must verify"
+    );
+    assert_eq!(
+        alt_bn128_pairing_map(Version::V0, &pairs(&true_pairs))
+            .unwrap()
+            .0,
+        gt_identity,
+        "known-good product must return canonical GT identity"
     );
 
     // negate the first G1 point (multiply by r - 1): the verdict flips to false,
@@ -93,6 +104,13 @@ fn pairing_check_verdicts() {
     let mut false_pairs = true_pairs;
     false_pairs[..64].copy_from_slice(&negated);
     assert!(!alt_bn128_pairing_check(Version::V0, &pairs(&false_pairs)).unwrap());
+    assert_ne!(
+        alt_bn128_pairing_map(Version::V0, &pairs(&false_pairs))
+            .unwrap()
+            .0,
+        gt_identity,
+        "nonidentity product must remain distinguishable in canonical GT"
+    );
 }
 
 fn pairing_check_rejects_non_subgroup_g2() {

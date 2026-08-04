@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# End-to-end check that the two BN254 batch syscalls
-# (sol_alt_bn128_g1_msm, sol_alt_bn128_pairing_check) execute on a local
+# End-to-end check that the BN254 batch syscalls (including the canonical
+# post-final-exponentiation sol_alt_bn128_pairing_map) execute on a local
 # solana-test-validator built from this fork, with the
 # enable_alt_bn128_batch_syscalls feature active at genesis.
 #

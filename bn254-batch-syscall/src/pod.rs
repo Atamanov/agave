@@ -1,15 +1,15 @@
 use {
-    crate::encoding::{G1_BYTES, G2_BYTES, SCALAR_BYTES},
+    crate::encoding::{FQ12_BYTES, G1_BYTES, G2_BYTES, SCALAR_BYTES},
     bytemuck_derive::{Pod, Zeroable},
 };
 #[cfg(not(target_os = "solana"))]
 use {
     crate::{
-        encoding::{parse_fr, parse_g1, parse_g2, serialize_g1},
+        encoding::{parse_fq12, parse_fr, parse_g1, parse_g2, serialize_fq12, serialize_g1},
         validation::{AltBn128BatchError, validate_g1, validate_g2},
     },
-    ark_bn254::{Fr, G1Affine, G2Affine},
-    ark_ff::PrimeField,
+    ark_bn254::{Fq12, Fr, G1Affine, G2Affine},
+    ark_ff::{One, PrimeField},
 };
 
 /// G1 affine point: 64 big-endian bytes (x | y), all-zeros = infinity. The wire
@@ -42,6 +42,15 @@ pub struct PodG1G2Pair {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct PodPairingResult(pub [u8; 32]);
+
+/// Canonical wire representation of the post-final-exponentiation BN254
+/// pairing target.  Despite being an Fq12 value, this type is deliberately
+/// named GT: callers must not mistake it for a raw Miller-loop intermediate.
+/// Coefficient order is specified by `encoding::serialize_fq12` and never
+/// depends on an arithmetic backend's in-memory/Montgomery representation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(transparent)]
+pub struct PodGtElement(pub [u8; FQ12_BYTES]);
 
 #[cfg(not(target_os = "solana"))]
 impl PodG1Point {
@@ -93,6 +102,24 @@ impl From<&Fr> for PodScalar {
     }
 }
 
+#[cfg(not(target_os = "solana"))]
+impl PodGtElement {
+    pub fn to_fq12(&self) -> Result<Fq12, AltBn128BatchError> {
+        parse_fq12(&self.0)
+    }
+
+    pub fn identity() -> Self {
+        Self(serialize_fq12(&Fq12::one()))
+    }
+}
+
+#[cfg(not(target_os = "solana"))]
+impl From<&Fq12> for PodGtElement {
+    fn from(value: &Fq12) -> Self {
+        Self(serialize_fq12(value))
+    }
+}
+
 impl PodPairingResult {
     pub fn from_verdict(verdict: bool) -> Self {
         let mut word = [0u8; 32];
@@ -126,11 +153,11 @@ mod tests {
         assert_eq!(size_of::<PodScalar>(), SCALAR_BYTES);
         assert_eq!(size_of::<PodG1G2Pair>(), PAIR_BYTES);
         assert_eq!(size_of::<PodPairingResult>(), 32);
+        assert_eq!(size_of::<PodGtElement>(), FQ12_BYTES);
         assert_eq!(align_of::<PodG1G2Pair>(), 1);
         assert_eq!(offset_of!(PodG1G2Pair, g1), 0);
         assert_eq!(offset_of!(PodG1G2Pair, g2), G1_BYTES);
     }
-
     #[test]
     fn test_pair_cast_splits_bytes() {
         let mut bytes = [0u8; 2 * PAIR_BYTES];
@@ -165,5 +192,14 @@ mod tests {
         let mut out_of_range = [0u8; 32];
         out_of_range[31] = 2;
         assert!(!PodPairingResult(out_of_range).verdict());
+    }
+
+    #[test]
+    fn test_gt_identity_is_canonical_and_round_trips() {
+        let identity = PodGtElement::identity();
+        assert_eq!(identity.to_fq12().unwrap(), Fq12::one());
+        assert_eq!(identity.0[..31], [0u8; 31]);
+        assert_eq!(identity.0[31], 1);
+        assert_eq!(identity.0[32..], [0u8; FQ12_BYTES - 32]);
     }
 }

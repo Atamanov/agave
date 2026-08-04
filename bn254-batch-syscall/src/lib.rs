@@ -3,10 +3,10 @@
 
 pub use crate::{
     encoding::{
-        FR_MAX_ELEMS, G1_BYTES, G2_BYTES, MSM_MAX_POINTS, PAIR_BYTES, PAIRING_MAX_PAIRS,
-        SCALAR_BYTES,
+        FQ12_BYTES, FR_MAX_ELEMS, G1_BYTES, G2_BYTES, MSM_MAX_POINTS, PAIR_BYTES,
+        PAIRING_MAX_PAIRS, SCALAR_BYTES,
     },
-    pod::{PodG1G2Pair, PodG1Point, PodG2Point, PodPairingResult, PodScalar},
+    pod::{PodG1G2Pair, PodG1Point, PodG2Point, PodGtElement, PodPairingResult, PodScalar},
     validation::AltBn128BatchError,
 };
 // The wire encoding and the entry-point signatures are the same on both
@@ -14,12 +14,13 @@ pub use crate::{
 #[cfg(target_os = "solana")]
 pub use crate::syscalls::{
     alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+    alt_bn128_pairing_map,
 };
 #[cfg(not(target_os = "solana"))]
 pub use crate::{
     fr::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
     msm::alt_bn128_g1_msm,
-    pairing::alt_bn128_pairing_check,
+    pairing::{alt_bn128_pairing_check, alt_bn128_pairing_map},
 };
 
 pub(crate) mod encoding;

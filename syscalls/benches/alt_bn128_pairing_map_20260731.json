@@ -1,0 +1,49 @@
+{
+  "schema": "helios.bn254-pairing-map-native-benchmark.v1",
+  "date": "2026-07-31",
+  "source_base_commit": "248ed94accbbeadbd8d8b4c7ef2cf94d8aeb7a26",
+  "host": {
+    "os": "Darwin 25.4.0 arm64",
+    "cpu": "Apple M4 Max",
+    "rustc": "1.95.0 (59807616e 2026-04-14)"
+  },
+  "command": "cargo bench -p solana-syscalls --bench alt_bn128_batch --features agave-unstable-api -- '<benchmark name>'",
+  "criterion": {
+    "unit": "nanoseconds",
+    "statistics": "point estimate and 95% confidence interval upper bound from Criterion estimates.json",
+    "pairing_check": [
+      {"pairs": 1, "mean": 543147.112621549, "mean_ci_upper": 544260.9589947151},
+      {"pairs": 2, "mean": 733426.2056578543, "mean_ci_upper": 734950.4936429776},
+      {"pairs": 3, "mean": 948251.4291348169, "mean_ci_upper": 950763.147360779},
+      {"pairs": 4, "mean": 1171897.417731523, "mean_ci_upper": 1175736.8070690967},
+      {"pairs": 8, "mean": 2059245.5488, "mean_ci_upper": 2065718.722360001},
+      {"pairs": 16, "mean": 3846732.176923077, "mean_ci_upper": 3853168.553865384}
+    ],
+    "pairing_map": [
+      {"pairs": 1, "mean": 532003.9551977043, "mean_ci_upper": 533293.9262158463},
+      {"pairs": 2, "mean": 741478.2911642973, "mean_ci_upper": 742994.4772657454},
+      {"pairs": 3, "mean": 946817.8256081694, "mean_ci_upper": 949245.7882542948},
+      {"pairs": 4, "mean": 1152099.0710776476, "mean_ci_upper": 1154689.6642934673},
+      {"pairs": 8, "mean": 2048347.1467999995, "mean_ci_upper": 2053345.647389999},
+      {"pairs": 16, "mean": 3871502.666923076, "mean_ci_upper": 3887006.0653846143}
+    ]
+  },
+  "experimental_runtime_schedule": {
+    "formula_cu": "17246 + pairs * (5741 + 3595)",
+    "nanoseconds_per_cu_used_only_for_local_comparison": 33,
+    "charged": [
+      {"pairs": 1, "cu": 26582, "equivalent_ns": 877206},
+      {"pairs": 2, "cu": 35918, "equivalent_ns": 1185294},
+      {"pairs": 3, "cu": 45254, "equivalent_ns": 1493382},
+      {"pairs": 4, "cu": 54590, "equivalent_ns": 1801470},
+      {"pairs": 8, "cu": 91934, "equivalent_ns": 3033822},
+      {"pairs": 16, "cu": 166622, "equivalent_ns": 5498526}
+    ],
+    "qualification": "The configured charge exceeds the observed pairing-map mean CI upper bound at every listed size on this one host. This is experimental evidence, not validator-fleet or release calibration."
+  },
+  "sbf_smoke_binary": {
+    "path": "programs/sbf/target/deploy/solana_sbf_rust_alt_bn128_batch.so",
+    "sha256": "9c85000fd0aae763cd86022caa6e4f5c59e1d562446b3ab7485a03e928d9932e",
+    "behavior": "Calls the map on identity and nonidentity products and consumes all 384 bytes in verdict assertions."
+  }
+}

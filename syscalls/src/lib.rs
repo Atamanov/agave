@@ -524,6 +524,12 @@ pub fn create_program_runtime_environment(
     register_feature_gated_function!(
         result,
         enable_alt_bn128_batch_syscalls,
+        "sol_alt_bn128_pairing_map",
+        SyscallAltBn128PairingMap
+    )?;
+    register_feature_gated_function!(
+        result,
+        enable_alt_bn128_batch_syscalls,
         "sol_alt_bn128_fr_lincomb",
         SyscallAltBn128FrLincomb
     )?;
@@ -756,6 +762,68 @@ declare_builtin_function!(
         _arg5: u64,
     ) -> Result<u64, Error> {
         Err(SyscallError::Abort.into())
+    }
+);
+
+declare_builtin_function!(
+    /// BN254 pairing map returning the post-final-exponentiation target-group
+    /// element as twelve canonical 32-byte big-endian Fq coefficients.
+    ///
+    /// Input validation and limits are identical to
+    /// `sol_alt_bn128_pairing_check`.  This does not expose a Miller-loop
+    /// intermediate or backend-native Montgomery limbs.  Callers may compose
+    /// the authenticated result inside one verifier invocation, but must not
+    /// treat arbitrary caller-supplied Fq12 bytes as syscall-proven GT values.
+    SyscallAltBn128PairingMap,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        num_pairs: u64,
+        pairs_addr: u64,
+        result_addr: u64,
+        _arg4: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{
+            PodG1G2Pair, PodGtElement, Version, alt_bn128_pairing_map,
+        };
+
+        let check_aligned = invoke_context.get_check_aligned();
+        let execution_cost = invoke_context.get_execution_cost();
+        // Pairing check and pairing map share validation, preparation, Miller
+        // loop, and final exponentiation.  This experimental path reuses the
+        // existing pairing schedule.  Fresh local map-vs-check measurements
+        // show that schedule exceeds observed time at n={1,2,3,4,8,16} on the
+        // study host only; this is not release or validator-fleet calibration.
+        let cost = execution_cost
+            .alt_bn128_pairing_check_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_pairing_check_per_pair_cost
+                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
+                    .saturating_mul(num_pairs),
+            );
+        invoke_context.compute_meter.consume_checked(cost)?;
+
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let pairs = translate_slice::<PodG1G2Pair>(
+            memory_mapping,
+            pairs_addr,
+            num_pairs,
+            check_aligned,
+        )?;
+
+        match alt_bn128_pairing_map(Version::V0, pairs) {
+            Ok(result) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: &mut PodGtElement = map(result_addr)?;
+                );
+                *result_ref_mut = result;
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
     }
 );
 
@@ -8760,6 +8828,64 @@ mod tests {
                 Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
             );
         }
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_pairing_map_writes_canonical_gt_at_exact_charge() {
+        use solana_bn254_batch_syscall::PodGtElement;
+
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        let pairs = bn254_hex(BN254_VALID_PAIRS);
+        let pairs_va = 0x100000000;
+        let result_va = 0x200000000;
+        let mut result_buf = [0xaau8; 384];
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const pairs[..], pairs_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(&invoke_context, 2));
+
+        let code = SyscallAltBn128PairingMap::rust(
+            &mut invoke_context,
+            2,
+            pairs_va,
+            result_va,
+            0,
+            0,
+        )
+        .unwrap();
+        assert_eq!(code, SUCCESS);
+        assert_eq!(result_buf, PodGtElement::identity().0);
+
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(&invoke_context, 2).saturating_sub(1));
+        let result = SyscallAltBn128PairingMap::rust(
+            &mut invoke_context,
+            2,
+            pairs_va,
+            result_va,
+            0,
+            0,
+        );
+        assert_matches!(
+            result,
+            Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
+        );
     }
 
     #[test]

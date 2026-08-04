@@ -1,7 +1,7 @@
 #[cfg(not(target_os = "solana"))]
 use {
     crate::validation::AltBn128BatchError,
-    ark_bn254::{Fq, Fq2, Fr, G1Affine, G2Affine},
+    ark_bn254::{Fq, Fq2, Fq6, Fq12, Fr, G1Affine, G2Affine},
     ark_ec::AffineRepr,
     ark_ff::{BigInt, PrimeField, Zero},
 };
@@ -13,6 +13,9 @@ pub const G1_BYTES: usize = 64;
 pub const G2_BYTES: usize = 128;
 pub const PAIR_BYTES: usize = G1_BYTES + G2_BYTES;
 pub const SCALAR_BYTES: usize = 32;
+/// A canonical BN254 extension-field element: twelve base-field coefficients,
+/// each encoded as a 32-byte big-endian canonical integer.
+pub const FQ12_BYTES: usize = 12 * 32;
 
 pub const MSM_MAX_POINTS: usize = 2048;
 pub const PAIRING_MAX_PAIRS: usize = 256;
@@ -99,6 +102,60 @@ pub(crate) fn serialize_g1(point: &G1Affine) -> [u8; G1_BYTES] {
     out
 }
 
+/// Serialize an Fq12 value without exposing arkworks' Montgomery limbs or
+/// in-memory layout.  The coefficient order is the tower order
+///
+/// `c0.c0.c0, c0.c0.c1, c0.c1.c0, c0.c1.c1, c0.c2.c0, c0.c2.c1,
+///  c1.c0.c0, c1.c0.c1, c1.c1.c0, c1.c1.c1, c1.c2.c0, c1.c2.c1`,
+///
+/// where `Fq12 = c0 + c1*w`, every `Fq6 = c0 + c1*v + c2*v^2`, and every
+/// `Fq2 = c0 + c1*u`.  Each Fq coefficient is canonical big-endian.
+#[cfg(not(target_os = "solana"))]
+pub(crate) fn serialize_fq12(value: &Fq12) -> [u8; FQ12_BYTES] {
+    let coefficients = [
+        &value.c0.c0.c0,
+        &value.c0.c0.c1,
+        &value.c0.c1.c0,
+        &value.c0.c1.c1,
+        &value.c0.c2.c0,
+        &value.c0.c2.c1,
+        &value.c1.c0.c0,
+        &value.c1.c0.c1,
+        &value.c1.c1.c0,
+        &value.c1.c1.c1,
+        &value.c1.c2.c0,
+        &value.c1.c2.c1,
+    ];
+    let mut out = [0u8; FQ12_BYTES];
+    for (i, coefficient) in coefficients.into_iter().enumerate() {
+        fq_to_be(coefficient, &mut out[i * FQ_BYTES..(i + 1) * FQ_BYTES]);
+    }
+    out
+}
+
+/// Parse the stable Fq12 wire format used by [`serialize_fq12`].  Rejecting
+/// coefficients greater than or equal to p prevents alternate encodings of a
+/// target-group element.
+#[cfg(not(target_os = "solana"))]
+pub(crate) fn parse_fq12(bytes: &[u8]) -> Result<Fq12, AltBn128BatchError> {
+    if bytes.len() != FQ12_BYTES {
+        return Err(AltBn128BatchError::InvalidLength);
+    }
+    let coefficient = |i: usize| fq_from_be(&bytes[i * FQ_BYTES..(i + 1) * FQ_BYTES]);
+    Ok(Fq12::new(
+        Fq6::new(
+            Fq2::new(coefficient(0)?, coefficient(1)?),
+            Fq2::new(coefficient(2)?, coefficient(3)?),
+            Fq2::new(coefficient(4)?, coefficient(5)?),
+        ),
+        Fq6::new(
+            Fq2::new(coefficient(6)?, coefficient(7)?),
+            Fq2::new(coefficient(8)?, coefficient(9)?),
+            Fq2::new(coefficient(10)?, coefficient(11)?),
+        ),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use {
@@ -107,6 +164,7 @@ mod tests {
             be_add_one, fq_modulus_be, g1_bytes, g2_bytes, random_g1, random_g2, rng,
         },
         ark_ec::AffineRepr,
+        ark_ff::{BigInteger, UniformRand},
     };
 
     #[test]
@@ -161,5 +219,34 @@ mod tests {
         bytes[..32].copy_from_slice(&modulus);
         bytes[32..].copy_from_slice(&modulus);
         assert_eq!(parse_g1(&bytes), Err(AltBn128BatchError::NonCanonical));
+    }
+
+    #[test]
+    fn test_fq12_canonical_round_trip_and_coefficient_order() {
+        let mut rng = rng();
+        for _ in 0..16 {
+            let value = Fq12::rand(&mut rng);
+            let encoded = serialize_fq12(&value);
+            assert_eq!(parse_fq12(&encoded).unwrap(), value);
+            assert_eq!(&encoded[0..32], value.c0.c0.c0.into_bigint().to_bytes_be());
+            assert_eq!(
+                &encoded[11 * 32..12 * 32],
+                value.c1.c2.c1.into_bigint().to_bytes_be()
+            );
+        }
+    }
+
+    #[test]
+    fn test_fq12_rejects_noncanonical_coefficient_in_every_slot() {
+        let modulus = fq_modulus_be();
+        for slot in 0..12 {
+            let mut encoded = serialize_fq12(&Fq12::from(7u64));
+            encoded[slot * 32..(slot + 1) * 32].copy_from_slice(&modulus);
+            assert_eq!(
+                parse_fq12(&encoded),
+                Err(AltBn128BatchError::NonCanonical),
+                "slot {slot}"
+            );
+        }
     }
 }

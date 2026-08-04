@@ -10,7 +10,7 @@
 use {
     crate::{
         Version,
-        pod::{PodG1G2Pair, PodG1Point, PodPairingResult, PodScalar},
+        pod::{PodG1G2Pair, PodG1Point, PodGtElement, PodPairingResult, PodScalar},
         validation::{AltBn128BatchError, validate_equal_lengths},
     },
     solana_define_syscall::define_syscall,
@@ -19,6 +19,7 @@ use {
 // Declared here until the published solana-define-syscall ships them.
 define_syscall!(fn sol_alt_bn128_g1_msm(num_points: u64, points_addr: *const u8, scalars_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_pairing_check(num_pairs: u64, pairs_addr: *const u8, result_addr: *mut u8) -> u64);
+define_syscall!(fn sol_alt_bn128_pairing_map(num_pairs: u64, pairs_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_fr_lincomb(num_elems: u64, a_addr: *const u8, b_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_fr_batch_invert(num_elems: u64, a_addr: *const u8, result_addr: *mut u8) -> u64);
 
@@ -55,6 +56,22 @@ pub fn alt_bn128_pairing_check(
     };
     check(code)?;
     Ok(result.verdict())
+}
+
+pub fn alt_bn128_pairing_map(
+    _version: Version,
+    pairs: &[PodG1G2Pair],
+) -> Result<PodGtElement, AltBn128BatchError> {
+    let mut result = PodGtElement([0u8; crate::encoding::FQ12_BYTES]);
+    let code = unsafe {
+        sol_alt_bn128_pairing_map(
+            pairs.len() as u64,
+            pairs.as_ptr().cast(),
+            result.0.as_mut_ptr(),
+        )
+    };
+    check(code)?;
+    Ok(result)
 }
 
 pub fn alt_bn128_fr_lincomb(

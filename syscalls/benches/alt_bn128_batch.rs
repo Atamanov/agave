@@ -14,7 +14,7 @@ use {
     criterion::{BenchmarkId, Criterion, criterion_group, criterion_main},
     solana_bn254_batch_syscall::{
         Version, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
-        alt_bn128_pairing_check,
+        alt_bn128_pairing_check, alt_bn128_pairing_map,
     },
 };
 
@@ -257,6 +257,35 @@ fn bench_pairing_check(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_pairing_map(c: &mut Criterion) {
+    const NS: &[usize] = &[1, 2, 3, 4, 8, 16];
+    const POOL: usize = 64;
+
+    let mut group = c.benchmark_group("BN254 Pairing map");
+    for &n in NS {
+        let pool = random_pairing_check_be(POOL, n);
+        for pairs in &pool {
+            let gt = alt_bn128_pairing_map(Version::V0, bytemuck::cast_slice(pairs))
+                .expect("valid fixture");
+            assert_eq!(
+                gt == solana_bn254_batch_syscall::PodGtElement::identity(),
+                n >= 2,
+                "telescoping inputs must map to identity"
+            );
+        }
+        let mut i = 0usize;
+        group.bench_with_input(BenchmarkId::new("BE", n), &n, |b, _| {
+            b.iter(|| {
+                let r =
+                    alt_bn128_pairing_map(Version::V0, bytemuck::cast_slice(&pool[i])).unwrap();
+                i = (i + 1) % POOL;
+                r
+            })
+        });
+    }
+    group.finish();
+}
+
 // prices the standalone `alt_bn128_g2_subgroup_check_cost` component
 fn bench_g2_subgroup_check(c: &mut Criterion) {
     const POOL: usize = 1024;
@@ -281,6 +310,7 @@ criterion_group!(
     benches,
     bench_g1_msm,
     bench_pairing_check,
+    bench_pairing_map,
     bench_g2_subgroup_check,
     bench_fr_lincomb,
     bench_fr_batch_invert,

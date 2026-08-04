@@ -1,30 +1,21 @@
 use {
     crate::{
-        Version, encoding::PAIRING_MAX_PAIRS, pod::PodG1G2Pair, validation::AltBn128BatchError,
+        Version,
+        encoding::PAIRING_MAX_PAIRS,
+        pod::{PodG1G2Pair, PodGtElement},
+        validation::AltBn128BatchError,
     },
     ark_bn254::{Bn254, Fq12},
     ark_ec::{AffineRepr, pairing::Pairing},
     ark_ff::One,
 };
 
-/// Boolean multi-pairing check: true iff the product of e(G1_i, G2_i) is the
-/// identity in GT.
-///
-/// Each `PodG1G2Pair` is a validated G1 point then its G2 partner, big-endian
-/// and byte-for-byte the input encoding of the existing `sol_alt_bn128_group_op`
-/// pairing. Every point is validated (canonical coordinates, on-curve, and for
-/// G2 subgroup membership) before any arithmetic; a pair with an infinity member
-/// contributes the identity factor and is skipped. G2 preparation, the Miller
-/// loop, the final exponentiation, and the identity compare all happen
-/// internally: no prepared point and no GT/Fq12 value crosses this API in
-/// either direction. Pair width is fixed by the type, so a malformed length
-/// faults at the syscall boundary, never here.
-pub fn alt_bn128_pairing_check(
-    _version: Version,
-    pairs: &[PodG1G2Pair],
-) -> Result<bool, AltBn128BatchError> {
+// Common validated pairing core. Every declared point is checked for canonical
+// coordinates and curve membership, including the partner of an infinity;
+// every G2 is subgroup checked. Infinity pairs contribute the identity. The
+// Miller loop and exactly one final exponentiation remain inside this helper.
+fn multi_pairing_gt(pairs: &[PodG1G2Pair]) -> Result<Fq12, AltBn128BatchError> {
     if pairs.is_empty() {
-        // an empty product is vacuously 1; reject rather than accept
         return Err(AltBn128BatchError::ZeroInput);
     }
     if pairs.len() > PAIRING_MAX_PAIRS {
@@ -36,7 +27,7 @@ pub fn alt_bn128_pairing_check(
     for pair in pairs {
         let g1 = pair.g1.to_affine()?;
         let g2 = pair.g2.to_affine()?;
-        // both members are validated above even when the pair is skipped
+        // Validate both members even when the identity contribution is skipped.
         if g1.is_zero() || g2.is_zero() {
             continue;
         }
@@ -44,12 +35,36 @@ pub fn alt_bn128_pairing_check(
         g2s.push(g2);
     }
     if g1s.is_empty() {
-        return Ok(true);
+        return Ok(Fq12::one());
     }
 
-    // arkworks' multi_pairing: one shared Miller loop over prepared lines and a
-    // single final exponentiation, the reference batch pairing-product primitive.
-    Ok(Bn254::multi_pairing(g1s, g2s).0 == Fq12::one())
+    // One shared Miller loop followed by exactly one final exponentiation.
+    Ok(Bn254::multi_pairing(g1s, g2s).0)
+}
+
+/// Return the canonical post-final-exponentiation pairing product in GT.
+///
+/// This is intentionally not a raw Miller-loop Fq12 value: such an input could
+/// be forged and cancelled by a caller, and its byte layout would expose
+/// backend internals.  The result is twelve canonical big-endian Fq
+/// coefficients in the stable tower order documented by `PodGtElement`. Every
+/// point is validated before arithmetic; zero pairs is rejected and infinity
+/// pairs contribute the identity.
+pub fn alt_bn128_pairing_map(
+    _version: Version,
+    pairs: &[PodG1G2Pair],
+) -> Result<PodGtElement, AltBn128BatchError> {
+    Ok(PodGtElement::from(&multi_pairing_gt(pairs)?))
+}
+
+/// Boolean multi-pairing check: true iff the validated product of
+/// `e(G1_i, G2_i)` is the identity in GT. No prepared point or GT value crosses
+/// this boolean API; zero pairs is rejected rather than accepted vacuously.
+pub fn alt_bn128_pairing_check(
+    _version: Version,
+    pairs: &[PodG1G2Pair],
+) -> Result<bool, AltBn128BatchError> {
+    Ok(multi_pairing_gt(pairs)? == Fq12::one())
 }
 
 #[cfg(test)]
@@ -78,6 +93,10 @@ mod tests {
         alt_bn128_pairing_check(Version::V0, bytemuck::cast_slice(pairs))
     }
 
+    fn map(pairs: &[u8]) -> Result<PodGtElement, AltBn128BatchError> {
+        alt_bn128_pairing_map(Version::V0, bytemuck::cast_slice(pairs))
+    }
+
     #[test]
     fn test_pairing_check_known_vector() {
         let pairs = decode_hex(TRUE_PAIRS_HEX);
@@ -87,6 +106,41 @@ mod tests {
         let mut corrupted = pairs.clone();
         corrupted[..G1_BYTES].copy_from_slice(&g1_bytes(&-g1));
         assert_eq!(check(&corrupted), Ok(false));
+    }
+
+    #[test]
+    fn test_pairing_map_known_vector_and_false_product() {
+        let pairs = decode_hex(TRUE_PAIRS_HEX);
+        assert_eq!(map(&pairs), Ok(PodGtElement::identity()));
+
+        let g1 = parse_g1(&pairs[..G1_BYTES]).unwrap();
+        let mut corrupted = pairs;
+        corrupted[..G1_BYTES].copy_from_slice(&g1_bytes(&-g1));
+        let result = map(&corrupted).unwrap();
+        assert_ne!(result, PodGtElement::identity());
+        assert_eq!(
+            result.to_fq12().unwrap(),
+            multi_pairing_gt(bytemuck::cast_slice(&corrupted)).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_pairing_map_and_boolean_check_are_exactly_consistent() {
+        let mut rng = rng();
+        for n in [2usize, 3, 4, 8, 16] {
+            for corrupt in [false, true] {
+                let mut pairs = telescoping_pairs(&mut rng, n);
+                if corrupt {
+                    let g1 = parse_g1(&pairs[..G1_BYTES]).unwrap();
+                    pairs[..G1_BYTES].copy_from_slice(&g1_bytes(&-g1));
+                }
+                assert_eq!(
+                    map(&pairs).unwrap() == PodGtElement::identity(),
+                    check(&pairs).unwrap(),
+                    "n = {n}, corrupt = {corrupt}"
+                );
+            }
+        }
     }
 
     #[test]
