@@ -58,6 +58,13 @@ use {
     thiserror::Error as ThisError,
 };
 
+#[cfg(all(
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+pub mod bn254_registry;
 mod cpi;
 mod logging;
 mod mem_ops;
@@ -532,6 +539,32 @@ pub fn create_program_runtime_environment(
         "sol_alt_bn128_pairing_map",
         SyscallAltBn128PairingMap
     )?;
+    #[cfg(all(
+        any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+        not(feature = "backend-b1-arkworks"),
+        not(feature = "backend-b2-arkworks-optimized"),
+        not(feature = "backend-b3-mcl")
+    ))]
+    {
+        register_feature_gated_function!(
+            result,
+            enable_alt_bn128_batch_syscalls,
+            "sol_alt_bn128_vk_registry_init",
+            SyscallAltBn128VkRegistryInit
+        )?;
+        register_feature_gated_function!(
+            result,
+            enable_alt_bn128_batch_syscalls,
+            "sol_alt_bn128_pairing_check_registered",
+            SyscallAltBn128PairingCheckRegistered
+        )?;
+        register_feature_gated_function!(
+            result,
+            enable_alt_bn128_batch_syscalls,
+            "sol_alt_bn128_trusted_gt_multiexp",
+            SyscallAltBn128TrustedGtMultiexp
+        )?;
+    }
     register_feature_gated_function!(
         result,
         enable_alt_bn128_batch_syscalls,
@@ -2954,7 +2987,7 @@ declare_builtin_function!(
     /// element as twelve canonical 32-byte big-endian Fq coefficients.
     ///
     /// Validation matches `sol_alt_bn128_pairing_check`, but this map accepts
-    /// at most 16 pairs. It does not expose Miller-loop or native field data.
+    /// at most 18 pairs. It does not expose Miller-loop or native field data.
     SyscallAltBn128PairingMap,
     fn rust(
         invoke_context: &mut InvokeContext<'_, '_>,
@@ -3012,6 +3045,348 @@ declare_builtin_function!(
             }
             Err(_) => Ok(1),
         }
+    }
+);
+
+#[cfg(all(
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+declare_builtin_function!(
+    /// Initialize and freeze a current-program-owned B5 VK registry PDA.
+    SyscallAltBn128VkRegistryInit,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        packed_shape: u64,
+        g2_sources_addr: u64,
+        gt_sources_addr: u64,
+        keyset_digest_addr: u64,
+        registry_data_addr: u64,
+    ) -> Result<u64, Error> {
+        use {
+            crate::bn254_registry::{
+                REGISTRY_MAX_G2_ENTRIES, REGISTRY_MAX_GT_ENTRIES,
+                prepare_registry_account_bytes, registry_account_len,
+                unpack_registry_init_shape,
+            },
+            solana_bn254_batch_syscall::{PodG1G2Pair, PodG2Point},
+        };
+
+        let Some(shape) = unpack_registry_init_shape(packed_shape) else {
+            return Ok(1);
+        };
+        let g2_count = usize::from(shape.g2_count);
+        let gt_count = usize::from(shape.gt_count);
+        if g2_count > REGISTRY_MAX_G2_ENTRIES
+            || gt_count > REGISTRY_MAX_GT_ENTRIES
+            || g2_count.saturating_add(gt_count) == 0
+        {
+            return Ok(1);
+        }
+        let execution_cost = invoke_context.get_execution_cost();
+        let g2_cost = execution_cost
+            .alt_bn128_pairing_check_per_pair_cost
+            .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
+            .saturating_mul(shape.g2_count.into());
+        let gt_cost = execution_cost
+            .alt_bn128_pairing_check_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_pairing_check_per_pair_cost
+                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
+                    .saturating_mul(shape.gt_count.into()),
+            );
+        invoke_context
+            .compute_meter
+            .consume_checked(g2_cost.saturating_add(gt_cost))?;
+
+        let expected_len = registry_account_len(g2_count, gt_count);
+        let metadata = invoke_context
+            .memory_contexts
+            .memory_context_abi_v1()?
+            .accounts_metadata
+            .get(usize::from(shape.account_index))
+            .ok_or(SyscallError::InvalidLength)?;
+        if metadata.vm_data_addr != registry_data_addr || metadata.original_data_len != expected_len {
+            return Ok(1);
+        }
+
+        let consumer = invoke_context
+            .transaction_context
+            .get_current_instruction_context()?
+            .get_program_key()?
+            .to_bytes();
+        let check_aligned = invoke_context.get_check_aligned();
+        let (g2_sources, gt_sources, keyset_digest) = {
+            let memory_mapping = invoke_context.memory_contexts.memory_mapping()?;
+            let g2_sources: Vec<PodG2Point> = if shape.g2_count == 0 {
+                Vec::new()
+            } else {
+                translate_slice::<PodG2Point>(
+                    memory_mapping,
+                    g2_sources_addr,
+                    shape.g2_count.into(),
+                    check_aligned,
+                )?
+                .to_vec()
+            };
+            let gt_sources: Vec<PodG1G2Pair> = if shape.gt_count == 0 {
+                Vec::new()
+            } else {
+                translate_slice::<PodG1G2Pair>(
+                    memory_mapping,
+                    gt_sources_addr,
+                    shape.gt_count.into(),
+                    check_aligned,
+                )?
+                .to_vec()
+            };
+            let digest = translate_slice::<u8>(
+                memory_mapping,
+                keyset_digest_addr,
+                32,
+                check_aligned,
+            )?;
+            let digest: [u8; 32] = digest.try_into().map_err(|_| SyscallError::InvalidLength)?;
+            (g2_sources, gt_sources, digest)
+        };
+        let Ok(prepared) = prepare_registry_account_bytes(
+            consumer,
+            keyset_digest,
+            &g2_sources,
+            &gt_sources,
+        ) else {
+            return Ok(1);
+        };
+        let instruction = invoke_context
+            .transaction_context
+            .get_current_instruction_context()?;
+        let Ok(account) = instruction.try_borrow_instruction_account(shape.account_index) else {
+            return Ok(1);
+        };
+        if !account.is_writable()
+            || account.get_owner().to_bytes() != consumer
+            || *account.get_key() != prepared.key
+            || account.get_data().len() != prepared.data.len()
+            || account.get_data().iter().any(|byte| *byte != 0)
+        {
+            return Ok(1);
+        }
+        drop(account);
+
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        translate_mut!(
+            memory_mapping,
+            check_aligned,
+            let destination: &mut [u8] = map(registry_data_addr, expected_len as u64)?;
+        );
+        if destination.iter().any(|byte| *byte != 0) {
+            return Ok(1);
+        }
+        destination.copy_from_slice(&prepared.data);
+        Ok(SUCCESS)
+    }
+);
+
+#[cfg(all(
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+declare_builtin_function!(
+    /// Pair ordinary operands with authenticated prepared-G2 registry entries.
+    SyscallAltBn128PairingCheckRegistered,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        packed_shape: u64,
+        full_addr: u64,
+        registered_addr: u64,
+        result_addr: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use {
+            crate::bn254_registry::{
+                REGISTRY_MAX_G2_ENTRIES, REGISTRY_MAX_REGISTERED_PAIRS, RegistryAccountView,
+                pairing_check_registry_account, unpack_registered_pairing_shape,
+            },
+            solana_bn254_batch_syscall::{
+                PodG1G2Pair, PodG1RegisteredG2Pair, PodPairingResult,
+            },
+        };
+        let Some(shape) = unpack_registered_pairing_shape(packed_shape) else {
+            return Ok(1);
+        };
+        let total = usize::from(shape.full_count)
+            .checked_add(usize::from(shape.registered_count))
+            .ok_or(SyscallError::ArithmeticOverflow)?;
+        if total == 0
+            || total > REGISTRY_MAX_REGISTERED_PAIRS
+            || usize::from(shape.registered_count) > REGISTRY_MAX_G2_ENTRIES
+        {
+            return Ok(1);
+        }
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = execution_cost
+            .alt_bn128_pairing_check_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_pairing_check_per_pair_cost
+                    .saturating_mul(total as u64),
+            )
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_g2_subgroup_check_cost
+                    .saturating_mul(shape.full_count.into()),
+            );
+        invoke_context.compute_meter.consume_checked(cost)?;
+        let check_aligned = invoke_context.get_check_aligned();
+        let (full, registered) = {
+            let memory_mapping = invoke_context.memory_contexts.memory_mapping()?;
+            let full: Vec<PodG1G2Pair> = if shape.full_count == 0 {
+                Vec::new()
+            } else {
+                translate_slice::<PodG1G2Pair>(
+                    memory_mapping,
+                    full_addr,
+                    shape.full_count.into(),
+                    check_aligned,
+                )?
+                .to_vec()
+            };
+            let registered: Vec<PodG1RegisteredG2Pair> = if shape.registered_count == 0 {
+                Vec::new()
+            } else {
+                translate_slice::<PodG1RegisteredG2Pair>(
+                    memory_mapping,
+                    registered_addr,
+                    shape.registered_count.into(),
+                    check_aligned,
+                )?
+                .to_vec()
+            };
+            (full, registered)
+        };
+        let consumer = invoke_context
+            .transaction_context
+            .get_current_instruction_context()?
+            .get_program_key()?
+            .to_bytes();
+        let instruction = invoke_context
+            .transaction_context
+            .get_current_instruction_context()?;
+        let Ok(account) = instruction.try_borrow_instruction_account(shape.account_index) else {
+            return Ok(1);
+        };
+        let Ok(verdict) = pairing_check_registry_account(
+            consumer,
+            RegistryAccountView {
+                key: *account.get_key(),
+                owner: *account.get_owner(),
+                data: account.get_data(),
+                is_writable: account.is_writable(),
+            },
+            &full,
+            &registered,
+        ) else {
+            return Ok(1);
+        };
+        drop(account);
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        translate_mut!(
+            memory_mapping,
+            check_aligned,
+            let result: &mut PodPairingResult = map(result_addr)?;
+        );
+        *result = PodPairingResult::from_verdict(verdict);
+        Ok(SUCCESS)
+    }
+);
+
+#[cfg(all(
+    any(feature = "backend-b4-helios", feature = "backend-b5-helios-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+declare_builtin_function!(
+    /// Resolve authenticated GT targets and execute their multi-exponentiation.
+    SyscallAltBn128TrustedGtMultiexp,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        packed_shape: u64,
+        operands_addr: u64,
+        result_addr: u64,
+        _arg4: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use {
+            crate::bn254_registry::{
+                REGISTRY_MAX_GT_ENTRIES, RegistryAccountView,
+                trusted_gt_multiexp_registry_account, unpack_gt_multiexp_shape,
+            },
+            solana_bn254_batch_syscall::{PodGtElement, PodTrustedGtExponent},
+        };
+        let Some((target_count, account_index)) = unpack_gt_multiexp_shape(packed_shape) else {
+            return Ok(1);
+        };
+        if target_count == 0 || usize::from(target_count) > REGISTRY_MAX_GT_ENTRIES {
+            return Ok(1);
+        }
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = execution_cost
+            .alt_bn128_pairing_check_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_pairing_check_per_pair_cost
+                    .saturating_mul(target_count.into()),
+            );
+        invoke_context.compute_meter.consume_checked(cost)?;
+        let check_aligned = invoke_context.get_check_aligned();
+        let operands = {
+            let memory_mapping = invoke_context.memory_contexts.memory_mapping()?;
+            translate_slice::<PodTrustedGtExponent>(
+                memory_mapping,
+                operands_addr,
+                target_count.into(),
+                check_aligned,
+            )?
+            .to_vec()
+        };
+        let consumer = invoke_context
+            .transaction_context
+            .get_current_instruction_context()?
+            .get_program_key()?
+            .to_bytes();
+        let instruction = invoke_context
+            .transaction_context
+            .get_current_instruction_context()?;
+        let Ok(account) = instruction.try_borrow_instruction_account(account_index) else {
+            return Ok(1);
+        };
+        let Ok(target) = trusted_gt_multiexp_registry_account(
+            consumer,
+            RegistryAccountView {
+                key: *account.get_key(),
+                owner: *account.get_owner(),
+                data: account.get_data(),
+                is_writable: account.is_writable(),
+            },
+            &operands,
+        ) else {
+            return Ok(1);
+        };
+        drop(account);
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        translate_mut!(
+            memory_mapping,
+            check_aligned,
+            let result: &mut PodGtElement = map(result_addr)?;
+        );
+        *result = target;
+        Ok(SUCCESS)
     }
 );
 
@@ -9349,6 +9724,7 @@ mod tests {
             (4, 54_590),
             (8, 91_934),
             (16, 166_622),
+            (18, 185_294),
         ] {
             assert_eq!(pairing_check_cost(&invoke_context, pairs), expected);
         }
@@ -9967,6 +10343,74 @@ mod tests {
             result,
             Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded
         );
+    }
+
+    #[test]
+    fn test_syscall_alt_bn128_pairing_map_accepts_18_and_rejects_19_before_translation() {
+        use solana_bn254_batch_syscall::{PodG1G2Pair, PodGtElement};
+
+        assert_eq!(PAIRING_MAP_MAX_PAIRS, 18);
+        let config = Config::default();
+        prepare_mockup!(invoke_context, program_id, bpf_loader::id());
+
+        let input = vec![0u8; PAIRING_MAP_MAX_PAIRS * size_of::<PodG1G2Pair>()];
+        let pairs_va = 0x100000000;
+        let result_va = 0x200000000;
+        let mut result_buf = [0xaau8; size_of::<PodGtElement>()];
+        let memory_mapping = unsafe {
+            MemoryMapping::new(
+                vec![
+                    MemoryRegion::new(&raw const input[..], pairs_va),
+                    MemoryRegion::new(&raw mut result_buf[..], result_va),
+                ],
+                &config,
+                SBPFVersion::V3,
+            )
+            .unwrap()
+        };
+        invoke_context
+            .memory_contexts
+            .mock_set_mapping_abi_v1(memory_mapping);
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(
+                &invoke_context,
+                PAIRING_MAP_MAX_PAIRS as u64,
+            ));
+        assert_eq!(
+            SyscallAltBn128PairingMap::rust(
+                &mut invoke_context,
+                PAIRING_MAP_MAX_PAIRS as u64,
+                pairs_va,
+                result_va,
+                0,
+                0,
+            )
+            .unwrap(),
+            SUCCESS
+        );
+        assert_eq!(result_buf, PodGtElement::identity().0);
+        assert_eq!(invoke_context.get_remaining(), 0);
+
+        result_buf.fill(0xaa);
+        let over_cap = PAIRING_MAP_MAX_PAIRS as u64 + 1;
+        invoke_context
+            .compute_meter
+            .mock_set_remaining(pairing_check_cost(&invoke_context, over_cap));
+        assert_eq!(
+            SyscallAltBn128PairingMap::rust(
+                &mut invoke_context,
+                over_cap,
+                u64::MAX,
+                result_va,
+                0,
+                0,
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(result_buf, [0xaau8; size_of::<PodGtElement>()]);
+        assert_eq!(invoke_context.get_remaining(), 0);
     }
 
     #[test]

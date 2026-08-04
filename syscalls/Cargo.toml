@@ -17,6 +17,7 @@ features = ["agave-unstable-api", "backend-b1-arkworks"]
 [features]
 default = ["metrics", "backend-b1-arkworks"]
 agave-unstable-api = ["solana-bn254-batch-syscall/agave-unstable-api"]
+research-observer = ["solana-bn254-batch-syscall/research-observer"]
 backend-b1-arkworks = ["solana-bn254-batch-syscall/backend-b1-arkworks"]
 backend-b2-arkworks-optimized = ["solana-bn254-batch-syscall/backend-b2-arkworks-optimized"]
 backend-b3-mcl = ["solana-bn254-batch-syscall/backend-b3-mcl"]
@@ -32,6 +33,7 @@ svm-internal = []
 
 [dependencies]
 bincode = { workspace = true }
+bytemuck = { workspace = true }
 libsecp256k1 = { workspace = true }
 num-traits = { workspace = true }
 solana-account = { workspace = true }
@@ -74,7 +76,6 @@ ark-ff = "0.5"
 ark-serialize = "0.5"
 ark-std = "0.5"
 assert_matches = { workspace = true }
-bytemuck = { workspace = true }
 criterion = { workspace = true }
 solana-epoch-rewards = { workspace = true }
 solana-epoch-schedule = { workspace = true }
