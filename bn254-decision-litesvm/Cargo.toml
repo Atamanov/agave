@@ -10,7 +10,7 @@ edition = { workspace = true }
 publish = false
 
 [features]
-default = ["backend-b4-helius"]
+default = ["backend-b5-helius-ifma"]
 backend-b4-helius = [
     "solana-bn254-batch-syscall/backend-b4-helius",
     "solana-syscalls/backend-b4-helius",

@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib", "lib"]
 
 [features]
-default = ["bpf-entrypoint", "backend-b4-helius"]
+default = ["bpf-entrypoint", "backend-b5-helius-ifma"]
 bpf-entrypoint = []
 backend-b1-arkworks = [
     "solana-bn254-batch-syscall/backend-b1-arkworks",

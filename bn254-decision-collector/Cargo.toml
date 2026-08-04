@@ -11,7 +11,7 @@ publish = false
 
 [features]
 # A backend must be selected: the registry surface it needs is gated on Helius.
-default = ["backend-b4-helius"]
+default = ["backend-b5-helius-ifma"]
 backend-b4-helius = ["solana-bn254-decision-litesvm/backend-b4-helius"]
 backend-b5-helius-ifma = ["solana-bn254-decision-litesvm/backend-b5-helius-ifma"]
 

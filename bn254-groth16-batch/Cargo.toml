@@ -15,7 +15,7 @@ no-default-features = true
 features = ["agave-unstable-api", "backend-b1-arkworks"]
 
 [features]
-default = ["backend-b1-arkworks"]
+default = ["backend-b5-helius-ifma"]
 agave-unstable-api = ["solana-bn254-batch-syscall/agave-unstable-api"]
 research-observer = ["solana-bn254-batch-syscall/research-observer"]
 backend-b1-arkworks = ["solana-bn254-batch-syscall/backend-b1-arkworks"]

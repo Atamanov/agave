@@ -15,15 +15,20 @@ no-default-features = true
 features = ["agave-unstable-api", "backend-b1-arkworks"]
 
 [features]
-# B1 remains the fallback when a workspace dependency disables default features.
-default = ["backend-b1-arkworks"]
+default = ["backend-b5-helius-ifma"]
 agave-unstable-api = []
 research-observer = []
 backend-b1-arkworks = []
 backend-b2-arkworks-optimized = []
 backend-b3-mcl = ["dep:solana-bn254-mcl-sys"]
 backend-b4-helius = ["dep:helius-bn254", "helius-bn254/std", "helius-bn254/deny-ifma"]
-backend-b5-helius-ifma = ["dep:helius-bn254", "helius-bn254/std", "helius-bn254/force-ifma"]
+# B5 takes the AVX-512 IFMA kernel where the target has it and the portable
+# Montgomery path everywhere else, so it builds and runs on every host.
+# AVX512_IFMA_COMPILED records which one a build actually got.
+backend-b5-helius-ifma = ["dep:helius-bn254", "helius-bn254/std"]
+# Turns a missing IFMA target feature into a build error. For an attested x86
+# pricing run, where a silent portable fallback would corrupt the tariff.
+require-ifma = ["backend-b5-helius-ifma", "helius-bn254/force-ifma"]
 
 [dependencies]
 bytemuck = { workspace = true, features = ["min_const_generics"] }
