@@ -6202,6 +6202,7 @@ dependencies = [
  "bytemuck",
  "bytemuck_derive",
  "solana-define-syscall 4.0.1",
+ "solana-keccak-hasher",
  "thiserror 2.0.18",
 ]
 

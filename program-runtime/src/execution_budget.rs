@@ -225,6 +225,12 @@ pub struct SVMTransactionExecutionCost {
     pub alt_bn128_fr_batch_invert_base_cost: u64,
     /// Per-term compute units for an alt_bn128 scalar-field batch inverse.
     pub alt_bn128_fr_batch_invert_per_term_cost: u64,
+    /// Base compute units for the scalar-only KZG PLONK batch reduction.
+    pub alt_bn128_plonk_batch_reduce_base_cost: u64,
+    /// Per-proof compute units for the scalar-only KZG PLONK batch reduction.
+    pub alt_bn128_plonk_batch_reduce_per_proof_cost: u64,
+    /// Per-Lagrange-slot compute units (proofs times max(public inputs, 1)).
+    pub alt_bn128_plonk_batch_reduce_per_lagrange_cost: u64,
 }
 
 impl Default for SVMTransactionExecutionCost {
@@ -304,6 +310,13 @@ impl Default for SVMTransactionExecutionCost {
             alt_bn128_fr_lincomb_per_term_cost: 2,
             alt_bn128_fr_batch_invert_base_cost: 100,
             alt_bn128_fr_batch_invert_per_term_cost: 3,
+            // Prototype fit on Apple M5 Pro, criterion 95%-CI upper bound /
+            // 33 ns per CU. base + 41*n + 6*n*max(public_inputs, 1)
+            // upper-bounds n in {1,2,4,5,8,16,32}; re-fit on the same
+            // validator-class x86 used above before activation.
+            alt_bn128_plonk_batch_reduce_base_cost: 200,
+            alt_bn128_plonk_batch_reduce_per_proof_cost: 41,
+            alt_bn128_plonk_batch_reduce_per_lagrange_cost: 6,
         }
     }
 }

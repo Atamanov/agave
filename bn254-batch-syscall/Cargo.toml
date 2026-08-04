@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
 ark-ec = { version = "0.5", default-features = false }
 ark-ff = { version = "0.5", default-features = false }
+solana-keccak-hasher = { workspace = true, features = ["sha3"] }
 
 [target.'cfg(target_os = "solana")'.dependencies]
 solana-define-syscall = { workspace = true }

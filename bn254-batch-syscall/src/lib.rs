@@ -4,9 +4,18 @@
 pub use crate::{
     encoding::{
         FQ12_BYTES, FR_MAX_ELEMS, G1_BYTES, G2_BYTES, MSM_MAX_POINTS, PAIR_BYTES,
-        PAIRING_MAX_PAIRS, SCALAR_BYTES,
+        PAIRING_MAX_PAIRS, PLONK_CHALLENGES, PLONK_EVALUATIONS, PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS,
+        PLONK_PER_PROOF_OUTPUTS, PLONK_REDUCE_MAX_PROOFS, PLONK_SHARED_OUTPUTS, SCALAR_BYTES,
+        SNARKJS_PLONK_PROOF_POINTS, SNARKJS_PLONK_VK_POINTS, plonk_reduction_output_count,
+        plonk_reduction_shape, snarkjs_plonk_multi_vk_output_count, snarkjs_plonk_multi_vk_shape,
+        unpack_plonk_reduction_shape, unpack_snarkjs_plonk_multi_vk_shape,
     },
-    pod::{PodG1G2Pair, PodG1Point, PodG2Point, PodGtElement, PodPairingResult, PodScalar},
+    pod::{
+        PodG1G2Pair, PodG1Point, PodG2Point, PodGtElement, PodPairingResult,
+        PodPlonkReductionContext, PodPlonkReductionInput, PodScalar, PodSnarkjsPlonkMultiVkContext,
+        PodSnarkjsPlonkMultiVkInput, PodSnarkjsPlonkReductionContext,
+        PodSnarkjsPlonkReductionInput,
+    },
     validation::AltBn128BatchError,
 };
 // The wire encoding and the entry-point signatures are the same on both
@@ -14,13 +23,20 @@ pub use crate::{
 #[cfg(target_os = "solana")]
 pub use crate::syscalls::{
     alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
-    alt_bn128_pairing_map,
+    alt_bn128_pairing_map, alt_bn128_plonk_batch_reduce, alt_bn128_snarkjs_plonk_batch_reduce,
+    alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
 };
 #[cfg(not(target_os = "solana"))]
 pub use crate::{
     fr::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
     msm::alt_bn128_g1_msm,
     pairing::{alt_bn128_pairing_check, alt_bn128_pairing_map},
+    plonk::alt_bn128_plonk_batch_reduce,
+    snarkjs_plonk::{alt_bn128_snarkjs_plonk_batch_reduce, diagnostic_snarkjs_plonk_challenges},
+    snarkjs_plonk_multi_vk::{
+        alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
+        diagnostic_snarkjs_plonk_multi_vk_batch_digest,
+    },
 };
 
 pub(crate) mod encoding;
@@ -30,7 +46,13 @@ pub(crate) mod fr;
 pub(crate) mod msm;
 #[cfg(not(target_os = "solana"))]
 pub(crate) mod pairing;
+#[cfg(not(target_os = "solana"))]
+pub(crate) mod plonk;
 pub(crate) mod pod;
+#[cfg(not(target_os = "solana"))]
+pub(crate) mod snarkjs_plonk;
+#[cfg(not(target_os = "solana"))]
+pub(crate) mod snarkjs_plonk_multi_vk;
 #[cfg(target_os = "solana")]
 pub(crate) mod syscalls;
 pub(crate) mod validation;

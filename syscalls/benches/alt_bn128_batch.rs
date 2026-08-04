@@ -8,13 +8,14 @@
 use {
     ark_bn254::{Fr, G1Projective, G2Affine, G2Projective},
     ark_ec::{AffineRepr, CurveGroup},
-    ark_ff::{Field, UniformRand},
+    ark_ff::{FftField, Field, UniformRand},
     ark_serialize::{CanonicalSerialize, Compress},
     ark_std::rand::{SeedableRng, rngs::StdRng},
     criterion::{BenchmarkId, Criterion, criterion_group, criterion_main},
     solana_bn254_batch_syscall::{
-        Version, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
-        alt_bn128_pairing_check, alt_bn128_pairing_map,
+        PodPlonkReductionContext, PodPlonkReductionInput, PodScalar, Version,
+        alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+        alt_bn128_pairing_map, alt_bn128_plonk_batch_reduce,
     },
 };
 
@@ -198,6 +199,69 @@ fn bench_fr_batch_invert(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_plonk_batch_reduce(c: &mut Criterion) {
+    const NS: &[usize] = &[1, 2, 4, 5, 8, 16, 32];
+    const POOL: usize = 32;
+
+    let omega = Fr::get_root_of_unity(8).unwrap();
+    let context = PodPlonkReductionContext {
+        domain_size_be: 8u64.to_be_bytes(),
+        num_public_inputs_be: 1u32.to_be_bytes(),
+        reserved: [0u8; 4],
+        omega: PodScalar::from(&omega),
+        k1: PodScalar::from(&Fr::from(2u64)),
+        k2: PodScalar::from(&Fr::from(3u64)),
+    };
+    let mut group = c.benchmark_group("BN254 PLONK batch scalar reduce");
+    group.sample_size(20);
+    for &n in NS {
+        let mut r = rng();
+        let mut input_pool = Vec::with_capacity(POOL);
+        let mut public_pool = Vec::with_capacity(POOL);
+        for _ in 0..POOL {
+            let inputs = (0..n)
+                .map(|_| {
+                    let challenges = core::array::from_fn(|_| {
+                        reverse_chunks(&fr_le(Fr::rand(&mut r)), 32)
+                            .try_into()
+                            .unwrap()
+                    });
+                    let evaluations = core::array::from_fn(|_| PodScalar::from(&Fr::rand(&mut r)));
+                    PodPlonkReductionInput {
+                        challenge_digests: challenges,
+                        evaluations,
+                        rho: PodScalar::from(&Fr::rand(&mut r)),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let public_inputs = (0..n)
+                .map(|_| PodScalar::from(&Fr::rand(&mut r)))
+                .collect::<Vec<_>>();
+            input_pool.push(inputs);
+            public_pool.push(public_inputs);
+        }
+        for (inputs, public_inputs) in input_pool.iter().zip(&public_pool) {
+            alt_bn128_plonk_batch_reduce(Version::V0, &context, inputs, public_inputs)
+                .expect("valid PLONK scalar fixture");
+        }
+        let mut i = 0usize;
+        group.bench_with_input(BenchmarkId::new("BE", n), &n, |bencher, _| {
+            bencher.iter(|| {
+                let out = alt_bn128_plonk_batch_reduce(
+                    Version::V0,
+                    &context,
+                    &input_pool[i],
+                    &public_pool[i],
+                )
+                .unwrap();
+                i = (i + 1) % POOL;
+                out
+            })
+        });
+    }
+    group.finish();
+}
+
 fn bench_g1_msm(c: &mut Criterion) {
     // 12 sizes, one per log2 bucket over the 1..=2048 cap
     const NS: &[usize] = &[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
@@ -314,5 +378,6 @@ criterion_group!(
     bench_g2_subgroup_check,
     bench_fr_lincomb,
     bench_fr_batch_invert,
+    bench_plonk_batch_reduce,
 );
 criterion_main!(benches);

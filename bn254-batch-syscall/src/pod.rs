@@ -1,5 +1,8 @@
 use {
-    crate::encoding::{FQ12_BYTES, G1_BYTES, G2_BYTES, SCALAR_BYTES},
+    crate::encoding::{
+        FQ12_BYTES, G1_BYTES, G2_BYTES, PLONK_CHALLENGES, PLONK_EVALUATIONS, SCALAR_BYTES,
+        SNARKJS_PLONK_PROOF_POINTS, SNARKJS_PLONK_VK_POINTS,
+    },
     bytemuck_derive::{Pod, Zeroable},
 };
 #[cfg(not(target_os = "solana"))]
@@ -27,6 +30,140 @@ pub struct PodG2Point(pub [u8; G2_BYTES]);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct PodScalar(pub [u8; SCALAR_BYTES]);
+
+/// Scalar-only context shared by a same-key PLONK reduction batch.
+///
+/// `omega`, `k1`, and `k2` are canonical BN254 Fr encodings. The byte-array
+/// integer fields make the wire layout endian-stable and alignment-1 on every
+/// host. `reserved` is zero in V0 and must be rejected otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodPlonkReductionContext {
+    pub domain_size_be: [u8; 8],
+    pub num_public_inputs_be: [u8; 4],
+    pub reserved: [u8; 4],
+    pub omega: PodScalar,
+    pub k1: PodScalar,
+    pub k2: PodScalar,
+}
+
+impl PodPlonkReductionContext {
+    pub const fn domain_size(&self) -> u64 {
+        u64::from_be_bytes(self.domain_size_be)
+    }
+
+    pub const fn num_public_inputs(&self) -> u32 {
+        u32::from_be_bytes(self.num_public_inputs_be)
+    }
+}
+
+/// Dynamic scalar inputs for one proof in the non-production synthetic
+/// baseline. Canonical snarkjs integrations use
+/// [`PodSnarkjsPlonkReductionInput`] instead.
+///
+/// Challenge slots are the raw 32-byte Keccak digests for
+/// `(beta, gamma, alpha, zeta, v, u)`, not canonical scalars. Reducing these
+/// digests modulo Fr inside the syscall is byte-for-byte equivalent to the
+/// verifier's former `from_be_bytes_mod_order` calls and avoids doing that
+/// Montgomery work in SBF. Evaluation slots are canonical
+/// `(a, b, c, sigma1, sigma2, z_omega)`. `rho` is the nonzero, canonical outer
+/// batch randomizer derived by the caller over the frozen transcript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodPlonkReductionInput {
+    pub challenge_digests: [[u8; SCALAR_BYTES]; PLONK_CHALLENGES],
+    pub evaluations: [PodScalar; PLONK_EVALUATIONS],
+    pub rho: PodScalar,
+}
+
+/// Scalar parameters and raw verification-key bytes for the canonical
+/// snarkjs PLONK transcript. Curve validation deliberately remains the MSM
+/// and pairing syscalls' responsibility; this record only binds the exact
+/// bytes into Fiat-Shamir and validates the scalar/domain context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodSnarkjsPlonkReductionContext {
+    pub domain_size_be: [u8; 8],
+    pub num_public_inputs_be: [u8; 4],
+    pub reserved: [u8; 4],
+    pub omega: PodScalar,
+    pub k1: PodScalar,
+    pub k2: PodScalar,
+    pub transcript_vk_points: [PodG1Point; SNARKJS_PLONK_VK_POINTS],
+    /// Raw snarkjs `X_2` bytes. This point is deliberately excluded from the
+    /// six inner Fiat-Shamir challenges, but included in the outer frozen-batch
+    /// seed because changing it changes the final pairing verdict.
+    pub x_2: PodG2Point,
+}
+
+impl PodSnarkjsPlonkReductionContext {
+    pub const fn domain_size(&self) -> u64 {
+        u64::from_be_bytes(self.domain_size_be)
+    }
+
+    pub const fn num_public_inputs(&self) -> u32 {
+        u32::from_be_bytes(self.num_public_inputs_be)
+    }
+}
+
+/// Raw proof bytes and canonical scalar evaluations for one canonical
+/// snarkjs PLONK reduction. Point order is
+/// `(A,B,C,Z,T1,T2,T3,Wxi,Wxiw)`. Outer batch randomizers are derived
+/// natively from a domain-separated hash of the complete canonical batch;
+/// callers cannot choose or omit them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodSnarkjsPlonkReductionInput {
+    pub transcript_points: [PodG1Point; SNARKJS_PLONK_PROOF_POINTS],
+    pub evaluations: [PodScalar; PLONK_EVALUATIONS],
+}
+
+/// One verifier-resolved context in an atomic multi-VK PLONK batch.
+///
+/// `application_context` is an application-owned circuit/registry binding,
+/// not an authorization claim supplied by a proof. The verifier constructs
+/// this record only after resolving and validating the allowed key. Both the
+/// explicit context index and every byte that affects the final pairing are
+/// frozen into the outer transcript. `g2_gen` is separate from the canonical
+/// snarkjs `X_2` field because both pairing operands affect the verdict.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodSnarkjsPlonkMultiVkContext {
+    pub context_index_be: [u8; 4],
+    pub reserved: [u8; 4],
+    pub application_context: [u8; 32],
+    pub reduction: PodSnarkjsPlonkReductionContext,
+    pub g2_gen: PodG2Point,
+}
+
+impl PodSnarkjsPlonkMultiVkContext {
+    pub const fn context_index(&self) -> u32 {
+        u32::from_be_bytes(self.context_index_be)
+    }
+}
+
+/// One indexed proof in an atomic multi-VK PLONK batch.
+///
+/// The global proof index must equal its position in the input array. The
+/// context index selects the already verifier-resolved context; neither index
+/// is inferred from client-controlled offsets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodSnarkjsPlonkMultiVkInput {
+    pub proof_index_be: [u8; 4],
+    pub context_index_be: [u8; 4],
+    pub proof: PodSnarkjsPlonkReductionInput,
+}
+
+impl PodSnarkjsPlonkMultiVkInput {
+    pub const fn proof_index(&self) -> u32 {
+        u32::from_be_bytes(self.proof_index_be)
+    }
+
+    pub const fn context_index(&self) -> u32 {
+        u32::from_be_bytes(self.context_index_be)
+    }
+}
 
 /// One pairing input, a G1 point then its G2 partner: 192 contiguous bytes with
 /// no padding, so a raw pair buffer casts to `&[PodG1G2Pair]` directly.
@@ -154,9 +291,33 @@ mod tests {
         assert_eq!(size_of::<PodG1G2Pair>(), PAIR_BYTES);
         assert_eq!(size_of::<PodPairingResult>(), 32);
         assert_eq!(size_of::<PodGtElement>(), FQ12_BYTES);
+        assert_eq!(size_of::<PodPlonkReductionContext>(), 112);
+        assert_eq!(size_of::<PodPlonkReductionInput>(), 416);
+        assert_eq!(size_of::<PodSnarkjsPlonkReductionContext>(), 752);
+        assert_eq!(size_of::<PodSnarkjsPlonkReductionInput>(), 768);
+        assert_eq!(size_of::<PodSnarkjsPlonkMultiVkContext>(), 920);
+        assert_eq!(size_of::<PodSnarkjsPlonkMultiVkInput>(), 776);
         assert_eq!(align_of::<PodG1G2Pair>(), 1);
+        assert_eq!(align_of::<PodPlonkReductionContext>(), 1);
+        assert_eq!(align_of::<PodPlonkReductionInput>(), 1);
+        assert_eq!(align_of::<PodSnarkjsPlonkReductionContext>(), 1);
+        assert_eq!(align_of::<PodSnarkjsPlonkReductionInput>(), 1);
+        assert_eq!(align_of::<PodSnarkjsPlonkMultiVkContext>(), 1);
+        assert_eq!(align_of::<PodSnarkjsPlonkMultiVkInput>(), 1);
         assert_eq!(offset_of!(PodG1G2Pair, g1), 0);
         assert_eq!(offset_of!(PodG1G2Pair, g2), G1_BYTES);
+        assert_eq!(offset_of!(PodPlonkReductionContext, omega), 16);
+        assert_eq!(offset_of!(PodPlonkReductionInput, evaluations), 192);
+        assert_eq!(offset_of!(PodPlonkReductionInput, rho), 384);
+        assert_eq!(
+            offset_of!(PodSnarkjsPlonkReductionContext, transcript_vk_points),
+            112
+        );
+        assert_eq!(offset_of!(PodSnarkjsPlonkReductionContext, x_2), 624);
+        assert_eq!(offset_of!(PodSnarkjsPlonkReductionInput, evaluations), 576);
+        assert_eq!(offset_of!(PodSnarkjsPlonkMultiVkContext, reduction), 40);
+        assert_eq!(offset_of!(PodSnarkjsPlonkMultiVkContext, g2_gen), 792);
+        assert_eq!(offset_of!(PodSnarkjsPlonkMultiVkInput, proof), 8);
     }
     #[test]
     fn test_pair_cast_splits_bytes() {

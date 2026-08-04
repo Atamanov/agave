@@ -35,6 +35,39 @@ pub struct InnerChallenges {
     pub u: Fr,
 }
 
+/// Raw Keccak squeezes for the same six inner challenges. The verifier passes
+/// these bytes to the native scalar-reduction syscall, which performs exactly
+/// the former `from_be_bytes_mod_order` mapping. Keeping the raw form avoids
+/// six 256-bit modular reductions per proof in SBF without moving or changing
+/// any transcript hashing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InnerChallengeDigests {
+    pub beta: [u8; 32],
+    pub gamma: [u8; 32],
+    pub alpha: [u8; 32],
+    pub zeta: [u8; 32],
+    pub v: [u8; 32],
+    pub u: [u8; 32],
+}
+
+impl InnerChallengeDigests {
+    pub(crate) fn slots(&self) -> [[u8; 32]; 6] {
+        [self.beta, self.gamma, self.alpha, self.zeta, self.v, self.u]
+    }
+
+    fn to_scalars(self) -> InnerChallenges {
+        let reduce = |digest: &[u8; 32]| Fr::from_be_bytes_mod_order(digest);
+        InnerChallenges {
+            beta: reduce(&self.beta),
+            gamma: reduce(&self.gamma),
+            alpha: reduce(&self.alpha),
+            zeta: reduce(&self.zeta),
+            v: reduce(&self.v),
+            u: reduce(&self.u),
+        }
+    }
+}
+
 /// Running-state Fiat-Shamir transcript: absorbing sets
 /// state = keccak256(state || bytes); squeezing maps
 /// keccak256(state || phase_tag) to Fr via from_be_bytes_mod_order. The mod-r
@@ -81,8 +114,12 @@ impl InnerTranscript {
         self.state = keccak_parts(&all[..=parts.len()]);
     }
 
+    fn challenge_digest(&self, phase_tag: u8) -> [u8; 32] {
+        hashv(&[&self.state, &[phase_tag]]).to_bytes()
+    }
+
     fn challenge(&self, phase_tag: u8) -> Fr {
-        Fr::from_be_bytes_mod_order(&hashv(&[&self.state, &[phase_tag]]).to_bytes())
+        Fr::from_be_bytes_mod_order(&self.challenge_digest(phase_tag))
     }
 
     /// round 1 -> beta, gamma
@@ -124,17 +161,40 @@ impl InnerTranscript {
     }
 }
 
-/// The verifier-side derivation: replay the whole proof through the phased
-/// transcript.
+/// Verifier-side transcript replay returning the six raw Keccak squeezes.
+/// Absorb order, phase tags, and hash inputs are exactly those of
+/// [`derive_inner`]; only the modular-reduction location changes.
 #[inline(never)]
-pub fn derive_inner(vk: &ValidatedVerifyingKey, proof: &Proof) -> InnerChallenges {
+pub fn derive_inner_digests(vk: &ValidatedVerifyingKey, proof: &Proof) -> InnerChallengeDigests {
     let mut transcript = InnerTranscript::new(vk, &proof.public_inputs);
-    let (beta, gamma) = transcript.wire_commitments(&proof.wire_commitments);
-    let alpha = transcript.grand_product(&proof.grand_product);
-    let zeta = transcript.quotient(&proof.quotient);
-    let v = transcript.evaluations(&proof.evaluations);
-    let u = transcript.openings(&proof.opening, &proof.shifted_opening);
-    InnerChallenges {
+    transcript.absorb(&[
+        &proof.wire_commitments[0].0,
+        &proof.wire_commitments[1].0,
+        &proof.wire_commitments[2].0,
+    ]);
+    let beta = transcript.challenge_digest(b'B');
+    let gamma = transcript.challenge_digest(b'G');
+    transcript.absorb(&[&proof.grand_product.0]);
+    let alpha = transcript.challenge_digest(b'A');
+    transcript.absorb(&[
+        &proof.quotient[0].0,
+        &proof.quotient[1].0,
+        &proof.quotient[2].0,
+    ]);
+    let zeta = transcript.challenge_digest(b'Z');
+    let slots = proof.evaluations.slots();
+    transcript.absorb(&[
+        &slots[0].0,
+        &slots[1].0,
+        &slots[2].0,
+        &slots[3].0,
+        &slots[4].0,
+        &slots[5].0,
+    ]);
+    let v = transcript.challenge_digest(b'V');
+    transcript.absorb(&[&proof.opening.0, &proof.shifted_opening.0]);
+    let u = transcript.challenge_digest(b'U');
+    InnerChallengeDigests {
         beta,
         gamma,
         alpha,
@@ -142,6 +202,13 @@ pub fn derive_inner(vk: &ValidatedVerifyingKey, proof: &Proof) -> InnerChallenge
         v,
         u,
     }
+}
+
+/// The verifier-side derivation: replay the whole proof through the phased
+/// transcript.
+#[inline(never)]
+pub fn derive_inner(vk: &ValidatedVerifyingKey, proof: &Proof) -> InnerChallenges {
+    derive_inner_digests(vk, proof).to_scalars()
 }
 
 /// How the per-proof outer randomizers derive from the seed. `Independent`
@@ -171,11 +238,7 @@ impl RandomizerMode {
 /// this seed as a PLONK section digest, so one collision-resistant value
 /// binds the section's whole framing.
 #[inline(never)]
-pub fn derive_seed(
-    mode: RandomizerMode,
-    vk: &ValidatedVerifyingKey,
-    proofs: &[Proof],
-) -> [u8; 32] {
+pub fn derive_seed(mode: RandomizerMode, vk: &ValidatedVerifyingKey, proofs: &[Proof]) -> [u8; 32] {
     let proof_count = (proofs.len() as u64).to_be_bytes();
     let mut parts: Vec<&[u8]> = Vec::with_capacity(3 + proofs.len() * 16);
     parts.push(mode.domain_tag());

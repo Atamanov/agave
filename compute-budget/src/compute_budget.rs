@@ -154,6 +154,9 @@ pub struct ComputeBudget {
     pub alt_bn128_fr_lincomb_per_term_cost: u64,
     pub alt_bn128_fr_batch_invert_base_cost: u64,
     pub alt_bn128_fr_batch_invert_per_term_cost: u64,
+    pub alt_bn128_plonk_batch_reduce_base_cost: u64,
+    pub alt_bn128_plonk_batch_reduce_per_proof_cost: u64,
+    pub alt_bn128_plonk_batch_reduce_per_lagrange_cost: u64,
 }
 
 #[cfg(feature = "dev-context-only-utils")]
@@ -247,6 +250,11 @@ impl ComputeBudget {
             alt_bn128_fr_lincomb_per_term_cost: cost.alt_bn128_fr_lincomb_per_term_cost,
             alt_bn128_fr_batch_invert_base_cost: cost.alt_bn128_fr_batch_invert_base_cost,
             alt_bn128_fr_batch_invert_per_term_cost: cost.alt_bn128_fr_batch_invert_per_term_cost,
+            alt_bn128_plonk_batch_reduce_base_cost: cost.alt_bn128_plonk_batch_reduce_base_cost,
+            alt_bn128_plonk_batch_reduce_per_proof_cost: cost
+                .alt_bn128_plonk_batch_reduce_per_proof_cost,
+            alt_bn128_plonk_batch_reduce_per_lagrange_cost: cost
+                .alt_bn128_plonk_batch_reduce_per_lagrange_cost,
         }
     }
 
@@ -325,6 +333,11 @@ impl ComputeBudget {
             alt_bn128_fr_lincomb_per_term_cost: self.alt_bn128_fr_lincomb_per_term_cost,
             alt_bn128_fr_batch_invert_base_cost: self.alt_bn128_fr_batch_invert_base_cost,
             alt_bn128_fr_batch_invert_per_term_cost: self.alt_bn128_fr_batch_invert_per_term_cost,
+            alt_bn128_plonk_batch_reduce_base_cost: self.alt_bn128_plonk_batch_reduce_base_cost,
+            alt_bn128_plonk_batch_reduce_per_proof_cost: self
+                .alt_bn128_plonk_batch_reduce_per_proof_cost,
+            alt_bn128_plonk_batch_reduce_per_lagrange_cost: self
+                .alt_bn128_plonk_batch_reduce_per_lagrange_cost,
         }
     }
 

@@ -539,6 +539,24 @@ pub fn create_program_runtime_environment(
         "sol_alt_bn128_fr_batch_invert",
         SyscallAltBn128FrBatchInvert
     )?;
+    register_feature_gated_function!(
+        result,
+        enable_alt_bn128_batch_syscalls,
+        "sol_alt_bn128_plonk_batch_reduce",
+        SyscallAltBn128PlonkBatchReduce
+    )?;
+    register_feature_gated_function!(
+        result,
+        enable_alt_bn128_batch_syscalls,
+        "sol_alt_bn128_snarkjs_plonk_batch_reduce",
+        SyscallAltBn128SnarkjsPlonkBatchReduce
+    )?;
+    register_feature_gated_function!(
+        result,
+        enable_alt_bn128_batch_syscalls,
+        "sol_alt_bn128_snarkjs_plonk_multi_vk_batch_reduce",
+        SyscallAltBn128SnarkjsPlonkMultiVkBatchReduce
+    )?;
 
     // Big_mod_exp
     register_feature_gated_function!(
@@ -766,6 +784,103 @@ declare_builtin_function!(
 );
 
 declare_builtin_function!(
+    /// Atomic canonical snarkjs PLONK reduction across verifier-resolved
+    /// contexts. The packed shape declares context, proof, and flattened
+    /// public-input counts so charging and all translations are exact.
+    SyscallAltBn128SnarkjsPlonkMultiVkBatchReduce,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        shape: u64,
+        contexts_addr: u64,
+        inputs_addr: u64,
+        public_inputs_addr: u64,
+        result_addr: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{
+            PodScalar, PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput, Version,
+            alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
+            snarkjs_plonk_multi_vk_output_count, unpack_snarkjs_plonk_multi_vk_shape,
+        };
+
+        let (num_contexts, num_proofs, num_public_inputs) =
+            unpack_snarkjs_plonk_multi_vk_shape(shape);
+        let execution_cost = invoke_context.get_execution_cost();
+        // Prototype B1 pricing. The scalar term reuses the experimental shape
+        // parameters; the transcript term charges every declared context,
+        // proof, and public scalar before translating guest memory. Production
+        // activation still requires validator-class B1/B3/B5 calibration.
+        let scalar_cost = execution_cost
+            .alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(num_proofs),
+            )
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_lagrange_cost
+                    .saturating_mul(num_public_inputs.saturating_add(num_proofs)),
+            );
+        let transcript_cost = 200u64
+            .saturating_add(800u64.saturating_mul(num_contexts))
+            .saturating_add(1719u64.saturating_mul(num_proofs))
+            .saturating_add(32u64.saturating_mul(num_public_inputs));
+        invoke_context
+            .compute_meter
+            .consume_checked(scalar_cost.saturating_add(transcript_cost))?;
+
+        let Some(output_count) = usize::try_from(num_contexts)
+            .ok()
+            .and_then(|contexts| {
+                usize::try_from(num_proofs)
+                    .ok()
+                    .and_then(|proofs| snarkjs_plonk_multi_vk_output_count(contexts, proofs))
+            })
+        else {
+            return Ok(1);
+        };
+        let check_aligned = invoke_context.get_check_aligned();
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let contexts = translate_slice::<PodSnarkjsPlonkMultiVkContext>(
+            memory_mapping,
+            contexts_addr,
+            num_contexts,
+            check_aligned,
+        )?;
+        let inputs = translate_slice::<PodSnarkjsPlonkMultiVkInput>(
+            memory_mapping,
+            inputs_addr,
+            num_proofs,
+            check_aligned,
+        )?;
+        let public_inputs = translate_slice::<PodScalar>(
+            memory_mapping,
+            public_inputs_addr,
+            num_public_inputs,
+            check_aligned,
+        )?;
+
+        match alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
+            Version::V0,
+            contexts,
+            inputs,
+            public_inputs,
+        ) {
+            Ok(output) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count as u64)?;
+                );
+                result_ref_mut.copy_from_slice(&output);
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
     /// BN254 pairing map returning the post-final-exponentiation target-group
     /// element as twelve canonical 32-byte big-endian Fq coefficients.
     ///
@@ -820,6 +935,107 @@ declare_builtin_function!(
                     let result_ref_mut: &mut PodGtElement = map(result_addr)?;
                 );
                 *result_ref_mut = result;
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    /// Canonical snarkjs PLONK transcript plus scalar reduction. The context
+    /// contains raw `(Qm,Ql,Qr,Qo,Qc,S1,S2,S3)` bytes and each input contains
+    /// raw `(A,B,C,Z,T1,T2,T3,Wxi,Wxiw)` bytes. The native side derives all
+    /// six phased Keccak challenges and returns only two-MSM coefficients.
+    SyscallAltBn128SnarkjsPlonkBatchReduce,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        shape: u64,
+        context_addr: u64,
+        inputs_addr: u64,
+        public_inputs_addr: u64,
+        result_addr: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{
+            PodScalar, PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput, Version,
+            alt_bn128_snarkjs_plonk_batch_reduce, plonk_reduction_output_count,
+            unpack_plonk_reduction_shape,
+        };
+
+        let (num_proofs, num_public_inputs) = unpack_plonk_reduction_shape(shape);
+        let execution_cost = invoke_context.get_execution_cost();
+        // Prototype only. Scalar-reduction terms are the Apple M5 Pro fit
+        // used by the synthetic operation. The additional terms conservatively
+        // charge both the six proof-local canonical transcript hashes and the
+        // full-batch seed/nonzero-rho derivation at the existing SBF Keccak
+        // slice schedule. Recalibrate on validator-class x86 before activation.
+        let scalar_cost = execution_cost
+            .alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(num_proofs),
+            )
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_lagrange_cost
+                    .saturating_mul(num_proofs)
+                    .saturating_mul(num_public_inputs.max(1)),
+            );
+        // The fixed outer-batch seed includes X_2 as one 128-byte slice:
+        // max(mem_op_base=10, sha256_byte_cost=1 * 128/2) = 64 CU.
+        let transcript_cost = 498u64.saturating_add(
+            num_proofs.saturating_mul(
+                1719u64.saturating_add(32u64.saturating_mul(num_public_inputs)),
+            ),
+        );
+        invoke_context
+            .compute_meter
+            .consume_checked(scalar_cost.saturating_add(transcript_cost))?;
+
+        let Some(output_count) = usize::try_from(num_proofs)
+            .ok()
+            .and_then(plonk_reduction_output_count)
+        else {
+            return Ok(1);
+        };
+        let check_aligned = invoke_context.get_check_aligned();
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let context = translate_type::<PodSnarkjsPlonkReductionContext>(
+            memory_mapping,
+            context_addr,
+            check_aligned,
+        )?;
+        if u64::from(context.num_public_inputs()) != num_public_inputs {
+            return Ok(1);
+        }
+        let inputs = translate_slice::<PodSnarkjsPlonkReductionInput>(
+            memory_mapping,
+            inputs_addr,
+            num_proofs,
+            check_aligned,
+        )?;
+        let total_public_inputs = num_proofs.saturating_mul(num_public_inputs);
+        let public_inputs = translate_slice::<PodScalar>(
+            memory_mapping,
+            public_inputs_addr,
+            total_public_inputs,
+            check_aligned,
+        )?;
+
+        match alt_bn128_snarkjs_plonk_batch_reduce(
+            Version::V0,
+            context,
+            inputs,
+            public_inputs,
+        ) {
+            Ok(output) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count as u64)?;
+                );
+                result_ref_mut.copy_from_slice(&output);
                 Ok(SUCCESS)
             }
             Err(_) => Ok(1),
@@ -3045,6 +3261,97 @@ declare_builtin_function!(
                     let result_ref_mut: &mut [PodScalar] = map(result_addr, num_elems)?;
                 );
                 result_ref_mut.copy_from_slice(&result);
+                Ok(SUCCESS)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    /// Non-production synthetic benchmark reduction of a same-key KZG PLONK
+    /// batch into the canonical,
+    /// signed, outer-randomizer-weighted coefficients consumed by two G1 MSMs.
+    ///
+    /// `shape` packs `num_public_inputs` in the high u32 and `num_proofs` in
+    /// the low u32, allowing complete up-front charging. `context_addr` points
+    /// to one `PodPlonkReductionContext`; `inputs_addr` to `num_proofs`
+    /// `PodPlonkReductionInput` records; `public_inputs_addr` to
+    /// `num_proofs * num_public_inputs` canonical scalars. The output is nine
+    /// shared scalars followed by eleven scalars per proof. Transcript hashing
+    /// and all curve points remain outside this syscall. This caller-challenge,
+    /// caller-rho ABI is retained only for baseline reproduction; canonical
+    /// integrations use `SyscallAltBn128SnarkjsPlonkBatchReduce`.
+    SyscallAltBn128PlonkBatchReduce,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        shape: u64,
+        context_addr: u64,
+        inputs_addr: u64,
+        public_inputs_addr: u64,
+        result_addr: u64,
+    ) -> Result<u64, Error> {
+        use solana_bn254_batch_syscall::{
+            PodPlonkReductionContext, PodPlonkReductionInput, PodScalar, Version,
+            alt_bn128_plonk_batch_reduce, plonk_reduction_output_count,
+            unpack_plonk_reduction_shape,
+        };
+
+        let (num_proofs, num_public_inputs) = unpack_plonk_reduction_shape(shape);
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = execution_cost
+            .alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(num_proofs),
+            )
+            .saturating_add(
+                execution_cost
+                    .alt_bn128_plonk_batch_reduce_per_lagrange_cost
+                    .saturating_mul(num_proofs)
+                    .saturating_mul(num_public_inputs.max(1)),
+            );
+        invoke_context.compute_meter.consume_checked(cost)?;
+
+        let Some(output_count) = usize::try_from(num_proofs)
+            .ok()
+            .and_then(plonk_reduction_output_count)
+        else {
+            return Ok(1);
+        };
+        let check_aligned = invoke_context.get_check_aligned();
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        let context = translate_type::<PodPlonkReductionContext>(
+            memory_mapping,
+            context_addr,
+            check_aligned,
+        )?;
+        if u64::from(context.num_public_inputs()) != num_public_inputs {
+            return Ok(1);
+        }
+        let inputs = translate_slice::<PodPlonkReductionInput>(
+            memory_mapping,
+            inputs_addr,
+            num_proofs,
+            check_aligned,
+        )?;
+        let total_public_inputs = num_proofs.saturating_mul(num_public_inputs);
+        let public_inputs = translate_slice::<PodScalar>(
+            memory_mapping,
+            public_inputs_addr,
+            total_public_inputs,
+            check_aligned,
+        )?;
+
+        match alt_bn128_plonk_batch_reduce(Version::V0, context, inputs, public_inputs) {
+            Ok(output) => {
+                translate_mut!(
+                    memory_mapping,
+                    check_aligned,
+                    let result_ref_mut: &mut [PodScalar] = map(result_addr, output_count as u64)?;
+                );
+                result_ref_mut.copy_from_slice(&output);
                 Ok(SUCCESS)
             }
             Err(_) => Ok(1),
@@ -8859,29 +9166,17 @@ mod tests {
             .compute_meter
             .mock_set_remaining(pairing_check_cost(&invoke_context, 2));
 
-        let code = SyscallAltBn128PairingMap::rust(
-            &mut invoke_context,
-            2,
-            pairs_va,
-            result_va,
-            0,
-            0,
-        )
-        .unwrap();
+        let code =
+            SyscallAltBn128PairingMap::rust(&mut invoke_context, 2, pairs_va, result_va, 0, 0)
+                .unwrap();
         assert_eq!(code, SUCCESS);
         assert_eq!(result_buf, PodGtElement::identity().0);
 
         invoke_context
             .compute_meter
             .mock_set_remaining(pairing_check_cost(&invoke_context, 2).saturating_sub(1));
-        let result = SyscallAltBn128PairingMap::rust(
-            &mut invoke_context,
-            2,
-            pairs_va,
-            result_va,
-            0,
-            0,
-        );
+        let result =
+            SyscallAltBn128PairingMap::rust(&mut invoke_context, 2, pairs_va, result_va, 0, 0);
         assert_matches!(
             result,
             Result::Err(error) if error.downcast_ref::<InstructionError>().unwrap() == &InstructionError::ComputationalBudgetExceeded

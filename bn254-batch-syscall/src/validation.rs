@@ -23,6 +23,18 @@ pub enum AltBn128BatchError {
     CapExceeded,
     #[error("points and scalars disagree in count")]
     LengthMismatch,
+    #[error("invalid PLONK scalar-reduction context")]
+    InvalidContext,
+    #[error("PLONK challenge is degenerate for the declared domain")]
+    DegenerateChallenge,
+    #[error("PLONK outer randomizer is zero")]
+    ZeroRandomizer,
+    #[error("atomic PLONK batch index does not match its canonical position")]
+    IndexMismatch,
+    #[error("atomic PLONK batch repeats an identical context")]
+    DuplicateContext,
+    #[error("atomic PLONK batch contains an unused verifying-key context")]
+    UnusedContext,
     /// On the solana target the runtime reports every rejection as one nonzero
     /// code, so the variants above are not recoverable there.
     #[error("syscall rejected the input")]

@@ -21,6 +21,134 @@ pub const MSM_MAX_POINTS: usize = 2048;
 pub const PAIRING_MAX_PAIRS: usize = 256;
 pub const FR_MAX_ELEMS: usize = 2048;
 
+// KZG PLONK scalar-reduction ABI. The operation deliberately stops at
+// canonical scalar coefficients: transcript hashing and the two MSM bases
+// remain verifier-owned, while the Montgomery-heavy field reduction runs
+// natively. One proof contributes nine Q-side points, so this cap is exactly
+// the largest batch that can feed the existing G1 MSM syscall.
+pub const PLONK_CHALLENGES: usize = 6;
+pub const PLONK_EVALUATIONS: usize = 6;
+pub const PLONK_SHARED_OUTPUTS: usize = 9;
+pub const PLONK_PER_PROOF_OUTPUTS: usize = 11;
+/// Multi-VK output has eight key-local coefficients per context. The ninth
+/// shared coefficient (the G1 generator) is collapsed once across all keys.
+pub const PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS: usize = 8;
+pub const PLONK_REDUCE_MAX_PROOFS: usize = (MSM_MAX_POINTS - PLONK_SHARED_OUTPUTS) / 9;
+
+/// Canonical snarkjs transcript inputs. The verification key contributes
+/// `(Qm,Ql,Qr,Qo,Qc,S1,S2,S3)` and each proof contributes
+/// `(A,B,C,Z,T1,T2,T3,Wxi,Wxiw)`, all as raw 64-byte EIP-196 G1 encodings.
+pub const SNARKJS_PLONK_VK_POINTS: usize = 8;
+pub const SNARKJS_PLONK_PROOF_POINTS: usize = 9;
+
+/// Atomic multi-verifying-key PLONK shape packing.
+///
+/// The syscall ABI has five registers, so the complete dynamic shape is
+/// carried in one word: 16 bits of context count, 24 bits of proof count, and
+/// 24 bits of flattened public-input count. The arithmetic caps below are far
+/// tighter than any of the packed integer maxima.
+pub const PLONK_MULTI_VK_COUNT_BITS: u32 = 16;
+pub const PLONK_MULTI_VK_PROOF_BITS: u32 = 24;
+pub const PLONK_MULTI_VK_PUBLIC_BITS: u32 = 24;
+const PLONK_MULTI_VK_24_MASK: u64 = (1u64 << 24) - 1;
+
+pub const fn plonk_reduction_output_count(num_proofs: usize) -> Option<usize> {
+    if num_proofs == 0 || num_proofs > PLONK_REDUCE_MAX_PROOFS {
+        return None;
+    }
+    match PLONK_PER_PROOF_OUTPUTS.checked_mul(num_proofs) {
+        Some(per_proof) => PLONK_SHARED_OUTPUTS.checked_add(per_proof),
+        None => None,
+    }
+}
+
+/// Pack both declared dynamic dimensions into the syscall's first u64
+/// argument so the runtime can charge the complete cost before translating
+/// any guest pointer.
+pub const fn plonk_reduction_shape(num_proofs: usize, num_public_inputs: usize) -> Option<u64> {
+    if num_proofs == 0
+        || num_proofs > PLONK_REDUCE_MAX_PROOFS
+        || num_public_inputs > u32::MAX as usize
+    {
+        return None;
+    }
+    Some(((num_public_inputs as u64) << 32) | num_proofs as u64)
+}
+
+pub const fn unpack_plonk_reduction_shape(shape: u64) -> (u64, u64) {
+    (shape & u32::MAX as u64, shape >> 32)
+}
+
+/// Scalar count returned by the atomic multi-VK reducer.
+///
+/// Each context owns eight collapsed shared coefficients, the batch owns one
+/// global generator coefficient, and each proof owns eleven coefficients.
+/// The Q-side MSM has one global generator, eight
+/// verifying-key points per context, and nine points per proof.
+pub const fn snarkjs_plonk_multi_vk_output_count(
+    num_contexts: usize,
+    num_proofs: usize,
+) -> Option<usize> {
+    if num_contexts == 0 || num_proofs == 0 {
+        return None;
+    }
+    let shared = match PLONK_MULTI_VK_PER_CONTEXT_OUTPUTS.checked_mul(num_contexts) {
+        Some(value) => value,
+        None => return None,
+    };
+    let per_proof = match PLONK_PER_PROOF_OUTPUTS.checked_mul(num_proofs) {
+        Some(value) => value,
+        None => return None,
+    };
+    let vk_points = match SNARKJS_PLONK_VK_POINTS.checked_mul(num_contexts) {
+        Some(value) => value,
+        None => return None,
+    };
+    let proof_points = match SNARKJS_PLONK_PROOF_POINTS.checked_mul(num_proofs) {
+        Some(value) => value,
+        None => return None,
+    };
+    let q_points = match vk_points.checked_add(proof_points) {
+        Some(value) => match value.checked_add(1) {
+            Some(value) => value,
+            None => return None,
+        },
+        None => return None,
+    };
+    if q_points > MSM_MAX_POINTS || num_proofs > MSM_MAX_POINTS / 2 {
+        return None;
+    }
+    match shared.checked_add(1) {
+        Some(value) => value.checked_add(per_proof),
+        None => None,
+    }
+}
+
+/// Pack the exact atomic multi-VK input dimensions.
+pub const fn snarkjs_plonk_multi_vk_shape(
+    num_contexts: usize,
+    num_proofs: usize,
+    num_public_inputs: usize,
+) -> Option<u64> {
+    if snarkjs_plonk_multi_vk_output_count(num_contexts, num_proofs).is_none()
+        || num_contexts >= (1usize << PLONK_MULTI_VK_COUNT_BITS)
+        || num_proofs >= (1usize << PLONK_MULTI_VK_PROOF_BITS)
+        || num_public_inputs >= (1usize << PLONK_MULTI_VK_PUBLIC_BITS)
+        || num_public_inputs > FR_MAX_ELEMS
+    {
+        return None;
+    }
+    Some(((num_contexts as u64) << 48) | ((num_public_inputs as u64) << 24) | num_proofs as u64)
+}
+
+pub const fn unpack_snarkjs_plonk_multi_vk_shape(shape: u64) -> (u64, u64, u64) {
+    (
+        shape >> 48,
+        shape & PLONK_MULTI_VK_24_MASK,
+        (shape >> 24) & PLONK_MULTI_VK_24_MASK,
+    )
+}
+
 #[cfg(not(target_os = "solana"))]
 const FQ_BYTES: usize = 32;
 

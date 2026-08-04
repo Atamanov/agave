@@ -2,18 +2,28 @@ use {
     crate::{
         PlonkBatchError, Version,
         proof::Proof,
-        reduce::{ReducedProof, lagrange_count, lagrange_denominators, reduce, vanishing_eval},
         scalar::{G1_GENERATOR, fr_from_be, fr_to_pod},
         transcript::{
-            InnerChallenges, RandomizerMode, derive_inner, derive_randomizers, derive_seed,
+            InnerChallengeDigests, RandomizerMode, derive_inner_digests, derive_randomizers,
+            derive_seed,
         },
         vk::ValidatedVerifyingKey,
     },
     ark_bn254::Fr,
     solana_bn254_batch_syscall::{
-        MSM_MAX_POINTS, PodG1G2Pair, PodG1Point, PodScalar, alt_bn128_fr_batch_invert,
-        alt_bn128_g1_msm, alt_bn128_pairing_check,
+        MSM_MAX_POINTS, PLONK_PER_PROOF_OUTPUTS, PLONK_SHARED_OUTPUTS, PodG1G2Pair, PodG1Point,
+        PodPlonkReductionContext, PodPlonkReductionInput, PodScalar, alt_bn128_g1_msm,
+        alt_bn128_pairing_check, alt_bn128_plonk_batch_reduce, plonk_reduction_output_count,
     },
+};
+
+#[cfg(test)]
+use {
+    crate::{
+        reduce::{ReducedProof, lagrange_count, lagrange_denominators, reduce, vanishing_eval},
+        transcript::{InnerChallenges, derive_inner},
+    },
+    solana_bn254_batch_syscall::alt_bn128_fr_batch_invert,
 };
 
 // Q-side MSM basis: 8 verifying-key commitments (five selectors, three
@@ -33,16 +43,17 @@ pub const MAX_PROOFS: usize = (MSM_MAX_POINTS - Q_SHARED_POINTS) / Q_POINTS_PER_
 const _: () = assert!(Q_SHARED_POINTS + Q_POINTS_PER_PROOF * MAX_PROOFS <= MSM_MAX_POINTS);
 const _: () = assert!(Q_SHARED_POINTS + Q_POINTS_PER_PROOF * (MAX_PROOFS + 1) > MSM_MAX_POINTS);
 
-/// Batched KZG PLONK verification over the four batch syscalls, the reference
+/// Batched KZG PLONK verification over the batch syscalls, the reference
 /// the on-chain program layer follows.
 ///
 /// All proofs share one verifying key. Per proof, the PLONK verifier reduces
 /// to scalar coefficients on a shared G1 basis; the rho-weighted sums P and
 /// -Q come out of two G1 MSMs and the verdict is one boolean pairing check
-/// e(P, [tau]_2) e(-Q, [1]_2) = 1. Field-side cost note: the Lagrange
-/// denominators of the whole batch go through a single
-/// alt_bn128_fr_batch_invert, so batches with
-/// n * max(num_public_inputs, 1) > FR_MAX_ELEMS surface `CapExceeded`.
+/// e(P, [tau]_2) e(-Q, [1]_2) = 1. The scalar-only PLONK reduction syscall
+/// maps the unchanged raw Fiat-Shamir squeezes to canonical challenges,
+/// batch-inverts the Lagrange denominators, evaluates the existing verifier
+/// equations, and applies the outer randomizers. It never hashes or sees a
+/// curve point.
 pub fn plonk_batch_verify(
     _version: Version,
     vk: &ValidatedVerifyingKey,
@@ -148,29 +159,161 @@ pub fn fold_msms_prevalidated(
     if basis > MSM_MAX_POINTS {
         return Err(PlonkBatchError::TooManyProofs);
     }
-    // each group reduces with its own batch-wide inversion
+    // Each same-key group gets one native scalar reduction. Transcript hashing
+    // remains here; only its raw squeezes cross the boundary.
     let mut reduced_groups = Vec::with_capacity(groups.len());
+    let mut offset = 0usize;
     for group in groups {
-        let inner: Vec<InnerChallenges> = group
+        let inner: Vec<InnerChallengeDigests> = group
             .proofs
             .iter()
-            .map(|proof| derive_inner(group.vk, proof))
+            .map(|proof| derive_inner_digests(group.vk, proof))
             .collect();
-        reduced_groups.push(reduce_batch(group.vk, group.proofs, &inner)?);
+        let rhos = &randomizers[offset..offset + group.proofs.len()];
+        offset += group.proofs.len();
+        reduced_groups.push(reduce_batch(group.vk, group.proofs, &inner, rhos)?);
     }
-    let parts: Vec<(&ValidatedVerifyingKey, &[Proof], &[ReducedProof])> = groups
+    let parts: Vec<(&ValidatedVerifyingKey, &[Proof], &[PodScalar])> = groups
         .iter()
         .zip(&reduced_groups)
         .map(|(group, reduced)| (group.vk, group.proofs, reduced.as_slice()))
         .collect();
-    assemble_msms(&parts, randomizers)
+    assemble_msms(&parts)
 }
 
-/// Runs the per-proof reductions with the Lagrange denominators of the whole
-/// batch inverted in a single alt_bn128_fr_batch_invert call.
-// inline(never) on the batch stages keeps each frame under the 4KiB SBF stack
+/// Marshal one same-key group into the scalar-only native reduction.
 #[inline(never)]
 pub(crate) fn reduce_batch(
+    vk: &ValidatedVerifyingKey,
+    proofs: &[Proof],
+    inner: &[InnerChallengeDigests],
+    randomizers: &[Fr],
+) -> Result<Vec<PodScalar>, PlonkBatchError> {
+    if proofs.len() != inner.len() || proofs.len() != randomizers.len() {
+        return Err(PlonkBatchError::RandomizerCountMismatch);
+    }
+    let context = PodPlonkReductionContext {
+        domain_size_be: vk.domain_size().to_be_bytes(),
+        num_public_inputs_be: (vk.num_public_inputs() as u32).to_be_bytes(),
+        reserved: [0u8; 4],
+        omega: fr_to_pod(&vk.omega()),
+        k1: fr_to_pod(&vk.k1()),
+        k2: fr_to_pod(&vk.k2()),
+    };
+    let inputs: Vec<PodPlonkReductionInput> = proofs
+        .iter()
+        .zip(inner)
+        .zip(randomizers)
+        .map(|((proof, challenges), rho)| PodPlonkReductionInput {
+            challenge_digests: challenges.slots(),
+            evaluations: [
+                proof.evaluations.a,
+                proof.evaluations.b,
+                proof.evaluations.c,
+                proof.evaluations.s_sigma1,
+                proof.evaluations.s_sigma2,
+                proof.evaluations.z_omega,
+            ],
+            rho: fr_to_pod(rho),
+        })
+        .collect();
+    let public_inputs: Vec<PodScalar> = proofs
+        .iter()
+        .flat_map(|proof| proof.public_inputs.iter().copied())
+        .collect();
+    Ok(alt_bn128_plonk_batch_reduce(
+        solana_bn254_batch_syscall::Version::V0,
+        &context,
+        &inputs,
+        &public_inputs,
+    )?)
+}
+
+/// The two batch MSMs: P = sum rho_i (W_zeta + u_i W_zeta_omega) over 2n
+/// points, and -Q over 1 + 8k + 9n points for k keys. -Q is computed directly
+/// by negating every Q coefficient before the MSM; no point is ever negated
+/// outside the field. Shared-basis coefficients collapse to rho-weighted
+/// sums, so each key's commitments appear once whatever n is and every
+/// group's E terms ride on the one generator slot.
+#[inline(never)]
+pub(crate) fn assemble_msms(
+    parts: &[(&ValidatedVerifyingKey, &[Proof], &[PodScalar])],
+) -> Result<(PodG1Point, PodG1Point), PlonkBatchError> {
+    let total: usize = parts.iter().map(|(_, proofs, _)| proofs.len()).sum();
+    let basis = 1 + VK_POINTS_PER_KEY * parts.len() + Q_POINTS_PER_PROOF * total;
+    let mut p_points = Vec::with_capacity(2 * total);
+    let mut p_scalars = Vec::with_capacity(2 * total);
+    let mut q_points = Vec::with_capacity(basis);
+    let mut q_scalars = Vec::with_capacity(basis);
+
+    let mut generator = Fr::from(0u64);
+    for (vk, proofs, reduced) in parts {
+        let expected =
+            plonk_reduction_output_count(proofs.len()).ok_or(PlonkBatchError::TooManyProofs)?;
+        if reduced.len() != expected {
+            return Err(PlonkBatchError::RandomizerCountMismatch);
+        }
+        let key = vk.key();
+        let shared_points: [&PodG1Point; VK_POINTS_PER_KEY] = [
+            &key.q_m,
+            &key.q_l,
+            &key.q_r,
+            &key.q_o,
+            &key.q_c,
+            &key.s_sigma[0],
+            &key.s_sigma[1],
+            &key.s_sigma[2],
+        ];
+        for (point, coefficient) in shared_points.iter().zip(&reduced[..VK_POINTS_PER_KEY]) {
+            q_points.push(**point);
+            q_scalars.push(*coefficient);
+        }
+        generator +=
+            fr_from_be(&reduced[VK_POINTS_PER_KEY]).ok_or(PlonkBatchError::NonCanonicalScalar)?;
+
+        for (i, proof) in proofs.iter().enumerate() {
+            let base = PLONK_SHARED_OUTPUTS + i * PLONK_PER_PROOF_OUTPUTS;
+            let coefficients = &reduced[base..base + PLONK_PER_PROOF_OUTPUTS];
+            p_points.push(proof.opening);
+            p_scalars.push(coefficients[0]);
+            p_points.push(proof.shifted_opening);
+            p_scalars.push(coefficients[1]);
+
+            let per_proof: [&PodG1Point; Q_POINTS_PER_PROOF] = [
+                &proof.grand_product,
+                &proof.quotient[0],
+                &proof.quotient[1],
+                &proof.quotient[2],
+                &proof.wire_commitments[0],
+                &proof.wire_commitments[1],
+                &proof.wire_commitments[2],
+                &proof.opening,
+                &proof.shifted_opening,
+            ];
+            for (point, coefficient) in per_proof.iter().zip(&coefficients[2..]) {
+                q_points.push(**point);
+                q_scalars.push(*coefficient);
+            }
+        }
+    }
+    q_points.push(G1_GENERATOR);
+    q_scalars.push(fr_to_pod(&generator));
+
+    Ok((msm(&p_points, &p_scalars)?, msm(&q_points, &q_scalars)?))
+}
+
+fn msm(points: &[PodG1Point], scalars: &[PodScalar]) -> Result<PodG1Point, PlonkBatchError> {
+    Ok(alt_bn128_g1_msm(
+        solana_bn254_batch_syscall::Version::V0,
+        points,
+        scalars,
+    )?)
+}
+
+/// Former all-SBF scalar path retained only as an independent differential
+/// oracle for the native reduction.
+#[cfg(test)]
+fn reduce_batch_reference(
     vk: &ValidatedVerifyingKey,
     proofs: &[Proof],
     inner: &[InnerChallenges],
@@ -210,14 +353,8 @@ pub(crate) fn reduce_batch(
         .collect()
 }
 
-/// The two batch MSMs: P = sum rho_i (W_zeta + u_i W_zeta_omega) over 2n
-/// points, and -Q over 1 + 8k + 9n points for k keys. -Q is computed directly
-/// by negating every Q coefficient before the MSM; no point is ever negated
-/// outside the field. Shared-basis coefficients collapse to rho-weighted
-/// sums, so each key's commitments appear once whatever n is and every
-/// group's E terms ride on the one generator slot.
-#[inline(never)]
-pub(crate) fn assemble_msms(
+#[cfg(test)]
+fn assemble_msms_reference(
     parts: &[(&ValidatedVerifyingKey, &[Proof], &[ReducedProof])],
     randomizers: &[Fr],
 ) -> Result<(PodG1Point, PodG1Point), PlonkBatchError> {
@@ -227,85 +364,72 @@ pub(crate) fn assemble_msms(
     let mut p_scalars = Vec::with_capacity(2 * total);
     let mut q_points = Vec::with_capacity(basis);
     let mut q_scalars = Vec::with_capacity(basis);
-
-    // reference arrays throughout: by-value point/coefficient arrays push the
-    // frame past the 4KiB SBF stack
     let mut generator = Fr::from(0u64);
     let mut offset = 0usize;
+
     for (vk, proofs, reduced) in parts {
         let rhos = &randomizers[offset..offset + proofs.len()];
         offset += proofs.len();
         let key = vk.key();
-
         let mut shared = [Fr::from(0u64); VK_POINTS_PER_KEY];
         for (proof_coeffs, rho) in reduced.iter().zip(rhos) {
             let vk_coeffs = &proof_coeffs.vk_coeffs;
-            let coefficients: [&Fr; VK_POINTS_PER_KEY] = [
-                &vk_coeffs.q_m,
-                &vk_coeffs.q_l,
-                &vk_coeffs.q_r,
-                &vk_coeffs.q_o,
-                &vk_coeffs.q_c,
-                &vk_coeffs.s_sigma1,
-                &vk_coeffs.s_sigma2,
-                &vk_coeffs.s_sigma3,
+            let coefficients = [
+                vk_coeffs.q_m,
+                vk_coeffs.q_l,
+                vk_coeffs.q_r,
+                vk_coeffs.q_o,
+                vk_coeffs.q_c,
+                vk_coeffs.s_sigma1,
+                vk_coeffs.s_sigma2,
+                vk_coeffs.s_sigma3,
             ];
             for (accumulator, coefficient) in shared.iter_mut().zip(coefficients) {
-                *accumulator += *rho * *coefficient;
+                *accumulator += *rho * coefficient;
             }
             generator += *rho * proof_coeffs.generator;
         }
-        let shared_points: [&PodG1Point; VK_POINTS_PER_KEY] = [
-            &key.q_m,
-            &key.q_l,
-            &key.q_r,
-            &key.q_o,
-            &key.q_c,
-            &key.s_sigma[0],
-            &key.s_sigma[1],
-            &key.s_sigma[2],
+        let shared_points = [
+            key.q_m,
+            key.q_l,
+            key.q_r,
+            key.q_o,
+            key.q_c,
+            key.s_sigma[0],
+            key.s_sigma[1],
+            key.s_sigma[2],
         ];
-        for (point, coefficient) in shared_points.iter().zip(shared) {
-            q_points.push(**point);
-            q_scalars.push(-coefficient);
+        for (point, coefficient) in shared_points.into_iter().zip(shared) {
+            q_points.push(point);
+            q_scalars.push(fr_to_pod(&-coefficient));
         }
 
         for ((proof, proof_coeffs), rho) in proofs.iter().zip(*reduced).zip(rhos) {
             p_points.push(proof.opening);
-            p_scalars.push(*rho * proof_coeffs.w_zeta_p);
+            p_scalars.push(fr_to_pod(&(*rho * proof_coeffs.w_zeta_p)));
             p_points.push(proof.shifted_opening);
-            p_scalars.push(*rho * proof_coeffs.w_zeta_omega_p);
+            p_scalars.push(fr_to_pod(&(*rho * proof_coeffs.w_zeta_omega_p)));
 
-            let per_proof: [(&PodG1Point, &Fr); Q_POINTS_PER_PROOF] = [
-                (&proof.grand_product, &proof_coeffs.z),
-                (&proof.quotient[0], &proof_coeffs.t_lo),
-                (&proof.quotient[1], &proof_coeffs.t_mid),
-                (&proof.quotient[2], &proof_coeffs.t_hi),
-                (&proof.wire_commitments[0], &proof_coeffs.a),
-                (&proof.wire_commitments[1], &proof_coeffs.b),
-                (&proof.wire_commitments[2], &proof_coeffs.c),
-                (&proof.opening, &proof_coeffs.w_zeta_q),
-                (&proof.shifted_opening, &proof_coeffs.w_zeta_omega_q),
+            let per_proof = [
+                (&proof.grand_product, proof_coeffs.z),
+                (&proof.quotient[0], proof_coeffs.t_lo),
+                (&proof.quotient[1], proof_coeffs.t_mid),
+                (&proof.quotient[2], proof_coeffs.t_hi),
+                (&proof.wire_commitments[0], proof_coeffs.a),
+                (&proof.wire_commitments[1], proof_coeffs.b),
+                (&proof.wire_commitments[2], proof_coeffs.c),
+                (&proof.opening, proof_coeffs.w_zeta_q),
+                (&proof.shifted_opening, proof_coeffs.w_zeta_omega_q),
             ];
             for (point, coefficient) in per_proof {
                 q_points.push(*point);
-                q_scalars.push(-(*rho * *coefficient));
+                q_scalars.push(fr_to_pod(&-(*rho * coefficient)));
             }
         }
     }
     q_points.push(G1_GENERATOR);
-    q_scalars.push(-generator);
-
+    q_scalars.push(fr_to_pod(&-generator));
     Ok((msm(&p_points, &p_scalars)?, msm(&q_points, &q_scalars)?))
-}
-
-fn msm(points: &[PodG1Point], scalars: &[Fr]) -> Result<PodG1Point, PlonkBatchError> {
-    let scalars: Vec<PodScalar> = scalars.iter().map(fr_to_pod).collect();
-    Ok(alt_bn128_g1_msm(
-        solana_bn254_batch_syscall::Version::V0,
-        points,
-        &scalars,
-    )?)
 }
 
 #[cfg(test)]
@@ -428,6 +552,75 @@ mod tests {
     }
 
     #[test]
+    fn test_native_reduction_matches_former_scalar_path_exactly() {
+        let mut rng = rng();
+        for n in 1usize..=5 {
+            let (_, vk, proofs) = batch(&mut rng, n);
+            let inner: Vec<InnerChallenges> = proofs
+                .iter()
+                .map(|proof| derive_inner(&vk, proof))
+                .collect();
+            let digests: Vec<InnerChallengeDigests> = proofs
+                .iter()
+                .map(|proof| derive_inner_digests(&vk, proof))
+                .collect();
+            let seed = derive_seed(Independent, &vk, &proofs);
+            let rhos = derive_randomizers(&seed, n as u64, Independent);
+            let reference = reduce_batch_reference(&vk, &proofs, &inner).unwrap();
+            let native = reduce_batch(&vk, &proofs, &digests, &rhos).unwrap();
+
+            let mut expected = vec![PodScalar([0u8; 32]); native.len()];
+            let mut shared = [Fr::from(0u64); PLONK_SHARED_OUTPUTS];
+            for (i, (reduced, rho)) in reference.iter().zip(&rhos).enumerate() {
+                let vk_coeffs = &reduced.vk_coeffs;
+                for (accumulator, coefficient) in shared[..8].iter_mut().zip([
+                    vk_coeffs.q_m,
+                    vk_coeffs.q_l,
+                    vk_coeffs.q_r,
+                    vk_coeffs.q_o,
+                    vk_coeffs.q_c,
+                    vk_coeffs.s_sigma1,
+                    vk_coeffs.s_sigma2,
+                    vk_coeffs.s_sigma3,
+                ]) {
+                    *accumulator -= *rho * coefficient;
+                }
+                shared[8] -= *rho * reduced.generator;
+                let base = PLONK_SHARED_OUTPUTS + i * PLONK_PER_PROOF_OUTPUTS;
+                let per = [
+                    *rho * reduced.w_zeta_p,
+                    *rho * reduced.w_zeta_omega_p,
+                    -(*rho * reduced.z),
+                    -(*rho * reduced.t_lo),
+                    -(*rho * reduced.t_mid),
+                    -(*rho * reduced.t_hi),
+                    -(*rho * reduced.a),
+                    -(*rho * reduced.b),
+                    -(*rho * reduced.c),
+                    -(*rho * reduced.w_zeta_q),
+                    -(*rho * reduced.w_zeta_omega_q),
+                ];
+                for (slot, scalar) in expected[base..base + PLONK_PER_PROOF_OUTPUTS]
+                    .iter_mut()
+                    .zip(per)
+                {
+                    *slot = fr_to_pod(&scalar);
+                }
+            }
+            for (slot, scalar) in expected[..PLONK_SHARED_OUTPUTS].iter_mut().zip(shared) {
+                *slot = fr_to_pod(&scalar);
+            }
+            assert_eq!(native, expected, "all scalar slots, n = {n}");
+
+            let old_points =
+                assemble_msms_reference(&[(&vk, proofs.as_slice(), reference.as_slice())], &rhos)
+                    .unwrap();
+            let new_points = assemble_msms(&[(&vk, proofs.as_slice(), native.as_slice())]).unwrap();
+            assert_eq!(new_points, old_points, "both MSM outputs, n = {n}");
+        }
+    }
+
+    #[test]
     fn test_batch_of_one_matches_direct_arkworks_pairing() {
         // n = 1 is a batch of one, checked like any other; pin
         // the reduction against an independent computation of P and Q with
@@ -437,7 +630,7 @@ mod tests {
         let (_, vk, proofs) = batch(&mut rng, 1);
         let proof = &proofs[0];
         let challenges = derive_inner(&vk, proof);
-        let reduced = reduce_batch(&vk, proofs.as_slice(), &[challenges])
+        let reduced = reduce_batch_reference(&vk, proofs.as_slice(), &[challenges])
             .unwrap()
             .remove(0);
 
@@ -517,7 +710,7 @@ mod tests {
             .iter()
             .map(|proof| derive_inner(&vk, proof))
             .collect();
-        let reduced = reduce_batch(&vk, &proofs, &inner).unwrap();
+        let reduced = reduce_batch_reference(&vk, &proofs, &inner).unwrap();
 
         // perturbations s_i on W_zeta and t_i on W_zeta_omega add
         // (s_i + u_i t_i) G to P_i and (zeta_i s_i + u_i zeta_i omega t_i) G
@@ -541,9 +734,11 @@ mod tests {
         perturbed[1].shifted_opening = shift(&proofs[1].shifted_opening, t_1);
 
         let check = |randomizers: &[Fr]| -> bool {
-            let (p, negated_q) =
-                assemble_msms(&[(&vk, perturbed.as_slice(), reduced.as_slice())], randomizers)
-                    .unwrap();
+            let (p, negated_q) = assemble_msms_reference(
+                &[(&vk, perturbed.as_slice(), reduced.as_slice())],
+                randomizers,
+            )
+            .unwrap();
             let pairs = [
                 PodG1G2Pair {
                     g1: p,
