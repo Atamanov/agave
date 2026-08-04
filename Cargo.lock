@@ -7558,6 +7558,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-bn254-decision-collector"
+version = "4.1.2"
+dependencies = [
+ "hex",
+ "litesvm",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "solana-account 3.4.0",
+ "solana-address 2.6.0",
+ "solana-bn254-decision-bench",
+ "solana-bn254-decision-litesvm",
+ "solana-compute-budget-interface",
+ "solana-instruction",
+ "solana-keccak-hasher",
+ "solana-keypair",
+ "solana-message 3.1.0",
+ "solana-signer",
+ "solana-transaction 3.1.0",
+]
+
+[[package]]
 name = "solana-bn254-decision-litesvm"
 version = "4.1.2"
 dependencies = [

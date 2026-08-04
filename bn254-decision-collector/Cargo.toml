@@ -1,0 +1,37 @@
+[package]
+name = "solana-bn254-decision-collector"
+description = "In-tree LiteSVM residual collector for the BN254 decision campaign"
+version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[features]
+# A backend must be selected: the registry surface it needs is gated on Helios.
+default = ["backend-b4-helios"]
+backend-b4-helios = ["solana-bn254-decision-litesvm/backend-b4-helios"]
+backend-b5-helios-ifma = ["solana-bn254-decision-litesvm/backend-b5-helios-ifma"]
+
+[dependencies]
+hex = { workspace = true }
+litesvm = { version = "0.12", features = ["register-tracing"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+solana-account-v3 = { package = "solana-account", version = "3.2.0" }
+solana-address-v2 = { package = "solana-address", version = "2.6" }
+solana-bn254-decision-bench = { path = "../bn254-decision-bench" }
+solana-bn254-decision-litesvm = { path = "../bn254-decision-litesvm", default-features = false }
+solana-compute-budget-interface-v3 = { package = "solana-compute-budget-interface", version = "3.0.0" }
+solana-instruction-v3 = { package = "solana-instruction", version = "3.4" }
+solana-keccak-hasher = "3.1.0"
+solana-keypair-v3 = { package = "solana-keypair", version = "3.1" }
+solana-message-v3 = { package = "solana-message", version = "3.1" }
+solana-signer-v3 = { package = "solana-signer", version = "3.0" }
+solana-transaction-v3 = { package = "solana-transaction", version = "3.1", features = ["verify"] }
+
+[lints]
+workspace = true
