@@ -109,3 +109,48 @@ fn residuals_json_agrees_with_the_observed_cells() {
     }
     assert_eq!(residuals.len(), 30, "residuals.json must hold 30 cells");
 }
+
+/// The stock-priced columns are the only ones where the table's syscall charge
+/// and the charge LiteSVM actually metered are the same schedule. So their cell
+/// must reconstruct the metered transaction exactly:
+///
+///     syscall_cu(trace) + non_core_transaction_cu == transaction_cu
+///
+/// Any drift means the residual subtractor and the renderer disagree about what
+/// a stock op costs — the residual either keeps a charge the table adds again
+/// (double count) or drops one the table never adds. Both have happened here:
+/// the pairing overhead was double counted, and the G1 mul/add work was
+/// dropped entirely.
+#[test]
+fn stock_priced_cells_reconstruct_the_metered_transaction() {
+    use solana_bn254_decision_bench::syscall_cu;
+    use solana_program_runtime::execution_budget::SVMTransactionExecutionCost;
+
+    let contract = observed();
+    let cost = SVMTransactionExecutionCost::default();
+    let mut checked = 0usize;
+    for cell in &contract.cells {
+        if !matches!(cell.column_id, ColumnId::Current | ColumnId::CurrentFp12) {
+            continue;
+        }
+        // Older captures predate the field; they cannot be checked, not silently passed.
+        assert_ne!(
+            cell.transaction_cu, 0,
+            "{:?}/{:?} has no metered total; re-run collect-residuals.sh",
+            cell.row_id, cell.column_id
+        );
+        let syscall = syscall_cu(&cost, cell.column_id, &cell.observed_trace);
+        assert_eq!(
+            syscall + cell.non_core_transaction_cu,
+            cell.transaction_cu,
+            "{:?}/{:?}: syscall {} + residual {} != metered {}",
+            cell.row_id,
+            cell.column_id,
+            syscall,
+            cell.non_core_transaction_cu,
+            cell.transaction_cu
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 10, "both stock columns on all five rows");
+}

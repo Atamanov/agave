@@ -725,6 +725,7 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
         column_id: request.column_id,
         observed_trace: observations[0].1.clone(),
         non_core_transaction_cu: observations[0].2,
+        transaction_cu: observations[0].0.compute_units_consumed,
         source: "observed_in_tree_host_non_core".into(),
         sample_count: SAMPLE_COUNT,
         program_sha256: digest(&program_bytes),

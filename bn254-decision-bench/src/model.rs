@@ -6,6 +6,20 @@ use {
 pub const SCHEMA_PREFIX: &str = "helius.bn254-decision-table-v3";
 pub const MAX_TRANSACTION_CU: u64 = 1_400_000;
 
+/// The current-basis charge for one `alt_bn128_pairing_map` call.
+///
+/// The Fp12 finalizer is not the stock precompile - no stock op returns an Fp12
+/// element - so the Current + Fp12 column cannot be priced at the stock
+/// `group_op` rate. This is the price LiteSVM meters and the price the residual
+/// subtracts; using anything else makes the cell reconstruct to a number the
+/// runtime never charged.
+pub fn current_pairing_map_cu(pairs: u64) -> u64 {
+    const BASE: u64 = 17_246;
+    const PER_PAIR: u64 = 5_741;
+    const SUBGROUP: u64 = 3_595;
+    BASE.saturating_add(PER_PAIR.saturating_add(SUBGROUP).saturating_mul(pairs))
+}
+
 /// The stock `alt_bn128_group_op` pairing charge, which is consensus today and
 /// not part of the batch schedule.
 ///
@@ -452,6 +466,12 @@ pub struct ResidualCell {
     pub column_id: ColumnId,
     pub observed_trace: OperationTrace,
     pub non_core_transaction_cu: u64,
+    /// Everything LiteSVM metered for the transaction, before any syscall
+    /// charge was subtracted. For the stock-priced columns
+    /// `syscall_cu + non_core_transaction_cu` must equal this exactly; a
+    /// mismatch means the split double counts a charge or drops one.
+    #[serde(default)]
+    pub transaction_cu: u64,
     pub source: String,
     pub sample_count: u64,
     pub program_sha256: String,

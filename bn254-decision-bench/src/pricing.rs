@@ -5,7 +5,10 @@
 //! stock pairing charge drift between the renderer and the residual subtractor.
 
 use {
-    crate::{ColumnId, OperationTrace, RowId, expected_trace, stock_group_op_pairing_cu},
+    crate::{
+        ColumnId, OperationTrace, RowId, current_pairing_map_cu, expected_trace,
+        stock_group_op_pairing_cu,
+    },
     solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
 };
 
@@ -17,11 +20,22 @@ pub fn syscall_cu(
 ) -> u64 {
     // Current keeps the stock precompile; every other column reaches the batch
     // syscalls and is priced by the fitted schedule.
+    // Current keeps the stock precompile; every other column reaches the batch
+    // syscalls. Current + Fp12 is a third case: it stays per-proof independent
+    // but its finalizer is `pairing_map`, which has no stock equivalent.
     let stock = matches!(column, ColumnId::Current | ColumnId::CurrentFp12);
     let mut cu = 0u64;
-    for call in trace.pairing_checks.iter().chain(&trace.pairing_maps) {
+    for call in &trace.pairing_checks {
         let each = if stock {
             stock_group_op_pairing_cu(call.pairs.into())
+        } else {
+            cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into())
+        };
+        cu = cu.saturating_add(u64::from(call.calls).saturating_mul(each));
+    }
+    for call in &trace.pairing_maps {
+        let each = if stock {
+            current_pairing_map_cu(call.pairs.into())
         } else {
             cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into())
         };

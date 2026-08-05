@@ -23,10 +23,11 @@
         "stock_g1_multiplications": 5
       },
       "non_core_transaction_cu": 3899,
+      "transaction_cu": 392829,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "2b3e52462d79f273e6ec77b73c426def26cc9d84526dc4f8c6300e44ae24d7b2"
     },
     {
@@ -83,10 +84,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 68774,
+      "transaction_cu": 193122,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "b5adb4579702c571ce5b4c3fd120994181f46566acd608afac9fc87465e8a0df"
     },
     {
@@ -143,10 +145,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 70318,
+      "transaction_cu": 183881,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "ef5a421b1d74ca72db968ff172a123c1b65732cc95c99d76a8f0663fd4d0beab"
     },
     {
@@ -195,10 +198,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 150498,
+      "transaction_cu": 250537,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e021ced42c5e2f42e7c8e404757fb23edc16abd87bbfc245be583e30cbf61d61",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "91c58513ab7a44b6b85e4ba57b6341086050984800ee5faf0b622016ba2676ea"
     },
     {
@@ -222,10 +226,11 @@
         "stock_g1_multiplications": 5
       },
       "non_core_transaction_cu": 30238,
+      "transaction_cu": 277378,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "821af4e07c32f3047e8ad7c6da68eec39518a04c901e4d2f35680e6e800ca0b8"
     },
     {
@@ -278,10 +283,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 73428,
+      "transaction_cu": 185018,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "9e8a59137621f08046c33f375b399d9a229f7922eb23ae8ce57c02383e51248d"
     },
     {
@@ -305,10 +311,11 @@
         "stock_g1_multiplications": 2
       },
       "non_core_transaction_cu": 1999,
+      "transaction_cu": 157571,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "83388618ea5504861131bd0fcbca4460aac04917fdf0a9baf86cbb4a6f4a88bf"
     },
     {
@@ -365,10 +372,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 37966,
+      "transaction_cu": 159082,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "f0ba876d3da5c695deb252d88f6cc16d18ab2d55f519648e0bc64bd75be9c3bb"
     },
     {
@@ -425,10 +433,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 40363,
+      "transaction_cu": 139909,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "8d45f4b41f6467e43d588b178ee90735816a539c28e6e97f8a84d03dee5285af"
     },
     {
@@ -477,10 +486,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 127170,
+      "transaction_cu": 226591,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e021ced42c5e2f42e7c8e404757fb23edc16abd87bbfc245be583e30cbf61d61",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "e11e2febc9b0bec37ca6bfae23a36e10e851673f5b531e1d03ff87ca292320d9"
     },
     {
@@ -504,10 +514,11 @@
         "stock_g1_multiplications": 2
       },
       "non_core_transaction_cu": 15627,
+      "transaction_cu": 114483,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "c0407a8afc0a7d2dd3f8d601df5ff7aa59ccf485b5cdd229e20feb52e21e1806"
     },
     {
@@ -558,10 +569,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 37082,
+      "transaction_cu": 157988,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "f0cb63ec427e0750804e5db6c478226826f6c506641676afebb6905836c38674"
     },
     {
@@ -585,10 +597,11 @@
         "stock_g1_multiplications": 3
       },
       "non_core_transaction_cu": 2703,
+      "transaction_cu": 236061,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "53a25da83eb8ef989727466cdf2c2da8006f036526d4c5f4e5bbdaf12c65f5cd"
     },
     {
@@ -661,10 +674,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 56244,
+      "transaction_cu": 229295,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "a692ca764670e79d28a651f7ff98fdbfa6bb493467d4eaaa018c91844957c024"
     },
     {
@@ -737,10 +751,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 59490,
+      "transaction_cu": 200186,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "fed3c2c5b3029c325de927d729843f940916093188861bb2557e2cad140d13cf"
     },
     {
@@ -789,10 +804,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 134996,
+      "transaction_cu": 235909,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e021ced42c5e2f42e7c8e404757fb23edc16abd87bbfc245be583e30cbf61d61",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "dae5d78227d5d7f2e2718d3ed75131fb34ac45905bb3a6cfdf21b4169301a484"
     },
     {
@@ -816,10 +832,11 @@
         "stock_g1_multiplications": 3
       },
       "non_core_transaction_cu": 22722,
+      "transaction_cu": 171006,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "764e98526e4a9890b869275a8a3544d24b80df113ccb885c82cfa2554f3913f2"
     },
     {
@@ -882,10 +899,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 55201,
+      "transaction_cu": 221025,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "e99d367068439f7dd74e8c7cf89eb1605ba48b4b053b67685f6de6f536699089",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "e5be9c10766d9eed5314a8ff569d7b1019a20568f382f6d7e2f480c7ca559099"
     },
     {
@@ -909,10 +927,11 @@
         "stock_g1_multiplications": 40
       },
       "non_core_transaction_cu": 255085,
+      "transaction_cu": 518681,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "7b3284fcf978ed9b5ea5c1af464b0a5f2b00074c84f8e59dca7d9f79525f7d1a"
     },
     {
@@ -945,10 +964,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 265118,
+      "transaction_cu": 331000,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "e1a7c804b1e42ee51ae6cb85781ef28c43a9c24795f67990b0a49c4e6e7ce499"
     },
     {
@@ -981,10 +1001,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 265410,
+      "transaction_cu": 324102,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "e842fd2a9bc0d5aacd3eb324fceed01f9c632816105ae7ba0688bda5019ee9b8"
     },
     {
@@ -1033,10 +1054,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 134997,
+      "transaction_cu": 235910,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "22e49c96b324c97e7a2f6749aa26118a9433d36f9c18f6bb716620cbb2000956",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "02eb2e7495307c3c8fafa7712809b7c58f51184bbce309a04414a7b3f402c848"
     },
     {
@@ -1060,10 +1082,11 @@
         "stock_g1_multiplications": 40
       },
       "non_core_transaction_cu": 255333,
+      "transaction_cu": 492793,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "e04de361cb2b5d400b3c4b7ab0ddf2629056b458a185099a571de373e9827693"
     },
     {
@@ -1096,10 +1119,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 265181,
+      "transaction_cu": 331063,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "aaf392789e08130495af48e1207a0682414168b46cf20256dd9fb77d59d3017c"
     },
     {
@@ -1123,10 +1147,11 @@
         "stock_g1_multiplications": 60
       },
       "non_core_transaction_cu": 378991,
+      "transaction_cu": 774385,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "95cbf6dd44b0c59826560b05f0e505667db5a872f8078798000ec75fbf88e164"
     },
     {
@@ -1159,10 +1184,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 393493,
+      "transaction_cu": 474258,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "6245b0d16af6508c5bcee8ea75a85da85c6360078a240e4b43df8b72fe5ee2cf"
     },
     {
@@ -1195,10 +1221,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 393812,
+      "transaction_cu": 467387,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "72ad39d6c6921044166001cac240280402497b4113083a77cea812b5d07618ab"
     },
     {
@@ -1247,10 +1274,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 158176,
+      "transaction_cu": 259278,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "22e49c96b324c97e7a2f6749aa26118a9433d36f9c18f6bb716620cbb2000956",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "9efab6583f5c710dadac091efe78d7df6d9572e22c30bea010b3e7028ccf522c"
     },
     {
@@ -1274,10 +1302,11 @@
         "stock_g1_multiplications": 60
       },
       "non_core_transaction_cu": 379350,
+      "transaction_cu": 735540,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "1c87d53cc2a29cbf74b0e1de9dbed312aa2aecde79f9e51cac7ae9f6c22ba64d"
     },
     {
@@ -1310,10 +1339,11 @@
         "stock_g1_multiplications": 0
       },
       "non_core_transaction_cu": 393556,
+      "transaction_cu": 474321,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "54715ed6c960019ba951f3ba94550bd10ce6cc1791017d185cf951956e03eb52",
-      "runtime_revision": "ca6e27fd6ee38169c959954251e479a73457a38a",
+      "runtime_revision": "d96d12c42a8a3a97a18c020972dc13a9e04235bb",
       "transaction_log_sha256": "647e1e89278c563c695db61071cd4e2a95eb7381c5b58149407f3dd86dc3ed29"
     }
   ]
