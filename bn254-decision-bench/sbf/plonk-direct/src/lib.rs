@@ -255,19 +255,25 @@ fn parse_vk(data: &[u8], offset: &mut usize) -> Option<(VerifyingKey, [u8; 32], 
     // to the allowlisted keys: all other commitments and both SRS points must
     // remain finite. The ordinary untrusted VerifyingKey::validate path is not
     // weakened.
-    if key.q_r.0 != [0u8; 64] || key.q_c.0 != [0u8; 64] {
-        return None;
-    }
-    let finite_g1_points = [
+    // Qr and Qc are infinity only when the circuit never uses those selectors,
+    // which the multiplier fixtures did and no real circuit does. Both spellings
+    // are admitted, and a finite one is validated like every other commitment.
+    let mut finite_g1_points = Vec::with_capacity(8);
+    finite_g1_points.extend_from_slice(&[
         &key.q_m,
         &key.q_l,
         &key.q_o,
         &key.s_sigma[0],
         &key.s_sigma[1],
         &key.s_sigma[2],
-    ];
-    if finite_g1_points.iter().any(|point| point.0 == [0u8; 64])
-        || key.g2_gen.0 == [0u8; 128]
+    ]);
+    if key.q_r.0 != [0u8; 64] {
+        finite_g1_points.push(&key.q_r);
+    }
+    if key.q_c.0 != [0u8; 64] {
+        finite_g1_points.push(&key.q_c);
+    }
+    if key.g2_gen.0 == [0u8; 128]
         || key.g2_tau.0 == [0u8; 128]
     {
         return None;
@@ -275,7 +281,7 @@ fn parse_vk(data: &[u8], offset: &mut usize) -> Option<(VerifyingKey, [u8; 32], 
     #[cfg(not(target_os = "solana"))]
     {
         use ark_ec::AffineRepr;
-        for point in finite_g1_points {
+        for point in &finite_g1_points {
             if point.to_affine().ok()?.is_zero() {
                 return None;
             }
