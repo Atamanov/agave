@@ -58,9 +58,15 @@ pub const CURRENT_MSM_PER_POINT_CU: u64 = 3_322;
 pub const CURRENT_PAIRING_BASE_CU: u64 = 17_246;
 pub const CURRENT_PAIRING_PER_PAIR_CU: u64 = 5_741;
 pub const CURRENT_G2_SUBGROUP_CHECK_CU: u64 = 3_595;
-pub const CURRENT_G2_LINE_PREP_CREDIT_CU: u64 = 900;
-pub const CURRENT_PREPARED_G2_RESTORE_CU: u64 = 300;
-pub const CURRENT_G2_PREPARE_BASE_CU: u64 = 700;
+// The prepared-operand ops charge the RUNTIME lane tariff, not the embedded
+// linear current-pricing model above: they are new ops with no legacy
+// schedule, and consumer CU assertions should match the fork validator.
+pub const RUNTIME_PAIRING_BASE_CU: u64 = 4_641;
+pub const RUNTIME_PAIRING_PER_PAIR_CU: u64 = 4_188;
+pub const RUNTIME_PAIRING_LANE_CU: u64 = 20_338;
+pub const RUNTIME_PREPARED_SCALAR_CREDIT_CU: u64 = 2_200;
+pub const RUNTIME_PREPARED_LANE_CREDIT_CU: u64 = 500;
+pub const RUNTIME_G2_PREPARE_CU: u64 = 700 + 4_188 + 1_612;
 pub const CURRENT_GROUP_OP_G1_ADD_CU: u64 = 334;
 pub const CURRENT_GROUP_OP_G1_MUL_CU: u64 = 3_840;
 pub const CURRENT_GROUP_OP_PAIRING_FIRST_CU: u64 = 36_364;
@@ -156,18 +162,25 @@ pub fn current_trusted_gt_multiexp_cu(targets: u64) -> u64 {
     CURRENT_PAIRING_BASE_CU.saturating_add(CURRENT_PAIRING_PER_PAIR_CU.saturating_mul(targets))
 }
 
-/// A prepared pair takes the registered credit plus the line-preparation
-/// credit and pays the wire-blob restore.
+/// Runtime lane tariff with the regime-split measured NET credit per
+/// prepared pair; mirrors `alt_bn128_pairing_cost_prepared`.
 pub fn current_prepared_pairing_cu(full: u64, prepared: u64) -> u64 {
-    current_registered_pairing_cu(full, prepared)
-        .saturating_sub(CURRENT_G2_LINE_PREP_CREDIT_CU.saturating_mul(prepared))
-        .saturating_add(CURRENT_PREPARED_G2_RESTORE_CU.saturating_mul(prepared))
+    let pairs = full.saturating_add(prepared);
+    let lanes = pairs / 8;
+    let remainder = pairs % 8;
+    let credit = if lanes == 0 {
+        RUNTIME_PREPARED_SCALAR_CREDIT_CU
+    } else {
+        RUNTIME_PREPARED_LANE_CREDIT_CU
+    };
+    RUNTIME_PAIRING_BASE_CU
+        .saturating_add(RUNTIME_PAIRING_LANE_CU.saturating_mul(lanes))
+        .saturating_add(RUNTIME_PAIRING_PER_PAIR_CU.saturating_mul(remainder))
+        .saturating_sub(credit.saturating_mul(prepared))
 }
 
 pub fn current_g2_prepare_cu() -> u64 {
-    CURRENT_G2_PREPARE_BASE_CU
-        .saturating_add(CURRENT_PAIRING_PER_PAIR_CU)
-        .saturating_add(CURRENT_G2_SUBGROUP_CHECK_CU)
+    RUNTIME_G2_PREPARE_CU
 }
 
 pub fn current_registry_init_cu(g2_entries: u64, gt_entries: u64) -> u64 {
@@ -801,7 +814,9 @@ declare_builtin_function!(
         let total = usize::from(full_count)
             .checked_add(usize::from(prepared_count))
             .ok_or("pair count overflow")?;
-        if total == 0 || total > PAIRING_MAX_PAIRS || usize::from(prepared_count) > MAX_PREPARED_PAIRS
+        if prepared_count == 0
+            || total > PAIRING_MAX_PAIRS
+            || usize::from(prepared_count) > MAX_PREPARED_PAIRS
         {
             return Ok(1);
         }
@@ -853,7 +868,7 @@ declare_builtin_function!(
         let total = usize::from(full_count)
             .checked_add(usize::from(prepared_count))
             .ok_or("pair count overflow")?;
-        if total == 0
+        if prepared_count == 0
             || total > PAIRING_MAP_MAX_PAIRS
             || usize::from(prepared_count) > MAX_PREPARED_PAIRS
         {

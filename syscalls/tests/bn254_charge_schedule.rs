@@ -145,56 +145,91 @@ fn a_registered_pair_is_cheaper_than_a_full_pair() {
     }
 }
 
-/// Mirrors `alt_bn128_pairing_cost_prepared`: the registered credit plus the
-/// line-preparation credit, minus nothing, plus the per-blob restore charge.
+/// Ryzen 9 9900X IFMA capture, 2026-08-05, agent-mail prepared-tariff-bench:
+/// net per-prepared-pair saving `(allfull(total) - mixed) / prepared` in CU
+/// at 33 ns/CU. Regime is decided by `total / 8`.
+const MEASURED_PREPARED_SAVING: &[(u64, u64, u64)] = &[
+    // (full, prepared, measured net saving per prepared pair)
+    (1, 2, 2_270),
+    (1, 3, 2_317),
+    (0, 3, 2_387),
+    (5, 3, 552),
+    (2, 6, 899),
+    (0, 8, 983),
+    (8, 8, 792),
+];
+
+/// Mirrors `alt_bn128_pairing_cost_prepared`: full price for every pair,
+/// minus a regime-split measured NET credit per prepared pair.
 fn prepared_pairing_charge(cost: &SVMTransactionExecutionCost, full: u64, prepared: u64) -> u64 {
-    registered_pairing_charge(cost, full, prepared)
-        - cost.alt_bn128_g2_line_prep_credit_cost * prepared
-        + cost.alt_bn128_prepared_g2_restore_cost * prepared
+    let pairs = full + prepared;
+    let credit = if pairs < 8 {
+        cost.alt_bn128_prepared_pair_scalar_credit_cost
+    } else {
+        cost.alt_bn128_prepared_pair_lane_credit_cost
+    };
+    pairing_charge(cost, pairs) - credit * prepared
 }
 
-/// A prepared pair skips the subgroup check AND line preparation, so it must
-/// undercut a registered pair, which must undercut a full pair; the combined
-/// credit must never exceed the per-pair price, or a shape could go free.
+/// The credit never exceeds the measured saving in its regime, so the
+/// prepared schedule never charges below what the syscall would cost as
+/// plain full pairs minus real work saved.
 #[test]
-fn a_prepared_pair_undercuts_registered_and_never_goes_free() {
+fn prepared_credit_stays_within_the_measured_saving() {
     let cost = SVMTransactionExecutionCost::default();
-    let net_credit = cost.alt_bn128_g2_subgroup_check_cost
-        + cost.alt_bn128_g2_line_prep_credit_cost
-        - cost.alt_bn128_prepared_g2_restore_cost;
-    assert!(net_credit > cost.alt_bn128_g2_subgroup_check_cost);
+    for &(full, prepared, measured_saving) in MEASURED_PREPARED_SAVING {
+        let credit = if full + prepared < 8 {
+            cost.alt_bn128_prepared_pair_scalar_credit_cost
+        } else {
+            cost.alt_bn128_prepared_pair_lane_credit_cost
+        };
+        assert!(
+            credit <= measured_saving,
+            "full {full} prepared {prepared}: credit {credit} exceeds measured {measured_saving}"
+        );
+    }
+}
+
+/// A prepared pair must stay cheaper than a full pair in both regimes, and
+/// the charge must stay above base so no shape goes free. The lane-regime
+/// credit must be below the sub-lane credit: the 8-wide kernel means a
+/// prepared pair saves preparation, not lane time.
+#[test]
+fn prepared_charge_is_positive_and_regime_ordered() {
+    let cost = SVMTransactionExecutionCost::default();
     assert!(
-        cost.alt_bn128_g2_subgroup_check_cost + cost.alt_bn128_g2_line_prep_credit_cost
+        cost.alt_bn128_prepared_pair_lane_credit_cost
+            < cost.alt_bn128_prepared_pair_scalar_credit_cost
+    );
+    assert!(
+        cost.alt_bn128_prepared_pair_scalar_credit_cost
             < cost.alt_bn128_pairing_check_per_pair_cost
     );
     for total in 1..24u64 {
         for prepared in 1..=total.min(16) {
             let full = total - prepared;
             let mixed = prepared_pairing_charge(&cost, full, prepared);
-            assert!(mixed < registered_pairing_charge(&cost, full, prepared));
-            assert!(mixed > cost.alt_bn128_pairing_check_base_cost.saturating_sub(1));
-            assert_eq!(
-                registered_pairing_charge(&cost, full, prepared) - mixed,
-                (cost.alt_bn128_g2_line_prep_credit_cost
-                    - cost.alt_bn128_prepared_g2_restore_cost)
-                    * prepared
-            );
+            assert!(mixed < pairing_charge(&cost, total));
+            assert!(mixed >= cost.alt_bn128_pairing_check_base_cost);
         }
     }
 }
 
-/// UNMEASURED. Line preparation is not separable in any committed capture and
-/// no standalone prepare/restore capture exists yet. Values are deliberate
-/// under-credits/over-charges; `helius-bn254/benches/prepared.rs` produces the
-/// curves a re-fit needs. This test exists to fail when someone lands real
-/// numbers, so the placeholders cannot survive unnoticed. Update it in the
-/// same change.
+/// MEASURED credits (capture above); the prepare base stays a deliberate
+/// overcharge (whole op measured at 2,656 CU vs the 6,500 composite charge).
+/// This test exists to fail when the schedule is re-fitted, so a change
+/// cannot land without restating the evidence.
 #[test]
-fn provisional_prepared_operand_schedule() {
+fn prepared_operand_schedule_is_pinned() {
     let cost = SVMTransactionExecutionCost::default();
-    assert_eq!(cost.alt_bn128_g2_line_prep_credit_cost, 900);
-    assert_eq!(cost.alt_bn128_prepared_g2_restore_cost, 300);
+    assert_eq!(cost.alt_bn128_prepared_pair_scalar_credit_cost, 2_200);
+    assert_eq!(cost.alt_bn128_prepared_pair_lane_credit_cost, 500);
     assert_eq!(cost.alt_bn128_g2_prepare_base_cost, 700);
+    let prepare_charge = cost.alt_bn128_g2_prepare_base_cost
+        + cost.alt_bn128_pairing_check_per_pair_cost
+        + cost.alt_bn128_g2_subgroup_check_cost;
+    // Measured whole-op cost on the capture host.
+    assert!(prepare_charge >= 2_656);
 }
 
 /// PROVISIONAL. No x86 measurement exists for GT multiexponentiation. These

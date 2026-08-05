@@ -306,7 +306,10 @@ fn validate_prepared_counts(
     let total = full
         .checked_add(prepared)
         .ok_or(AltBn128BatchError::CapExceeded)?;
-    if total == 0 {
+    // Zero prepared operands are rejected: the plain check/map syscalls are
+    // the right entry points for that shape and skip the prepared entry
+    // point's measured fixed overhead.
+    if prepared == 0 {
         return Err(AltBn128BatchError::ZeroInput);
     }
     if total > cap || prepared > MAX_PREPARED_PAIRS {

@@ -43,25 +43,32 @@ fn bench_prepare_and_restore(c: &mut Criterion) {
     });
 }
 
+fn make_pairs(total: usize) -> Vec<PairBytes> {
+    (0..total)
+        .map(|i| PairBytes {
+            g1: g1_bytes(i as u64 + 2),
+            g2: g2_bytes(i as u64 + 3),
+        })
+        .collect()
+}
+
+const SPLITS: &[(usize, usize)] = &[
+    (1, 2),
+    (1, 3),
+    (3, 0),
+    (0, 3),
+    (5, 3),
+    (2, 6),
+    (0, 8),
+    (8, 8),
+];
+
 fn bench_mixed_splits(c: &mut Criterion) {
     let mut group = c.benchmark_group("pairing_mixed");
-    for &(full, prepared) in &[
-        (1usize, 2usize),
-        (1, 3),
-        (3, 0),
-        (0, 3),
-        (5, 3),
-        (2, 6),
-        (0, 8),
-        (8, 8),
-    ] {
+    let mut baselines = std::collections::HashSet::new();
+    for &(full, prepared) in SPLITS {
         let total = full + prepared;
-        let all_pairs: Vec<PairBytes> = (0..total)
-            .map(|i| PairBytes {
-                g1: g1_bytes(i as u64 + 2),
-                g2: g2_bytes(i as u64 + 3),
-            })
-            .collect();
+        let all_pairs = make_pairs(total);
         let handles: Vec<PreparedG2Handle> = all_pairs[full..]
             .iter()
             .map(|pair| g2_prepare(&pair.g2).unwrap())
@@ -84,12 +91,57 @@ fn bench_mixed_splits(c: &mut Criterion) {
                 BatchSize::SmallInput,
             );
         });
-        group.bench_function(format!("allfull{total}"), |ben| {
-            ben.iter(|| pairing_product_is_one(black_box(&all_pairs)).unwrap());
+        if baselines.insert(total) {
+            group.bench_function(format!("allfull{total}"), |ben| {
+                ben.iter(|| pairing_product_is_one(black_box(&all_pairs)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
+/// Registered-vs-full splits so the account-backed registry credit
+/// (`alt_bn128_g2_subgroup_check_cost`) gets a measured basis too.
+fn bench_registered_splits(c: &mut Criterion) {
+    use helius_bn254::{RegisteredG2, RegisteredG2Pair, pairing_product_registered};
+
+    let mut group = c.benchmark_group("pairing_registered");
+    for &(full, registered) in SPLITS {
+        if registered == 0 {
+            continue;
+        }
+        let all_pairs = make_pairs(full + registered);
+        let entries: Vec<RegisteredG2> = all_pairs[full..]
+            .iter()
+            .map(|pair| RegisteredG2::validate_for_registry(&pair.g2).unwrap())
+            .collect();
+        group.bench_function(format!("full{full}_registered{registered}"), |ben| {
+            ben.iter_batched(
+                || {
+                    all_pairs[full..]
+                        .iter()
+                        .zip(&entries)
+                        .map(|(pair, entry)| RegisteredG2Pair {
+                            g1: pair.g1,
+                            g2: entry.clone(),
+                        })
+                        .collect::<Vec<_>>()
+                },
+                |registered_pairs| {
+                    pairing_product_registered(black_box(&all_pairs[..full]), &registered_pairs)
+                        .unwrap()
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
     group.finish();
 }
 
-criterion_group!(benches, bench_prepare_and_restore, bench_mixed_splits);
+criterion_group!(
+    benches,
+    bench_prepare_and_restore,
+    bench_mixed_splits,
+    bench_registered_splits
+);
 criterion_main!(benches);

@@ -221,26 +221,28 @@ pub struct SVMTransactionExecutionCost {
     /// separately so the surcharge stays auditable and reusable by any future
     /// G2-input syscall.
     pub alt_bn128_g2_subgroup_check_cost: u64,
-    /// Per-pair credit for a caller-supplied prepared G2 operand, on top of
-    /// the subgroup-check credit: the pair skips all G2 double/add line
-    /// computation.
+    /// Net per-pair credit for a caller-supplied prepared G2 operand when the
+    /// whole call stays below one 8-wide lane (`total_pairs / 8 == 0`). All-in:
+    /// subgroup check, line preparation, minus the wire-blob restore.
     ///
-    /// UNMEASURED: line preparation is not separable in any committed capture.
-    /// Bounded above by the 2,576 net per-pair remainder; held at ~35% of it
-    /// as a deliberate under-credit until a mixed-shape capture re-fits it.
-    pub alt_bn128_g2_line_prep_credit_cost: u64,
-    /// Per-operand surcharge for restoring a prepared G2 wire blob: a 16,712
-    /// byte read, 522 canonical-limb checks, and the radix-52 derivation.
+    /// MEASURED (Ryzen 9 9900X IFMA capture, 2026-08-05, agent-mail
+    /// prepared-tariff-bench): per-pair saving 2,270-2,387 CU across the
+    /// sub-lane splits; held at 2,200 so the credit never exceeds the saving.
+    pub alt_bn128_prepared_pair_scalar_credit_cost: u64,
+    /// Net per-pair prepared credit once at least one 8-wide lane is full.
+    /// The 8-wide kernel makes the saving collapse: a prepared pair still
+    /// occupies a lane, so it saves preparation, not lane time.
     ///
-    /// UNMEASURED: estimated from 522 x 4 modular doublings at 33 ns/CU;
-    /// needs a standalone restore capture.
-    pub alt_bn128_prepared_g2_restore_cost: u64,
+    /// MEASURED (same capture): 552-983 CU across the lane-regime splits;
+    /// held at 500. A flat sub-lane credit here would undercharge.
+    pub alt_bn128_prepared_pair_lane_credit_cost: u64,
     /// Base compute units for `sol_alt_bn128_g2_prepare`, on top of the
-    /// full-validation pair price it charges: syscall overhead plus the
-    /// 16,712-byte output write.
+    /// full-validation pair price it charges (per_pair + subgroup, 5,800
+    /// total with this base).
     ///
-    /// UNMEASURED: rounded up hard from the cpi-bytes rate; a once-per-key
-    /// setup op, so conservative by construction.
+    /// MEASURED (same capture): the whole operation runs in 2,656 CU, so the
+    /// composite charge is a deliberate ~2.4x overcharge for a once-per-key
+    /// setup op.
     pub alt_bn128_g2_prepare_base_cost: u64,
     /// Base compute units for an alt_bn128 scalar-field inner product.
     pub alt_bn128_fr_lincomb_base_cost: u64,
@@ -340,8 +342,8 @@ impl Default for SVMTransactionExecutionCost {
             alt_bn128_pairing_check_per_pair_cost: 4_188,
             alt_bn128_pairing_check_lane_cost: 20_338,
             alt_bn128_g2_subgroup_check_cost: 1_612,
-            alt_bn128_g2_line_prep_credit_cost: 900,
-            alt_bn128_prepared_g2_restore_cost: 300,
+            alt_bn128_prepared_pair_scalar_credit_cost: 2_200,
+            alt_bn128_prepared_pair_lane_credit_cost: 500,
             alt_bn128_g2_prepare_base_cost: 700,
             // The scalar charges use the same B1 host data and 33 ns per CU.
             alt_bn128_fr_lincomb_base_cost: 100,

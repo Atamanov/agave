@@ -2870,9 +2870,10 @@ fn alt_bn128_pairing_cost(
 }
 
 /// Charges a mixed pairing whose prepared operands are caller-supplied wire
-/// blobs. On top of the registered-pair subgroup credit, a prepared pair
-/// skips all G2 line computation (credited) but pays the blob restore
-/// (charged). Both new constants are UNMEASURED; see `execution_budget.rs`.
+/// blobs. The credit is a measured NET saving per prepared pair (subgroup
+/// check + line preparation - blob restore) and is regime-split: once one
+/// 8-wide lane fills, a prepared pair still occupies a lane, so the saving
+/// collapses and a flat sub-lane credit would undercharge.
 #[cfg(all(
     any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
     not(feature = "backend-b1-arkworks"),
@@ -2884,17 +2885,14 @@ fn alt_bn128_pairing_cost_prepared(
     full_pairs: u64,
     prepared_pairs: u64,
 ) -> u64 {
-    alt_bn128_pairing_cost(execution_cost, full_pairs, prepared_pairs)
-        .saturating_sub(
-            execution_cost
-                .alt_bn128_g2_line_prep_credit_cost
-                .saturating_mul(prepared_pairs),
-        )
-        .saturating_add(
-            execution_cost
-                .alt_bn128_prepared_g2_restore_cost
-                .saturating_mul(prepared_pairs),
-        )
+    let pairs = full_pairs.saturating_add(prepared_pairs);
+    let credit = if pairs < ALT_BN128_PAIRING_LANE_WIDTH {
+        execution_cost.alt_bn128_prepared_pair_scalar_credit_cost
+    } else {
+        execution_cost.alt_bn128_prepared_pair_lane_credit_cost
+    };
+    alt_bn128_pairing_cost(execution_cost, pairs, 0)
+        .saturating_sub(credit.saturating_mul(prepared_pairs))
 }
 
 #[derive(Clone, Copy)]
@@ -3560,7 +3558,12 @@ declare_builtin_function!(
         let total = usize::from(full_count)
             .checked_add(usize::from(prepared_count))
             .ok_or(SyscallError::ArithmeticOverflow)?;
-        if total == 0 || total > PAIRING_MAX_PAIRS || usize::from(prepared_count) > MAX_PREPARED_PAIRS
+        // Zero prepared operands are rejected, not priced: the prepared entry
+        // point carries measured fixed overhead over the plain check, which
+        // is the right syscall for that shape.
+        if prepared_count == 0
+            || total > PAIRING_MAX_PAIRS
+            || usize::from(prepared_count) > MAX_PREPARED_PAIRS
         {
             return Ok(1);
         }
@@ -3673,7 +3676,7 @@ declare_builtin_function!(
         let total = usize::from(full_count)
             .checked_add(usize::from(prepared_count))
             .ok_or(SyscallError::ArithmeticOverflow)?;
-        if total == 0
+        if prepared_count == 0
             || total > PAIRING_MAP_MAX_PAIRS
             || usize::from(prepared_count) > MAX_PREPARED_PAIRS
         {
