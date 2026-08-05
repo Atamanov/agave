@@ -205,18 +205,23 @@ pub struct SVMTransactionExecutionCost {
     /// Per-point compute units for an alt_bn128 G1 MSM, before the
     /// size-bucketed discount applied at the syscall (Pippenger is sublinear).
     pub alt_bn128_g1_msm_per_point_cost: u64,
-    /// Base number of compute units consumed by an alt_bn128 pairing check
-    /// (covers the shared final exponentiation).
+    /// Base compute units for an alt_bn128 pairing check of fewer than eight
+    /// pairs, which the 8-wide kernel cannot fill a lane with.
     pub alt_bn128_pairing_check_base_cost: u64,
-    /// Per-pair compute units for an alt_bn128 pairing check: parse,
-    /// validation minus the subgroup check, G2 preparation, and the miller
-    /// loop share. Charged only for pairs outside a full 8-wide lane.
+    /// Per-pair compute units in that same sub-lane regime.
     pub alt_bn128_pairing_check_per_pair_cost: u64,
+    /// Base compute units once at least one lane is full. Lower than the
+    /// sub-lane base: the lane term already carries the shared work.
+    pub alt_bn128_pairing_check_lane_base_cost: u64,
     /// Compute units for one full group of eight pairs. The 8-wide IFMA kernel
     /// takes any eight pairs together, so eight pairs cost less than six and
-    /// price follows lane count, not pair count. Charged instead of, not on top
-    /// of, the eight per-pair costs it replaces.
+    /// price follows lane count, not pair count.
     pub alt_bn128_pairing_check_lane_cost: u64,
+    /// Per-pair compute units for the pairs left over after the full lanes.
+    /// A leftover pair costs about a third more than a pair in a sub-lane call,
+    /// because it runs against a kernel already holding lane state, so the two
+    /// regimes cannot share one per-pair term without overcharging by a quarter.
+    pub alt_bn128_pairing_check_lane_rem_cost: u64,
     /// Compute units for one alt_bn128 G2 subgroup membership check, priced
     /// separately so the surcharge stays auditable and reusable by any future
     /// G2-input syscall.
@@ -238,18 +243,8 @@ pub struct SVMTransactionExecutionCost {
     pub alt_bn128_plonk_batch_reduce_per_lagrange_cost: u64,
     /// Base compute units for a multiexponentiation over authenticated GT
     /// targets.
-    ///
-    /// PROVISIONAL: no x86 measurement exists for this operation. See
-    /// `alt_bn128_gt_multiexp_per_target_cost`.
     pub alt_bn128_gt_multiexp_base_cost: u64,
     /// Per-target compute units for an authenticated GT multiexponentiation.
-    ///
-    /// PROVISIONAL, and deliberately far above the only data we have: an arm64
-    /// p50 calibration of 9.1k / 19.0k / 34.3k CU at 1 / 2 / 3 targets. Holding
-    /// the overcharge until an x86 IFMA capture replaces it keeps the schedule
-    /// safe, but it inflates every cell that folds distinct verifying-key
-    /// targets. `provisional_gt_multiexp_schedule` pins these two values so the
-    /// substitution cannot be forgotten.
     pub alt_bn128_gt_multiexp_per_target_cost: u64,
 }
 
@@ -307,37 +302,88 @@ impl Default for SVMTransactionExecutionCost {
             bls12_381_g2_validate_cost: 1_968,
             bls12_381_one_pair_cost: 25_445,
             bls12_381_additional_pair_cost: 13_023,
-            // This research schedule applies to the B1 source measured on one Zen 4 host.
-            // Backend selection does not activate a different tariff. Activation requires
-            // validator-fleet calibration for the exact source and build profile.
-            // B5 (Helius AVX-512 IFMA) schedule, fitted to the Threadripper
-            // 9970X capture. Derivation and the measured curve:
+            // B5 (Helius AVX-512 IFMA) schedule. Every constant below comes from
+            // one capture on one host that meets docs/src/operations/requirements.md,
+            // reproduced by scripts/fit-bn254-schedule.py. Activation still requires
+            // validator-fleet calibration, and it raises the floor to a part with
+            // avx512ifma. Derivation and the measured curves:
             // research/bn254-decision-table-v2-20260804/B5-CHARGE-SCHEDULE.md
-            alt_bn128_g1_msm_base_cost: 461,
-            alt_bn128_g1_msm_per_point_cost: 296,
-            alt_bn128_pairing_check_base_cost: 4_641,
-            alt_bn128_pairing_check_per_pair_cost: 4_188,
-            alt_bn128_pairing_check_lane_cost: 20_338,
+            alt_bn128_g1_msm_base_cost: 583,
+            alt_bn128_g1_msm_per_point_cost: 364,
+            alt_bn128_pairing_check_base_cost: 6_105,
+            alt_bn128_pairing_check_per_pair_cost: 4_350,
+            alt_bn128_pairing_check_lane_base_cost: 4_655,
+            alt_bn128_pairing_check_lane_cost: 22_505,
+            alt_bn128_pairing_check_lane_rem_cost: 5_865,
+            // Not from this capture. The only measurement is arkworks standalone,
+            // which is not the code the pairing tariff prices, and crediting it
+            // would undercharge. Held at the prior value until a full-versus-
+            // registered differential at a fixed pair count replaces it.
             alt_bn128_g2_subgroup_check_cost: 1_612,
-            // The scalar charges use the same B1 host data and 33 ns per CU.
-            alt_bn128_fr_lincomb_base_cost: 100,
-            alt_bn128_fr_lincomb_per_term_cost: 2,
-            alt_bn128_fr_batch_invert_base_cost: 100,
-            alt_bn128_fr_batch_invert_per_term_cost: 3,
-            // Prototype fit on Apple M5 Pro, criterion 95%-CI upper bound /
-            // 33 ns per CU. base + 41*n + 6*n*max(public_inputs, 1)
-            // upper-bounds n in {1,2,4,5,8,16,32}; re-fit on the same
-            // validator-class x86 used above before activation.
-            alt_bn128_plonk_batch_reduce_base_cost: 200,
-            alt_bn128_plonk_batch_reduce_per_proof_cost: 41,
+            alt_bn128_fr_lincomb_base_cost: 1,
+            alt_bn128_fr_lincomb_per_term_cost: 1,
+            alt_bn128_fr_batch_invert_base_cost: 14,
+            alt_bn128_fr_batch_invert_per_term_cost: 2,
+            // The capture holds public inputs at one, which is what every zolana
+            // verifying key declares, so the two per-proof terms are not separable
+            // from it. Their sum is fitted; the split keeps the prototype's
+            // per-Lagrange marginal for wider statements.
+            alt_bn128_plonk_batch_reduce_base_cost: 127,
+            alt_bn128_plonk_batch_reduce_per_proof_cost: 62,
             alt_bn128_plonk_batch_reduce_per_lagrange_cost: 6,
-            alt_bn128_gt_multiexp_base_cost: 50_000,
-            alt_bn128_gt_multiexp_per_target_cost: 20_000,
+            alt_bn128_gt_multiexp_base_cost: 3_534,
+            alt_bn128_gt_multiexp_per_target_cost: 2_148,
         }
     }
 }
 
+/// Pairs per 8-wide IFMA lane.
+pub const ALT_BN128_PAIRING_LANE_WIDTH: u64 = 8;
+
 impl SVMTransactionExecutionCost {
+    /// Charges a BN254 pairing by lane count, not pair count.
+    ///
+    /// `full_pairs` carry their G2 subgroup check. `registered_pairs` come from
+    /// an authenticated registry and skip it. Both still run the Miller loop, so
+    /// both occupy lanes, and they are grouped before the split to match the
+    /// kernel, which does not care where a pair came from.
+    ///
+    /// Two regimes, because the kernel takes two paths. A call under eight pairs
+    /// never fills a lane; past that, the leftover pairs run against a kernel
+    /// already holding lane state and cost about a third more each.
+    ///
+    /// The single definition. The syscall charges through it and the decision
+    /// table renders from it, so a table cell cannot drift from what a validator
+    /// would charge.
+    pub fn alt_bn128_pairing_cost(&self, full_pairs: u64, registered_pairs: u64) -> u64 {
+        let pairs = full_pairs.saturating_add(registered_pairs);
+        let lanes = pairs.saturating_div(ALT_BN128_PAIRING_LANE_WIDTH);
+        let remainder = pairs.saturating_sub(lanes.saturating_mul(ALT_BN128_PAIRING_LANE_WIDTH));
+        let core = if lanes == 0 {
+            self.alt_bn128_pairing_check_base_cost.saturating_add(
+                self.alt_bn128_pairing_check_per_pair_cost
+                    .saturating_mul(remainder),
+            )
+        } else {
+            self.alt_bn128_pairing_check_lane_base_cost
+                .saturating_add(
+                    self.alt_bn128_pairing_check_lane_cost
+                        .saturating_mul(lanes),
+                )
+                .saturating_add(
+                    self.alt_bn128_pairing_check_lane_rem_cost
+                        .saturating_mul(remainder),
+                )
+        };
+        // Every price above was fitted to calls whose every pair carried its
+        // subgroup check. A registered pair is therefore a credit against that
+        // price, not the absence of a separate charge.
+        core.saturating_sub(
+            self.alt_bn128_g2_subgroup_check_cost
+                .saturating_mul(registered_pairs),
+        )
+    }
+
     /// Returns cost of the Poseidon hash function for the given number of
     /// inputs is determined by the following quadratic function:
     ///

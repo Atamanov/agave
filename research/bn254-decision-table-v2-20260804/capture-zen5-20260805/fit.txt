@@ -36,6 +36,36 @@ gt(t) = 3534 + 2148 * t
        3      9,961      9,978    0.2%
        4     12,084     12,126    0.3%
 
+fr_lincomb(n) = 1 + 1 * n
+   shape   measured    charged    over
+       1          2          2    0.0%
+      16         10         17   70.0%
+      64         37         65   75.7%
+     256        154        257   66.9%
+    1024        636      1,025   61.2%
+    2048      1,268      2,049   61.6%
+
+fr_batch_invert(n) = 14 + 2 * n
+   shape   measured    charged    over
+       1         16         16    0.0%
+      16         41         46   12.2%
+      64        123        142   15.4%
+     256        445        526   18.2%
+    1024      1,731      2,062   19.1%
+    2048      3,446      4,110   19.3%
+
+plonk_reduce(n, pi=1) = 127 + 62 * n + 6 * n
+   shape   measured    charged    over
+       1        195        195    0.0%
+       2        257        263    2.3%
+       4        381        399    4.7%
+       5        442        467    5.7%
+       8        626        671    7.2%
+      16      1,178      1,215    3.1%
+      32      2,301      2,303    0.1%
+
+reference (arkworks, not chargeable): g2_subgroup_check = 3319 CU   final_exponentiation = 10459 CU
+
 execution_budget.rs constants
   alt_bn128_pairing_check_base_cost:      6105
   alt_bn128_pairing_check_per_pair_cost:  4350
@@ -46,5 +76,12 @@ execution_budget.rs constants
   alt_bn128_g1_msm_per_point_cost:       364
   alt_bn128_gt_multiexp_base_cost:       3534
   alt_bn128_gt_multiexp_per_target_cost: 2148
+  alt_bn128_fr_lincomb_base_cost:        1
+  alt_bn128_fr_lincomb_per_term_cost:    1
+  alt_bn128_fr_batch_invert_base_cost:   14
+  alt_bn128_fr_batch_invert_per_term_cost: 2
+  alt_bn128_plonk_batch_reduce_base_cost: 127
+  alt_bn128_plonk_batch_reduce_per_proof_cost: 62
+  alt_bn128_plonk_batch_reduce_per_lagrange_cost: 6
 
 worst overcharge: pairing 0.1%, msm 2.0%, gt 0.3%

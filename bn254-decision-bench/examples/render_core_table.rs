@@ -55,14 +55,6 @@ fn stock_pairing(pairs: u64) -> u64 {
     36_364 + 12_121 * pairs.saturating_sub(1) + 85 + 192 * pairs + 32
 }
 
-fn batch_pairing(cost: &SVMTransactionExecutionCost, full: u64, registered: u64) -> u64 {
-    let pairs = full + registered;
-    cost.alt_bn128_pairing_check_base_cost
-        + cost.alt_bn128_pairing_check_lane_cost * (pairs / 8)
-        + cost.alt_bn128_pairing_check_per_pair_cost * (pairs % 8)
-        - cost.alt_bn128_g2_subgroup_check_cost * registered
-}
-
 fn core_cu(cost: &SVMTransactionExecutionCost, column: ColumnId, trace: &OperationTrace) -> u64 {
     let stock = matches!(column, ColumnId::Current | ColumnId::CurrentFp12);
     let mut cu = 0u64;
@@ -70,7 +62,7 @@ fn core_cu(cost: &SVMTransactionExecutionCost, column: ColumnId, trace: &Operati
         let each = if stock {
             stock_pairing(call.pairs.into())
         } else {
-            batch_pairing(cost, call.full_pairs.into(), call.registered_pairs.into())
+            cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into())
         };
         cu += u64::from(call.calls) * each;
     }
@@ -118,7 +110,8 @@ fn main() {
         .count();
     println!("\n{measured} of 30 cells carry a measured residual.");
     println!(
-        "GT multiexp is provisional at {} + {}t and inflates the fold-all column on multi-key rows.",
-        cost.alt_bn128_gt_multiexp_base_cost, cost.alt_bn128_gt_multiexp_per_target_cost
+        "The batch columns price the AVX-512 IFMA kernel. A validator without \
+         avx512ifma cannot reach these charges, so adopting them raises the \
+         hardware floor above docs/src/operations/requirements.md."
     );
 }

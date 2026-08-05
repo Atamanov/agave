@@ -23,7 +23,18 @@ GROUPS = {
     "pairing_map": "BN254 Pairing map",
     "msm": "BN254 G1 MSM",
     "gt": "BN254 trusted GT multiexp",
+    "subgroup": "BN254 G2 subgroup check",
+    "lincomb": "BN254 Fr lincomb",
+    "invert": "BN254 Fr batch invert",
+    "plonk": "BN254 PLONK batch scalar reduce",
+    "final_exp": "BN254 final exponentiation",
 }
+
+
+def _upper(estimates: pathlib.Path) -> float:
+    return json.loads(estimates.read_text())["mean"]["confidence_interval"][
+        "upper_bound"
+    ]
 
 
 def shape_cu(root: pathlib.Path, group: str) -> dict[int, int]:
@@ -37,12 +48,17 @@ def shape_cu(root: pathlib.Path, group: str) -> dict[int, int]:
             shape = estimates.parent.parent.name
             if not shape.isdigit():
                 continue
-            upper = json.loads(estimates.read_text())["mean"]["confidence_interval"][
-                "upper_bound"
-            ]
-            key = int(shape)
-            worst[key] = max(worst.get(key, 0.0), upper)
+            worst[int(shape)] = max(worst.get(int(shape), 0.0), _upper(estimates))
     return {k: math.ceil(v / NS_PER_CU) for k, v in sorted(worst.items())}
+
+
+def scalar_cu(root: pathlib.Path, group: str) -> int:
+    """Same selection rule for a group that has one shape, not a family."""
+    worst = 0.0
+    for run in ("run-1", "run-2"):
+        for estimates in (root / run / group).glob("*/new/estimates.json"):
+            worst = max(worst, _upper(estimates))
+    return math.ceil(worst / NS_PER_CU)
 
 
 def fit_linear(points: dict[int, int]) -> tuple[int, int]:
@@ -147,6 +163,46 @@ def main() -> None:
         f"gt(t) = {gt_base} + {gt_per} * t", gt, lambda t: gt_base + gt_per * t
     )
 
+    lincomb = shape_cu(args.capture, GROUPS["lincomb"])
+    lc_base, lc_per = fit_linear(lincomb)
+    report(
+        f"fr_lincomb(n) = {lc_base} + {lc_per} * n",
+        lincomb,
+        lambda n: lc_base + lc_per * n,
+    )
+    invert = shape_cu(args.capture, GROUPS["invert"])
+    inv_base, inv_per = fit_linear(invert)
+    report(
+        f"fr_batch_invert(n) = {inv_base} + {inv_per} * n",
+        invert,
+        lambda n: inv_base + inv_per * n,
+    )
+
+    # The bench holds public inputs at one, which is what every zolana verifying
+    # key declares, so the per-proof and per-Lagrange terms are not separable
+    # here. The fitted slope covers both; PLONK_LAGRANGE keeps the marginal for
+    # wider statements at its prototype value.
+    plonk = shape_cu(args.capture, GROUPS["plonk"])
+    pl_base, pl_slope = fit_linear(plonk)
+    pl_lagrange = 6
+    pl_proof = max(pl_slope - pl_lagrange, 0)
+    report(
+        f"plonk_reduce(n, pi=1) = {pl_base} + {pl_proof} * n + {pl_lagrange} * n",
+        plonk,
+        lambda n: pl_base + pl_slope * n,
+    )
+
+    # Reference only. Both time arkworks, not the IFMA kernel the pairing tariff
+    # is fitted to, so neither may be charged or credited on its own. The
+    # registered-pair credit has to come from a full-versus-registered
+    # differential at a fixed pair count.
+    subgroup = scalar_cu(args.capture, GROUPS["subgroup"])
+    final_exp = scalar_cu(args.capture, GROUPS["final_exp"])
+    print(
+        f"\nreference (arkworks, not chargeable): "
+        f"g2_subgroup_check = {subgroup} CU   final_exponentiation = {final_exp} CU"
+    )
+
     print("\nexecution_budget.rs constants")
     print(f"  alt_bn128_pairing_check_base_cost:      {s_base}")
     print(f"  alt_bn128_pairing_check_per_pair_cost:  {s_per}")
@@ -157,6 +213,13 @@ def main() -> None:
     print(f"  alt_bn128_g1_msm_per_point_cost:       {msm_per}")
     print(f"  alt_bn128_gt_multiexp_base_cost:       {gt_base}")
     print(f"  alt_bn128_gt_multiexp_per_target_cost: {gt_per}")
+    print(f"  alt_bn128_fr_lincomb_base_cost:        {lc_base}")
+    print(f"  alt_bn128_fr_lincomb_per_term_cost:    {lc_per}")
+    print(f"  alt_bn128_fr_batch_invert_base_cost:   {inv_base}")
+    print(f"  alt_bn128_fr_batch_invert_per_term_cost: {inv_per}")
+    print(f"  alt_bn128_plonk_batch_reduce_base_cost: {pl_base}")
+    print(f"  alt_bn128_plonk_batch_reduce_per_proof_cost: {pl_proof}")
+    print(f"  alt_bn128_plonk_batch_reduce_per_lagrange_cost: {pl_lagrange}")
     print(
         f"\nworst overcharge: pairing {worst_pairing * 100:.1f}%, "
         f"msm {worst_msm * 100:.1f}%, gt {worst_gt * 100:.1f}%"
