@@ -29,14 +29,18 @@ pub fn syscall_cu(
     }
     for call in &trace.msm_calls {
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
-            cost.alt_bn128_g1_msm_base_cost
-                + cost.alt_bn128_g1_msm_per_point_cost * u64::from(call.points),
+            cost.alt_bn128_g1_msm_base_cost.saturating_add(
+                cost.alt_bn128_g1_msm_per_point_cost
+                    .saturating_mul(u64::from(call.points)),
+            ),
         ));
     }
     for call in &trace.gt_target_multiexp_calls {
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
-            cost.alt_bn128_gt_multiexp_base_cost
-                + cost.alt_bn128_gt_multiexp_per_target_cost * u64::from(call.targets),
+            cost.alt_bn128_gt_multiexp_base_cost.saturating_add(
+                cost.alt_bn128_gt_multiexp_per_target_cost
+                    .saturating_mul(u64::from(call.targets)),
+            ),
         ));
     }
     cu
@@ -55,12 +59,12 @@ impl CostSplit {
     }
 
     /// Syscall share in tenths of a percent, so the gate needs no float.
+    /// A cell with no work reads as zero rather than dividing by it.
     pub fn syscall_share_per_mille(&self) -> u64 {
-        let total = self.total();
-        if total == 0 {
-            return 0;
-        }
-        self.syscall.saturating_mul(1_000) / total
+        self.syscall
+            .saturating_mul(1_000)
+            .checked_div(self.total())
+            .unwrap_or_default()
     }
 }
 

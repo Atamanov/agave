@@ -287,20 +287,25 @@ pub fn reject_deprecated_or_derived_json(raw: &str, label: &str) -> Result<(), E
         "derived_cu",
     ];
     let lowered = raw.to_ascii_lowercase();
-    let boundary = |byte: u8| !byte.is_ascii_alphanumeric() && byte != b'_';
+    let bytes = lowered.as_bytes();
+    let boundary = |index: usize| {
+        bytes
+            .get(index)
+            .is_none_or(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
+    };
     for token in FORBIDDEN {
-        let mut from = 0usize;
-        while let Some(offset) = lowered[from..].find(token) {
-            let start = from + offset;
-            let end = start + token.len();
-            let before_ok = start == 0 || boundary(lowered.as_bytes()[start - 1]);
-            let after_ok = end == lowered.len() || boundary(lowered.as_bytes()[end]);
+        for (start, _) in lowered.match_indices(token) {
+            let before_ok = start
+                .checked_sub(1)
+                .is_none_or(&boundary);
+            let after_ok = start
+                .checked_add(token.len())
+                .is_none_or(&boundary);
             if before_ok && after_ok {
                 return Err(Error::Contract(format!(
                     "{label} contains forbidden legacy/derived token `{token}`"
                 )));
             }
-            from = start + 1;
         }
     }
     Ok(())

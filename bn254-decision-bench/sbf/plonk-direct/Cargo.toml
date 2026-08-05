@@ -32,6 +32,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 
+# `curve25519` gives the host build of pinocchio's `Address` a real
+# `find_program_address`; the pin test re-derives the pinned registry PDA.
+[dev-dependencies]
+solana-address = { version = "2.7.0", features = ["curve25519"] }
+
 [lints.rust.unexpected_cfgs]
 level = "allow"
 check-cfg = ["cfg(target_os, values(\"solana\"))"]

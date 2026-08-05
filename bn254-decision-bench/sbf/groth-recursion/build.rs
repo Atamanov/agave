@@ -1,23 +1,23 @@
-use std::{env, path::PathBuf};
+//! Compiles the sealed recursion fixtures into the guest.
+//!
+//! `COMPACT_MANIFEST_SHA256` is the only digest written here. Every per-artifact
+//! digest is read out of the manifest that constant pins, so no fixture digest
+//! is pinned in two places where the copies can drift apart. Re-pinning the
+//! constant is the single edit that changes which bundle this build trusts.
+
+use std::{collections::BTreeMap, env, path::PathBuf};
 
 use groth16_solana::vk::gnark::generate_bsb22_vk_file;
 use sha2::{Digest, Sha256};
 
 const COMPACT_MANIFEST_SHA256: &str =
     "4d2d2e40408e481c543ace25276e42a34b6980d3de4fd622277ca0b0459f5cdd";
-const SOURCE_ZOLANA_MANIFEST_SHA256: &str =
-    "df35081dcc762c81f81b90b91af9849a9815bf3772bf8139b9aa92c0ad055a0c";
 
 struct Fixture {
     directory: &'static str,
     symbol: &'static str,
     vk_digest_environment: &'static str,
     payload_digest_environment: &'static str,
-    expected_vk_sha256: &'static str,
-    expected_payload_sha256: &'static str,
-    expected_generation_sha256: &'static str,
-    expected_statement_sha256: &'static str,
-    expected_source_row_sha256: &'static str,
     expected_n: usize,
     expected_public_variables_including_one: usize,
     expected_payload_bytes: usize,
@@ -40,24 +40,42 @@ fn read_sealed(path: &std::path::Path, expected: &str) -> Vec<u8> {
     bytes
 }
 
+/// Digest of every artifact the compact manifest seals, keyed by bundle-relative path.
+fn sealed_digests(manifest: &serde_json::Value) -> BTreeMap<String, String> {
+    manifest["artifacts"]
+        .as_array()
+        .expect("compact manifest lists artifacts")
+        .iter()
+        .map(|artifact| {
+            let path = artifact["path"].as_str().expect("artifact path").to_owned();
+            let digest = artifact["sha256"]
+                .as_str()
+                .expect("artifact sha256")
+                .to_owned();
+            (path, digest)
+        })
+        .collect()
+}
+
 fn main() {
-    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     println!("cargo:rerun-if-env-changed=HELIUS_GROTH_RECURSION_FIXTURE_ROOT");
     let fixtures = env::var_os("HELIUS_GROTH_RECURSION_FIXTURE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            manifest.join("../../../research/bn254-decision-table-v2-20260804/recursion-v2")
+            manifest_dir.join("../../../research/bn254-decision-table-v2-20260804/recursion-v2")
         });
     let output = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
     let compact_manifest = read_sealed(&fixtures.join("manifest.json"), COMPACT_MANIFEST_SHA256);
-    let compact_manifest =
-        std::str::from_utf8(&compact_manifest).expect("compact recursion manifest UTF-8");
-    assert!(
-        compact_manifest
-            .contains("\"schema\": \"helios.bn254-real-zolana-recursion-runtime-compact.v4\"")
+    let compact_manifest: serde_json::Value =
+        serde_json::from_slice(&compact_manifest).expect("compact recursion manifest is JSON");
+    assert_eq!(
+        compact_manifest["schema"].as_str(),
+        Some("helios.bn254-real-zolana-recursion-runtime-compact.v4"),
+        "compact manifest is not the schema this guest reads"
     );
-    assert!(compact_manifest.contains(SOURCE_ZOLANA_MANIFEST_SHA256));
+    let digests = sealed_digests(&compact_manifest);
     println!("cargo:rustc-env=HELIUS_GROTH_RECURSION_MANIFEST_SHA256={COMPACT_MANIFEST_SHA256}");
 
     for fixture in [
@@ -66,11 +84,6 @@ fn main() {
             symbol: "VK_G2",
             vk_digest_environment: "HELIUS_GROTH_G2_OUTER_VK_SHA256",
             payload_digest_environment: "HELIUS_GROTH_G2_PAYLOAD_SHA256",
-            expected_vk_sha256: "2a6fda1a4be28af88044e181e59c4ea0cc23ba5f1e35c0958baaa504174ee416",
-            expected_payload_sha256: "6901c6d6d4575d24ad987caf3defa82113cbccf36794a9a4d69d02810ee15278",
-            expected_generation_sha256: "3bfd41011e55dd5227b0d3f5a65d4c5b51def5c4a887dfb59d0cca9e7a5f0e44",
-            expected_statement_sha256: "d941fde012539a9b6b2b97ecb66227da05373f6461513f10de8502097f0af4c8",
-            expected_source_row_sha256: "51e5585ca8ac1dd547380b016f3e49f8e8cad60fed596faefd762a5af5ded577",
             expected_n: 2,
             expected_public_variables_including_one: 4,
             expected_payload_bytes: 480,
@@ -80,11 +93,6 @@ fn main() {
             symbol: "VK_G3",
             vk_digest_environment: "HELIUS_GROTH_G3_OUTER_VK_SHA256",
             payload_digest_environment: "HELIUS_GROTH_G3_PAYLOAD_SHA256",
-            expected_vk_sha256: "ef5786d016d67e10bc5290ff62de65a18b67ca3a1627022a11a4eed557f8cc8a",
-            expected_payload_sha256: "58d8db8c9f035386f1419b35c230c3589a62f47e89bf370cc734880f2487c79f",
-            expected_generation_sha256: "9b40c2f47d6dec8e3041025f704cf689f2fef669c0601849f4c4ff27113e8020",
-            expected_statement_sha256: "89c2a476438c36e43354ee193495977697bbae57ed173b2145724efc638b560e",
-            expected_source_row_sha256: "79d55ae5e3fbeaec1db68330554724e4ae3c9f42185029d53476f14799a649a1",
             expected_n: 3,
             expected_public_variables_including_one: 5,
             expected_payload_bytes: 512,
@@ -94,21 +102,23 @@ fn main() {
             symbol: "VK_G5",
             vk_digest_environment: "HELIUS_GROTH_G5_OUTER_VK_SHA256",
             payload_digest_environment: "HELIUS_GROTH_G5_PAYLOAD_SHA256",
-            expected_vk_sha256: "a265ecefc4f5da6c9b9c433b4ab083462908749784692cd74b807fd59621f9f4",
-            expected_payload_sha256: "4e949e0ec63f00197ce059a7be6b7a9aaac8fe8be08907f37f86e7c5aeb1dc86",
-            expected_generation_sha256: "85889924d9d3f764697d38dadb266c24b5e585797a09b4843a01706aa74e31c2",
-            expected_statement_sha256: "1db97b150e3b8cba653b77aa2d8d52a9b2ca2534a0e1057af537a79400dc4057",
-            expected_source_row_sha256: "cc6de5ad6f9e70e4c2448ec0c23f9575f61dd17d9aa6c05dc834d2b6c380dfbf",
             expected_n: 5,
             expected_public_variables_including_one: 7,
             expected_payload_bytes: 576,
         },
     ] {
         let directory = fixtures.join(fixture.directory);
-        let generation = read_sealed(
-            &directory.join("generation.json"),
-            fixture.expected_generation_sha256,
-        );
+        let sealed = |name: &str| {
+            let key = format!("{}/{name}", fixture.directory);
+            digests
+                .get(&key)
+                .unwrap_or_else(|| panic!("compact manifest does not seal {key}"))
+                .as_str()
+        };
+
+        let source_row_sha256 = sealed("fixture.bin");
+        let generation =
+            read_sealed(&directory.join("generation.json"), sealed("generation.json"));
         let generation = std::str::from_utf8(&generation).expect("generation JSON UTF-8");
         assert!(generation.contains(
             "\"schema\": \"helios.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
@@ -124,20 +134,15 @@ fn main() {
         assert!(generation.contains("\"measurement_ready\": true"));
         assert!(generation.contains("\"secure_os_random_export\": true"));
         assert!(generation.contains("\"publicly_derivable_toxic_waste\": false"));
-        assert!(generation.contains(fixture.expected_source_row_sha256));
+        assert!(generation.contains(source_row_sha256));
 
-        read_sealed(
-            &directory.join("fixture.bin"),
-            fixture.expected_source_row_sha256,
-        );
+        read_sealed(&directory.join("fixture.bin"), source_row_sha256);
         let statement = read_sealed(
             &directory.join("statement_commitment_fr.bin"),
-            fixture.expected_statement_sha256,
+            sealed("statement_commitment_fr.bin"),
         );
-        let payload = read_sealed(
-            &directory.join("payload_unnegated_a.bin"),
-            fixture.expected_payload_sha256,
-        );
+        let payload_sha256 = sealed("payload_unnegated_a.bin");
+        let payload = read_sealed(&directory.join("payload_unnegated_a.bin"), payload_sha256);
         assert_eq!(payload.len(), fixture.expected_payload_bytes);
         assert_eq!(
             payload.get(payload.len() - 32..),
@@ -145,14 +150,15 @@ fn main() {
         );
         println!(
             "cargo:rustc-env={}={}",
-            fixture.payload_digest_environment, fixture.expected_payload_sha256
+            fixture.payload_digest_environment, payload_sha256
         );
 
         let vk_path = directory.join("vk.bin");
-        read_sealed(&vk_path, fixture.expected_vk_sha256);
+        let vk_sha256 = sealed("vk.bin");
+        read_sealed(&vk_path, vk_sha256);
         println!(
             "cargo:rustc-env={}={}",
-            fixture.vk_digest_environment, fixture.expected_vk_sha256
+            fixture.vk_digest_environment, vk_sha256
         );
         generate_bsb22_vk_file(
             &vk_path,

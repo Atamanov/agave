@@ -108,6 +108,28 @@ const AUTHENTICATED_REGISTRY_KEYSET_DIGEST_V3: [u8; 32] = [
     0xdb, 0xfc, 0x97, 0x77, 0x92, 0xf6, 0xa6, 0x90, 0x01, 0x99, 0x55, 0x24, 0x1f, 0xac, 0x84,
     0x43, 0x05,
 ];
+/// Consumer the pinned registry address below is derived under. A guest loaded
+/// at any other program id must reject: the pinned address would not be a
+/// program-derived address of the running program.
+#[cfg(any(target_os = "solana", test))]
+const REGISTRY_V3_CONSUMER: [u8; 32] = [42u8; 32];
+
+/// `(keyset digest, registry PDA)` for every keyset the grid runs, standing in
+/// for what a real consumer emits at codegen time. The address is
+/// `find_program_address([REGISTRY_PDA_SEED, digest], REGISTRY_V3_CONSUMER)`
+/// and `pinned_registry_addresses_derive` re-runs that derivation. Lookup is
+/// keyed by the digest the guest recomputes from the account, so a fixture
+/// cannot present another keyset's registry account.
+#[cfg(any(target_os = "solana", test))]
+const REGISTRY_V3_PINNED: [([u8; 32], [u8; 32]); 1] = [(
+    AUTHENTICATED_REGISTRY_KEYSET_DIGEST_V3,
+    [
+        0x89, 0xcd, 0x12, 0x7c, 0x74, 0xb2, 0x75, 0x6a, 0xb1, 0x78, 0xc4, 0x2a, 0x84, 0x77,
+        0x22, 0x20, 0x9a, 0x90, 0x57, 0x29, 0x5c, 0x89, 0x8f, 0xb3, 0xcb, 0x13, 0x48, 0x55,
+        0x08, 0xa8, 0xaa, 0xbe,
+    ],
+)];
+
 #[cfg(not(target_os = "solana"))]
 const OPAQUE_G2_ID_DOMAIN: &[u8] = b"agave:bn254:b5:g2-registry:v3";
 const KEYSET_DIGEST_VERSION: u8 = 1;
@@ -505,6 +527,17 @@ fn sealed_registry_keyset_digest_v3(groups: &[Group]) -> Option<[u8; 32]> {
         return None;
     }
     Some(AUTHENTICATED_REGISTRY_KEYSET_DIGEST_V3)
+}
+
+/// Pinned registry address for a recomputed keyset digest. An unknown digest
+/// has no pinned address and the caller must reject; deriving one here would
+/// re-introduce the per-bump hashing this guest exists to keep out of the
+/// measurement.
+#[cfg(any(target_os = "solana", test))]
+fn pinned_registry_address(digest: &[u8; 32]) -> Option<&'static [u8; 32]> {
+    REGISTRY_V3_PINNED
+        .iter()
+        .find_map(|(pinned, address)| (pinned == digest).then_some(address))
 }
 
 /// One-pass frozen-header authentication and ordered opaque-ID extraction.
@@ -2446,11 +2479,12 @@ mod entrypoint {
         let registry = registry.ok_or(ProgramError::NotEnoughAccountKeys)?;
         let registry_digest = super::sealed_registry_keyset_digest_v3(&groups)
             .ok_or(ProgramError::InvalidAccountData)?;
-        let (expected_registry, _) = Address::find_program_address(
-            &[super::layout::REGISTRY_PDA_SEED, &registry_digest],
-            program_id,
-        );
-        if registry.address() != &expected_registry || !registry.owned_by(program_id) {
+        if program_id.as_array() != &super::REGISTRY_V3_CONSUMER {
+            return Err(ProgramError::IncorrectProgramId);
+        }
+        let expected_registry =
+            super::pinned_registry_address(&registry_digest).ok_or(ProgramError::InvalidSeeds)?;
+        if registry.address().as_array() != expected_registry || !registry.owned_by(program_id) {
             return Err(ProgramError::InvalidAccountOwner);
         }
         if registry.data_len()
@@ -2494,6 +2528,50 @@ mod entrypoint {
         })
     }
 }
+#[cfg(all(test, not(target_os = "solana")))]
+mod registry_pin_tests {
+    use super::*;
+    use solana_address::Address;
+
+    #[test]
+    fn pinned_registry_addresses_derive() {
+        for (digest, address) in REGISTRY_V3_PINNED {
+            let (derived, _) = Address::find_program_address(
+                &[layout::REGISTRY_PDA_SEED, &digest],
+                &Address::new_from_array(REGISTRY_V3_CONSUMER),
+            );
+            assert_eq!(
+                derived.to_bytes(),
+                address,
+                "pinned address is not the PDA of its digest"
+            );
+        }
+    }
+
+    #[test]
+    fn pinned_digests_are_distinct() {
+        for (index, (digest, _)) in REGISTRY_V3_PINNED.iter().enumerate() {
+            assert!(
+                pinned_registry_address(digest).is_some(),
+                "entry {index} is not reachable by lookup"
+            );
+            assert_eq!(
+                REGISTRY_V3_PINNED
+                    .iter()
+                    .filter(|(other, _)| other == digest)
+                    .count(),
+                1,
+                "entry {index} shares its digest with another row"
+            );
+        }
+    }
+
+    #[test]
+    fn unpinned_digest_has_no_address() {
+        assert!(pinned_registry_address(&[0u8; 32]).is_none());
+    }
+}
+
 #[cfg(all(test, not(target_os = "solana")))]
 mod exporter_tests {
     use super::*;
