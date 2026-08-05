@@ -9,8 +9,8 @@
     "tariff_id": "bn254-exact-shape-REPLACE",
     "samples": 20,
     "ns_per_cu": 33.0,
-    "source_revision": "a2dadc3fc25a02e260b82ff5afd6649ff9a3594a",
-    "captured_at_utc": "2026-08-05T00:00:00Z",
+    "source_revision": "REPLACE_WITH_CLEAN_AGAVE_HEAD",
+    "captured_at_utc": "REPLACE_WITH_UTC_TIMESTAMP",
     "jobs": [
       {
         "pricing_id": "stock_current",

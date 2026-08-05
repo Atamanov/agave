@@ -389,6 +389,10 @@ pub enum MeasurementKind {
 pub enum PricingBasis {
     CurrentRuntimeMeasured,
     MeasurementDerivedProposedExactShape,
+    /// Evaluated from the committed runtime charge schedule. The schedule is a
+    /// tariff, so a cell priced this way is identical on every host, and the
+    /// capture that fitted the constants is provenance rather than an input.
+    RuntimeSchedule,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

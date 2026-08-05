@@ -183,9 +183,15 @@ pub fn validate_tariff(
             "tariff schema must be {expected_schema}"
         )));
     }
-    if tariff.coverage != "exact_no_interpolation" {
+    // Two bases, and they validate differently. `exact_no_interpolation` is a
+    // timing capture converted at 33 ns/CU, so it must prove where it ran.
+    // `runtime_schedule` evaluates the committed charge constants, which are a
+    // tariff and therefore host-independent: demanding an on-host x86
+    // attestation of it would assert something untrue.
+    let from_runtime_schedule = tariff.coverage == "runtime_schedule";
+    if !from_runtime_schedule && tariff.coverage != "exact_no_interpolation" {
         return Err(Error::Contract(
-            "tariff coverage must be exact_no_interpolation; ratios and interpolation are forbidden"
+            "tariff coverage must be exact_no_interpolation or runtime_schedule; ratios and interpolation are forbidden"
                 .to_owned(),
         ));
     }
@@ -200,7 +206,16 @@ pub fn validate_tariff(
     for (index, entry) in tariff.entries.iter().enumerate() {
         let label = format!("tariff entry {index}");
         validate_shape(entry, &label)?;
-        if entry.cu == 0
+        if from_runtime_schedule {
+            if entry.cu == 0
+                || entry.measurement.method != "runtime_schedule"
+                || entry.measurement.command.trim().is_empty()
+            {
+                return Err(Error::Contract(format!(
+                    "{label}: a runtime-schedule tariff needs a positive charge and the expression that produced it"
+                )));
+            }
+        } else if entry.cu == 0
             || entry.measurement.method != "measured_exact_shape"
             || entry.measurement.sample_count < 2
             || !entry.measurement.upper_95_ns.is_finite()
@@ -228,6 +243,21 @@ pub fn validate_tariff(
     }
 
     let attestation = &tariff.b5_attestation;
+    if from_runtime_schedule {
+        // The schedule cites the capture that fitted it, and that capture ran
+        // somewhere else. Requiring the on-host fields here would force the
+        // file to claim this run measured them.
+        if attestation.backend_id != "helius-b5"
+            || attestation.source_revision.trim().is_empty()
+            || attestation.validator_fleet_calibrated
+        {
+            return Err(Error::Contract(
+                "a runtime-schedule tariff must name the B5 backend and the revision whose constants it read, and must not claim fleet calibration"
+                    .to_owned(),
+            ));
+        }
+        return Ok(());
+    }
     if attestation.backend_id != "helius-b5"
         || attestation.architecture != "x86_64"
         || attestation.cpu_model.trim().is_empty()
