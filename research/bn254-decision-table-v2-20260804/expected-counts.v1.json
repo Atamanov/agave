@@ -20,7 +20,8 @@
         "final_exponentiations": 5,
         "g2_subgroup_checks": 20,
         "stock_g1_additions": 5,
-        "stock_g1_multiplications": 5
+        "stock_g1_multiplications": 5,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -74,7 +75,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -128,7 +130,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 5,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -174,7 +177,13 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": [
+          {
+            "terms": 3,
+            "calls": 1
+          }
+        ]
       }
     },
     {
@@ -195,7 +204,8 @@
         "final_exponentiations": 5,
         "g2_subgroup_checks": 15,
         "stock_g1_additions": 5,
-        "stock_g1_multiplications": 5
+        "stock_g1_multiplications": 5,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -245,7 +255,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 7,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -266,7 +277,8 @@
         "final_exponentiations": 2,
         "g2_subgroup_checks": 8,
         "stock_g1_additions": 2,
-        "stock_g1_multiplications": 2
+        "stock_g1_multiplications": 2,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -320,7 +332,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -374,7 +387,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 2,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -420,7 +434,13 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": [
+          {
+            "terms": 3,
+            "calls": 1
+          }
+        ]
       }
     },
     {
@@ -441,7 +461,8 @@
         "final_exponentiations": 2,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 2,
-        "stock_g1_multiplications": 2
+        "stock_g1_multiplications": 2,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -489,7 +510,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -510,7 +532,8 @@
         "final_exponentiations": 3,
         "g2_subgroup_checks": 12,
         "stock_g1_additions": 3,
-        "stock_g1_multiplications": 3
+        "stock_g1_multiplications": 3,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -580,7 +603,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 12,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -650,7 +674,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 3,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -696,7 +721,13 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": [
+          {
+            "terms": 3,
+            "calls": 1
+          }
+        ]
       }
     },
     {
@@ -717,7 +748,8 @@
         "final_exponentiations": 3,
         "g2_subgroup_checks": 9,
         "stock_g1_additions": 3,
-        "stock_g1_multiplications": 3
+        "stock_g1_multiplications": 3,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -777,7 +809,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 9,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -798,7 +831,8 @@
         "final_exponentiations": 2,
         "g2_subgroup_checks": 4,
         "stock_g1_additions": 36,
-        "stock_g1_multiplications": 40
+        "stock_g1_multiplications": 40,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -828,7 +862,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 2,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -858,7 +893,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 0,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -904,7 +940,13 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": [
+          {
+            "terms": 3,
+            "calls": 1
+          }
+        ]
       }
     },
     {
@@ -925,7 +967,8 @@
         "final_exponentiations": 2,
         "g2_subgroup_checks": 4,
         "stock_g1_additions": 36,
-        "stock_g1_multiplications": 40
+        "stock_g1_multiplications": 40,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -955,7 +998,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 2,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -976,7 +1020,8 @@
         "final_exponentiations": 3,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 54,
-        "stock_g1_multiplications": 60
+        "stock_g1_multiplications": 60,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -1006,7 +1051,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 2,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -1036,7 +1082,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 0,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -1082,7 +1129,13 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": [
+          {
+            "terms": 3,
+            "calls": 1
+          }
+        ]
       }
     },
     {
@@ -1103,7 +1156,8 @@
         "final_exponentiations": 3,
         "g2_subgroup_checks": 6,
         "stock_g1_additions": 54,
-        "stock_g1_multiplications": 60
+        "stock_g1_multiplications": 60,
+        "fr_lincomb_calls": []
       }
     },
     {
@@ -1133,7 +1187,8 @@
         "final_exponentiations": 1,
         "g2_subgroup_checks": 2,
         "stock_g1_additions": 0,
-        "stock_g1_multiplications": 0
+        "stock_g1_multiplications": 0,
+        "fr_lincomb_calls": []
       }
     }
   ]

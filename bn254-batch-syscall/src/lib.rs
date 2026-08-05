@@ -42,8 +42,7 @@ pub use crate::syscalls::{
 };
 #[cfg(not(target_os = "solana"))]
 pub use crate::{
-    backend::{alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb},
-    plonk::alt_bn128_plonk_batch_reduce,
+    backend::alt_bn128_fr_batch_invert, plonk::alt_bn128_plonk_batch_reduce,
     snarkjs_plonk::alt_bn128_snarkjs_plonk_batch_reduce,
     snarkjs_plonk_multi_vk::alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
 };
@@ -82,6 +81,20 @@ pub fn alt_bn128_g1_msm(
     #[cfg(feature = "research-observer")]
     if result.is_ok() {
         research_observer::record_msm(points.len());
+    }
+    result
+}
+
+#[cfg(not(target_os = "solana"))]
+pub fn alt_bn128_fr_lincomb(
+    version: Version,
+    a: &[PodScalar],
+    b: &[PodScalar],
+) -> Result<PodScalar, AltBn128BatchError> {
+    let result = backend::alt_bn128_fr_lincomb(version, a, b);
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        research_observer::record_fr_lincomb(a.len());
     }
     result
 }

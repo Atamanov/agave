@@ -60,6 +60,14 @@ pub fn syscall_cu(
         cost.alt_bn128_g1_multiplication_cost
             .saturating_mul(u64::from(trace.stock_g1_multiplications)),
     );
+    for call in &trace.fr_lincomb_calls {
+        cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
+            cost.alt_bn128_fr_lincomb_base_cost.saturating_add(
+                cost.alt_bn128_fr_lincomb_per_term_cost
+                    .saturating_mul(u64::from(call.terms)),
+            ),
+        ));
+    }
     for call in &trace.gt_target_multiexp_calls {
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
             cost.alt_bn128_gt_multiexp_base_cost.saturating_add(

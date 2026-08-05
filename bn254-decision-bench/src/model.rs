@@ -202,6 +202,21 @@ pub struct MsmCall {
     pub calls: u32,
 }
 
+/// One `alt_bn128_fr_lincomb` call. The scalar syscalls were priced long before
+/// any guest reached them; this is the first that does.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrLincombCall {
+    pub terms: u32,
+    pub calls: u32,
+}
+
+impl FrLincombCall {
+    pub const fn one(terms: u32) -> Self {
+        Self { terms, calls: 1 }
+    }
+}
+
 impl MsmCall {
     pub const fn one(points: u32) -> Self {
         Self { points, calls: 1 }
@@ -233,6 +248,9 @@ pub struct OperationTrace {
     /// Stock `alt_bn128_group_op` G1 multiplications, same reason.
     #[serde(default)]
     pub stock_g1_multiplications: u32,
+    /// Scalar inner products moved off the guest and into the runtime.
+    #[serde(default)]
+    pub fr_lincomb_calls: Vec<FrLincombCall>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

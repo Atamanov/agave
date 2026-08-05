@@ -32,7 +32,15 @@ fn trace(
         g2_subgroup_checks,
         stock_g1_additions: 0,
         stock_g1_multiplications: 0,
+        fr_lincomb_calls: Vec::new(),
     }
+}
+
+/// The BSB22 hash-to-field reduction, one three-term inner product per outer
+/// proof. It replaced an ark-ff byte-at-a-time loop that cost 75,000 CU.
+fn with_bsb22_reduction(mut trace: OperationTrace) -> OperationTrace {
+    trace.fr_lincomb_calls = vec![FrLincombCall::one(3)];
+    trace
 }
 
 /// The unbatched columns build their public-input commitment with stock G1
@@ -94,12 +102,12 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
                 groth_msm(row, column),
                 vec![],
             ),
-            ColumnId::RecursionB5 => trace(
+            ColumnId::RecursionB5 => with_bsb22_reduction(trace(
                 vec![PairingCall::full(6, 1)],
                 vec![],
                 groth_msm(row, column),
                 vec![],
-            ),
+            )),
             // This is deliberately n independent current-verifier maps. It is
             // not the batched FP12 fold and therefore has no MSM syscall.
             ColumnId::CurrentFp12 => with_stock_g1(
@@ -151,12 +159,12 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
                 RowId::PlonkN3DistinctVkSharedSrs => &[1, 1, 10, 1, 1, 1],
                 _ => unreachable!("PLONK recursion rows are exhaustive"),
             };
-            trace(
+            with_bsb22_reduction(trace(
                 vec![PairingCall::full(6, 1)],
                 vec![],
                 msm(outer_msm),
                 vec![],
-            )
+            ))
         }
         // As above, preserve one independent current-verifier map per proof.
         ColumnId::CurrentFp12 => with_stock_g1(

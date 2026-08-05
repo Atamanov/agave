@@ -135,7 +135,7 @@ pub fn verify_payload<const N: usize>(data: &[u8], vk: &Groth16Verifyingkey<'_>)
     public_inputs.push(PodScalar(hash_to_field_bn254_fr(
         &commitment,
         b"bsb22-commitment",
-    )));
+    )?));
 
     let key = vk_from_gnark(vk)?;
     let proof = Proof {
@@ -266,7 +266,7 @@ mod tests {
             let generation = fixture_file(selector, "generation.json");
             let generation = std::str::from_utf8(&generation).expect("generation UTF-8");
             assert!(generation.contains(
-                "\"schema\": \"helius.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
+                "\"schema\": \"helios.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
             ));
             assert!(generation.contains("\"exact_inner_proof_equality_constrained\": true"));
             assert!(generation.contains("\"all_inner_proofs_host_verified\": true"));
@@ -340,6 +340,35 @@ mod tests {
             );
             assert!(research_observer::observed_pairing_map_shapes().is_empty());
             assert!(research_observer::observed_registered_pairing_shapes().is_empty());
+        }
+    }
+
+    /// The BSB22 wire is a challenge, so a reduction that differs from the
+    /// arkworks original on any real commitment binds the proof to another
+    /// statement while still verifying.
+    #[test]
+    fn bsb22_reduction_is_byte_identical_on_every_real_commitment() {
+        use ark_ff::PrimeField;
+
+        for selector in [2u8, 3, 5] {
+            let data = fixture_file(selector, "payload_unnegated_a.bin");
+            let commitment: [u8; 64] = data[layout::PROOF_BYTES..layout::PROOF_BYTES + 64]
+                .try_into()
+                .expect("commitment slice");
+            let digest =
+                hash_to_field::expand_message_xmd_sha256_l48(&commitment, b"bsb22-commitment");
+            let mut le = digest;
+            le.reverse();
+            let limbs = ark_bn254::Fr::from_le_bytes_mod_order(&le).into_bigint().0;
+            let mut expected = [0u8; 32];
+            for (chunk, limb) in expected.chunks_exact_mut(8).zip(limbs.iter().rev()) {
+                chunk.copy_from_slice(&limb.to_be_bytes());
+            }
+            assert_eq!(
+                hash_to_field::reduce_be_384(&digest),
+                Some(expected),
+                "selector={selector}"
+            );
         }
     }
 

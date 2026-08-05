@@ -14,9 +14,10 @@ use {
     litesvm::LiteSVM,
     serde::{Deserialize, Serialize},
     solana_bn254_batch_syscall::{
-        FQ12_BYTES, G1_BYTES, G2_BYTES, PAIR_BYTES, PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair,
-        PodPairingResult, PodScalar, PodTrustedGtExponent, SCALAR_BYTES, Version, alt_bn128_g1_msm,
-        alt_bn128_pairing_check, alt_bn128_pairing_map, research_observer as backend_observer,
+        FQ12_BYTES, FR_MAX_ELEMS, G1_BYTES, G2_BYTES, PAIR_BYTES, PodG1G2Pair, PodG1Point,
+        PodG1RegisteredG2Pair, PodPairingResult, PodScalar, PodTrustedGtExponent, SCALAR_BYTES,
+        Version, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+        alt_bn128_pairing_map, research_observer as backend_observer,
     },
     solana_program_runtime::{
         invoke_context::InvokeContext,
@@ -51,6 +52,8 @@ pub const CURRENT_GROUP_OP_G1_ADD_CU: u64 = 334;
 pub const CURRENT_GROUP_OP_G1_MUL_CU: u64 = 3_840;
 pub const CURRENT_GROUP_OP_PAIRING_FIRST_CU: u64 = 36_364;
 pub const CURRENT_GROUP_OP_PAIRING_OTHER_CU: u64 = 12_121;
+pub const CURRENT_FR_LINCOMB_BASE_CU: u64 = 1;
+pub const CURRENT_FR_LINCOMB_PER_TERM_CU: u64 = 1;
 pub use solana_bn254_decision_bench::stock_group_op_pairing_cu;
 
 const MSM_DISCOUNT_PER_THOUSAND: [u64; 12] =
@@ -78,6 +81,12 @@ pub struct RegisteredPairingObservation {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FrLincombObservation {
+    pub terms: u64,
+    pub charged_cu: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TrustedGtObservation {
     pub targets: u64,
     pub nontrivial_exponents: u64,
@@ -101,6 +110,7 @@ pub struct ObserverSnapshot {
     pub pairing_maps: Vec<PairingObservation>,
     pub registered_pairing_checks: Vec<RegisteredPairingObservation>,
     pub trusted_gt_multiexps: Vec<TrustedGtObservation>,
+    pub fr_lincombs: Vec<FrLincombObservation>,
     /// Setup is separate so hot-path totals can exclude it without inference.
     pub registry_init: RegistryInitObservation,
     pub standalone_subgroup_checks: u64,
@@ -141,6 +151,10 @@ pub fn current_registered_pairing_cu(full: u64, registered: u64) -> u64 {
 
 pub fn current_trusted_gt_multiexp_cu(targets: u64) -> u64 {
     CURRENT_PAIRING_BASE_CU.saturating_add(CURRENT_PAIRING_PER_PAIR_CU.saturating_mul(targets))
+}
+
+pub fn current_fr_lincomb_cu(terms: u64) -> u64 {
+    CURRENT_FR_LINCOMB_BASE_CU.saturating_add(CURRENT_FR_LINCOMB_PER_TERM_CU.saturating_mul(terms))
 }
 
 pub fn current_registry_init_cu(g2_entries: u64, gt_entries: u64) -> u64 {
@@ -191,6 +205,7 @@ pub fn current_embedded_hot_core_cu(snapshot: &ObserverSnapshot) -> u64 {
                 .iter()
                 .map(|event| event.charged_cu),
         )
+        .chain(snapshot.fr_lincombs.iter().map(|event| event.charged_cu))
         .chain(
             snapshot
                 .stock_group_ops
@@ -260,6 +275,13 @@ pub fn observer_snapshot() -> ObserverSnapshot {
                 charged_cu: current_trusted_gt_multiexp_cu(targets),
             })
             .collect(),
+        fr_lincombs: backend_observer::observed_fr_lincomb_term_counts()
+            .into_iter()
+            .map(|terms| FrLincombObservation {
+                terms,
+                charged_cu: current_fr_lincomb_cu(terms),
+            })
+            .collect(),
         registry_init: RegistryInitObservation {
             g2_entries: registry_init_shape.0,
             gt_entries: registry_init_shape.1,
@@ -309,6 +331,7 @@ fn with_decision_syscalls(svm: LiteSVM) -> LiteSVM {
             "sol_alt_bn128_trusted_gt_multiexp",
             SyscallTrustedGtMultiexp::vm,
         )
+        .with_custom_syscall("sol_alt_bn128_fr_lincomb", SyscallFrLincomb::vm)
 }
 
 fn translate<'a>(
@@ -409,6 +432,44 @@ declare_builtin_function!(
         match alt_bn128_g1_msm(Version::V0, points, scalars) {
             Ok(result) => {
                 translate_mut(memory_mapping, result_addr, G1_BYTES as u64)?
+                    .copy_from_slice(&result.0);
+                Ok(0)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    SyscallFrLincomb,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        num_elems: u64,
+        left_addr: u64,
+        right_addr: u64,
+        result_addr: u64,
+        _arg5: u64,
+        memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        // Charged from the declared count before any translation, as Agave does,
+        // so malformed input costs the same as valid input.
+        invoke_context.consume_checked(current_fr_lincomb_cu(num_elems))?;
+        if num_elems == 0 || num_elems > FR_MAX_ELEMS as u64 {
+            return Ok(1);
+        }
+        let left: &[PodScalar] = pod_slice(translate(
+            memory_mapping,
+            left_addr,
+            byte_len(num_elems, SCALAR_BYTES)?,
+        )?)?;
+        let right: &[PodScalar] = pod_slice(translate(
+            memory_mapping,
+            right_addr,
+            byte_len(num_elems, SCALAR_BYTES)?,
+        )?)?;
+        match alt_bn128_fr_lincomb(Version::V0, left, right) {
+            Ok(result) => {
+                translate_mut(memory_mapping, result_addr, SCALAR_BYTES as u64)?
                     .copy_from_slice(&result.0);
                 Ok(0)
             }
@@ -683,6 +744,7 @@ mod tests {
         assert_eq!(current_registered_pairing_cu(5, 3), 81_149);
         assert_eq!(current_trusted_gt_multiexp_cu(2), 28_728);
         assert_eq!(current_registry_init_cu(1, 1), 35_918);
+        assert_eq!(current_fr_lincomb_cu(3), 4);
     }
 
     #[test]

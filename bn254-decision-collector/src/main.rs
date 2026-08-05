@@ -5,7 +5,8 @@ use {
     solana_account_v3::Account,
     solana_address_v2::Address,
     solana_bn254_decision_bench::{
-        ColumnId, ExecutionRequest, FixtureManifest, GtTargetMultiexpCall, MsmCall, OperationTrace,
+        ColumnId, ExecutionRequest, FixtureManifest, FrLincombCall, GtTargetMultiexpCall, MsmCall,
+        OperationTrace,
         PairingCall, ResidualCell, RowId,
     },
     solana_bn254_decision_litesvm::{
@@ -524,7 +525,17 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
             GroupOpKind::Pairing => {}
         }
     }
+    let fr_lincomb_calls = snapshot
+        .fr_lincombs
+        .iter()
+        .map(|event| {
+            u32::try_from(event.terms)
+                .map(FrLincombCall::one)
+                .map_err(|_| "fr_lincomb term count overflows u32".to_owned())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     Ok(OperationTrace {
+        fr_lincomb_calls,
         stock_g1_additions,
         stock_g1_multiplications,
         pairing_checks,
