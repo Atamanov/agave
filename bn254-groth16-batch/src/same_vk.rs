@@ -11,12 +11,15 @@ use {
     crate::{
         Groth16BatchError,
         transcript::{RandomizerMode, derive_seed},
-        verify::{Proof, fr_from_be, fr_to_pod, msm, validate_batch_shape},
+        verify::{
+            MINUS_ONE_BE, Proof, fr_inner_product, fr_negate, fr_to_pod, is_canonical_fr_be, msm,
+            validate_batch_shape,
+        },
         vk::ValidatedVerifyingKey,
     },
     ark_bn254::Fr,
     ark_ff::{One, Zero},
-    core::ops::{AddAssign, Mul, Neg, Sub},
+    core::ops::{AddAssign, Sub},
     solana_bn254_batch_syscall::{
         PAIRING_MAP_MAX_PAIRS, PodG1G2Pair, PodG1Point, PodGtElement, PodScalar,
         Version as SyscallVersion, alt_bn128_pairing_map,
@@ -191,12 +194,20 @@ fn fold_same_vk_target_pairs_prevalidated(
         .len()
         .checked_add(2)
         .ok_or(Groth16BatchError::TooManyPairs)?;
+    let coefficients: Vec<PodScalar> = randomizers.iter().map(fr_to_pod).collect();
+    // every key-side term of a coefficient enters the fold negated, so -c_i is
+    // derived once and serves both the gamma columns and the delta MSM
+    let neg_coefficients = coefficients
+        .iter()
+        .map(fr_negate)
+        .collect::<Result<Vec<PodScalar>, _>>()?;
+
     let mut pairs = Vec::with_capacity(pair_count);
-    for (proof, coefficient) in proofs.iter().zip(randomizers) {
+    for (proof, coefficient) in proofs.iter().zip(&coefficients) {
         pairs.push(PodG1G2Pair {
             g1: msm(
                 core::slice::from_ref(&proof.a),
-                core::slice::from_ref(&fr_to_pod(coefficient)),
+                core::slice::from_ref(coefficient),
             )?,
             g2: proof.b,
         });
@@ -205,31 +216,38 @@ fn fold_same_vk_target_pairs_prevalidated(
     let key = vk.key();
     // sum(c_i) = 1, so the constant IC coefficient is exactly -1.
     let mut gamma_points: Vec<PodG1Point> = vec![key.ic[0]];
-    let mut gamma_scalars: Vec<Fr> = vec![Fr::one().neg()];
+    let mut gamma_scalars: Vec<PodScalar> = vec![MINUS_ONE_BE];
+    // column j is the inner product <-c, x_j>, one scalar-field call
+    let mut column: Vec<PodScalar> = Vec::with_capacity(proofs.len());
     for (input_index, ic) in key.ic.iter().enumerate().skip(1) {
         let input_index = input_index
             .checked_sub(1)
             .ok_or(Groth16BatchError::InputCountMismatch)?;
-        let mut coefficient = Fr::zero();
-        for (proof, randomizer) in proofs.iter().zip(randomizers) {
-            coefficient.add_assign(randomizer.mul(&fr_from_be(&proof.public_inputs[input_index])?));
+        column.clear();
+        for proof in proofs {
+            let input = proof
+                .public_inputs
+                .get(input_index)
+                .ok_or(Groth16BatchError::InputCountMismatch)?;
+            // The syscall also rejects a non-canonical scalar, but the reject
+            // stays here so an unvalidated batch fails with the input error
+            // rather than a backend-shaped one.
+            if !is_canonical_fr_be(input) {
+                return Err(Groth16BatchError::NonCanonicalInput);
+            }
+            column.push(*input);
         }
         gamma_points.push(*ic);
-        gamma_scalars.push(coefficient.neg());
+        gamma_scalars.push(fr_inner_product(&neg_coefficients, &column)?);
     }
-    let gamma_scalars: Vec<PodScalar> = gamma_scalars.iter().map(fr_to_pod).collect();
     pairs.push(PodG1G2Pair {
         g1: msm(&gamma_points, &gamma_scalars)?,
         g2: key.gamma_g2,
     });
 
     let delta_points: Vec<PodG1Point> = proofs.iter().map(|proof| proof.c).collect();
-    let delta_scalars: Vec<PodScalar> = randomizers
-        .iter()
-        .map(|coefficient| fr_to_pod(&coefficient.neg()))
-        .collect();
     pairs.push(PodG1G2Pair {
-        g1: msm(&delta_points, &delta_scalars)?,
+        g1: msm(&delta_points, &neg_coefficients)?,
         g2: key.delta_g2,
     });
 
@@ -485,6 +503,361 @@ mod tests {
         assert_eq!(
             groth16_same_vk_fp12_verify(&vk, &proofs, &CONTEXT, &other_key_target),
             Err(Groth16BatchError::SameVkTargetKeyMismatch)
+        );
+    }
+}
+
+/// The fold this module shipped before the coefficients moved into the
+/// scalar-field syscall, kept as the bit-exactness reference for
+/// [`fold_identity_tests`].
+#[cfg(test)]
+fn reference_fold_same_vk_target_pairs(
+    vk: &ValidatedVerifyingKey,
+    proofs: &[Proof],
+    randomizers: &[Fr],
+) -> Result<Vec<PodG1G2Pair>, Groth16BatchError> {
+    use {
+        crate::verify::fr_from_be,
+        core::ops::{Mul, Neg},
+    };
+
+    if randomizers.len() != proofs.len() {
+        return Err(Groth16BatchError::RandomizerCountMismatch);
+    }
+    if randomizers.iter().any(Zero::is_zero) || randomizers.iter().copied().sum::<Fr>() != Fr::one()
+    {
+        return Err(Groth16BatchError::InvalidSameVkRandomizers);
+    }
+
+    let pair_count = proofs
+        .len()
+        .checked_add(2)
+        .ok_or(Groth16BatchError::TooManyPairs)?;
+    let mut pairs = Vec::with_capacity(pair_count);
+    for (proof, coefficient) in proofs.iter().zip(randomizers) {
+        pairs.push(PodG1G2Pair {
+            g1: msm(
+                core::slice::from_ref(&proof.a),
+                core::slice::from_ref(&fr_to_pod(coefficient)),
+            )?,
+            g2: proof.b,
+        });
+    }
+
+    let key = vk.key();
+    let mut gamma_points: Vec<PodG1Point> = vec![key.ic[0]];
+    let mut gamma_scalars: Vec<Fr> = vec![Fr::one().neg()];
+    for (input_index, ic) in key.ic.iter().enumerate().skip(1) {
+        let input_index = input_index
+            .checked_sub(1)
+            .ok_or(Groth16BatchError::InputCountMismatch)?;
+        let mut coefficient = Fr::zero();
+        for (proof, randomizer) in proofs.iter().zip(randomizers) {
+            let input = proof
+                .public_inputs
+                .get(input_index)
+                .ok_or(Groth16BatchError::InputCountMismatch)?;
+            coefficient.add_assign(randomizer.mul(&fr_from_be(input)?));
+        }
+        gamma_points.push(*ic);
+        gamma_scalars.push(coefficient.neg());
+    }
+    let gamma_scalars: Vec<PodScalar> = gamma_scalars.iter().map(fr_to_pod).collect();
+    pairs.push(PodG1G2Pair {
+        g1: msm(&gamma_points, &gamma_scalars)?,
+        g2: key.gamma_g2,
+    });
+
+    let delta_points: Vec<PodG1Point> = proofs.iter().map(|proof| proof.c).collect();
+    let delta_scalars: Vec<PodScalar> = randomizers
+        .iter()
+        .map(|coefficient| fr_to_pod(&coefficient.neg()))
+        .collect();
+    pairs.push(PodG1G2Pair {
+        g1: msm(&delta_points, &delta_scalars)?,
+        g2: key.delta_g2,
+    });
+
+    if pairs.len() != pair_count {
+        return Err(Groth16BatchError::TooManyPairs);
+    }
+    Ok(pairs)
+}
+
+#[cfg(test)]
+mod fold_identity_tests {
+    use {
+        super::*,
+        crate::test_utils::{fr_bytes, make_proof, make_vk, rng},
+        ark_ff::UniformRand,
+        ark_std::rand::rngs::StdRng,
+    };
+
+    const CONTEXT: [u8; 32] = [0x53; 32];
+
+    const R_BE: [u8; 32] = [
+        0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58,
+        0x5d, 0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93, 0xf0, 0x00,
+        0x00, 0x01,
+    ];
+
+    /// A batch and a target record bound to its key. Every surface under test
+    /// checks shape before it looks at the target, so the target bytes here
+    /// need no pairing provenance.
+    fn fixture(n: usize) -> (ValidatedVerifyingKey, Vec<Proof>, SameVkTarget) {
+        let mut rng = rng();
+        let (trapdoor, vk) = make_vk(&mut rng, 1, false);
+        let proofs = (0..n)
+            .map(|_| {
+                let input = Fr::rand(&mut rng);
+                make_proof(&mut rng, &trapdoor, 0, &[input])
+            })
+            .collect();
+        let target = SameVkTarget::new(*vk.digest(), PodGtElement([7u8; 384]));
+        (vk, proofs, target)
+    }
+
+    /// Every batch shape this fold distinguishes: one proof, several proofs, a
+    /// zero-input circuit, a multi-column circuit, and a committed key. The
+    /// committed key never reaches the checked surface, which rejects it, but
+    /// the prevalidated fold must still not diverge on one.
+    fn batches() -> Vec<(&'static str, ValidatedVerifyingKey, Vec<Proof>)> {
+        let mut rng = rng();
+        let mut out = Vec::new();
+        for (label, n, inputs, committed) in [
+            ("n1", 1usize, 1usize, false),
+            ("n2", 2, 1, false),
+            ("n5", 5, 1, false),
+            ("n16", SAME_VK_FP12_MAX_PROOFS, 1, false),
+            ("zero_inputs_n3", 3, 0, false),
+            ("four_inputs_n3", 3, 4, false),
+            ("committed_n3", 3, 1, true),
+        ] {
+            let (trapdoor, vk) = make_vk(&mut rng, inputs, committed);
+            let proofs = (0..n)
+                .map(|_| {
+                    let values: Vec<Fr> = (0..inputs).map(|_| Fr::rand(&mut rng)).collect();
+                    make_proof(&mut rng, &trapdoor, 0, &values)
+                })
+                .collect();
+            out.push((label, vk, proofs));
+        }
+        out
+    }
+
+    /// A coefficient vector of the shape the fold requires: every entry
+    /// nonzero and the whole vector summing to one.
+    fn sum_to_one(tail: &[Fr]) -> Vec<Fr> {
+        let mut out = Vec::with_capacity(tail.len().saturating_add(1));
+        out.push(Fr::one().sub(tail.iter().copied().sum::<Fr>()));
+        out.extend_from_slice(tail);
+        out
+    }
+
+    fn random_sum_to_one(rng: &mut StdRng, n: usize) -> Vec<Fr> {
+        let tail: Vec<Fr> = (1..n).map(|_| Fr::rand(rng)).collect();
+        sum_to_one(&tail)
+    }
+
+    fn assert_same_fold(
+        label: &str,
+        vk: &ValidatedVerifyingKey,
+        proofs: &[Proof],
+        randomizers: &[Fr],
+    ) {
+        let expected = reference_fold_same_vk_target_pairs(vk, proofs, randomizers);
+        let folded = fold_same_vk_target_pairs_prevalidated(vk, proofs, randomizers);
+        match (&expected, &folded) {
+            (Ok(expected), Ok(folded)) => {
+                assert_eq!(expected.len(), folded.len(), "{label}: pair count");
+                for (index, (expected, folded)) in expected.iter().zip(folded).enumerate() {
+                    assert_eq!(expected, folded, "{label}: pair {index}");
+                }
+            }
+            _ => assert_eq!(expected, folded, "{label}"),
+        }
+    }
+
+    /// The fold must be bit-identical to the field-arithmetic reference over
+    /// the transcript's own coefficients, on every shape and on the verifying
+    /// surface that consumes them.
+    #[test]
+    fn derived_coefficients_fold_identically() {
+        for (label, vk, proofs) in batches() {
+            let target = SameVkTarget::new(*vk.digest(), PodGtElement([7u8; 384]));
+            let randomizers = derive_same_vk_sum_one_randomizers_prevalidated(
+                &vk,
+                &proofs,
+                &CONTEXT,
+                target.target(),
+            )
+            .expect("derivation must produce a sum-one vector");
+            assert_eq!(randomizers.len(), proofs.len());
+            assert_same_fold(label, &vk, &proofs, &randomizers);
+        }
+    }
+
+    /// Coefficient vectors at the edges of the field, still nonzero and still
+    /// summing to one, plus a random vector so no two positions can alias.
+    #[test]
+    fn edge_coefficients_fold_identically() {
+        let mut rng = rng();
+        let tails = [
+            Fr::from(2u64),
+            Fr::zero().sub(Fr::one()),
+            Fr::from(1u128 << 127),
+            Fr::from(u128::MAX) + Fr::one(),
+            Fr::from(u128::MAX),
+        ];
+        for (label, vk, proofs) in batches() {
+            let n = proofs.len();
+            for (index, tail) in tails.iter().enumerate() {
+                if n == 1 {
+                    continue;
+                }
+                let randomizers = sum_to_one(&vec![*tail; n.saturating_sub(1)]);
+                if randomizers.iter().any(Zero::is_zero) {
+                    continue;
+                }
+                assert_same_fold(
+                    &format!("{label}/uniform-tail{index}"),
+                    &vk,
+                    &proofs,
+                    &randomizers,
+                );
+            }
+            assert_same_fold(
+                &format!("{label}/one-only"),
+                &vk,
+                &proofs,
+                &sum_to_one(&vec![Fr::zero(); n.saturating_sub(1)]),
+            );
+            assert_same_fold(
+                &format!("{label}/random"),
+                &vk,
+                &proofs,
+                &random_sum_to_one(&mut rng, n),
+            );
+        }
+    }
+
+    /// Public inputs at the ends of the canonical range, where a byte path
+    /// that skipped the field would be most likely to diverge.
+    #[test]
+    fn edge_public_inputs_fold_identically() {
+        let mut r_minus_one = R_BE;
+        r_minus_one[31] = 0x00;
+        let mut two_pow_128 = [0u8; 32];
+        two_pow_128[15] = 1;
+        let edges = [
+            PodScalar([0u8; 32]),
+            fr_bytes(&Fr::one()),
+            PodScalar(r_minus_one),
+            PodScalar(two_pow_128),
+        ];
+
+        let mut rng = rng();
+        for (label, vk, proofs) in batches() {
+            let randomizers = random_sum_to_one(&mut rng, proofs.len());
+            for (index, edge) in edges.iter().enumerate() {
+                let mut mutated = proofs.clone();
+                for proof in &mut mutated {
+                    for input in &mut proof.public_inputs {
+                        *input = *edge;
+                    }
+                }
+                assert_same_fold(
+                    &format!("{label}/all-inputs-{index}"),
+                    &vk,
+                    &mutated,
+                    &randomizers,
+                );
+
+                // and one input at a time, so a column with mixed values is
+                // also covered
+                let mut single = proofs.clone();
+                if let Some(input) = single
+                    .first_mut()
+                    .and_then(|proof| proof.public_inputs.first_mut())
+                {
+                    *input = *edge;
+                    assert_same_fold(
+                        &format!("{label}/first-input-{index}"),
+                        &vk,
+                        &single,
+                        &randomizers,
+                    );
+                }
+            }
+        }
+    }
+
+    /// A public input at or above r stays rejected, with the same error, on
+    /// every surface that reaches this fold.
+    #[test]
+    fn non_canonical_public_input_is_still_rejected() {
+        let (vk, proofs, target) = fixture(2);
+        let mut r_plus_one = R_BE;
+        r_plus_one[31] = 0x02;
+        let coefficients = sum_to_one(&[Fr::from(2u64)]);
+
+        for bad in [R_BE, r_plus_one, [0xffu8; 32]] {
+            for position in [0usize, 1] {
+                let mut mutated = proofs.clone();
+                mutated[position].public_inputs[0] = PodScalar(bad);
+                assert_eq!(
+                    fold_same_vk_target_pairs_prevalidated(&vk, &mutated, &coefficients),
+                    Err(Groth16BatchError::NonCanonicalInput),
+                    "prevalidated fold, position {position}"
+                );
+                assert_eq!(
+                    fold_same_vk_target_pairs(&vk, &mutated, &coefficients),
+                    Err(Groth16BatchError::NonCanonicalInput),
+                    "checked fold, position {position}"
+                );
+                assert_eq!(
+                    groth16_same_vk_fp12_verify(&vk, &mutated, &CONTEXT, &target),
+                    Err(Groth16BatchError::NonCanonicalInput),
+                    "verify, position {position}"
+                );
+                assert_eq!(
+                    derive_same_vk_sum_one_randomizers(&vk, &mutated, &CONTEXT, &target),
+                    Err(Groth16BatchError::NonCanonicalInput),
+                    "derivation, position {position}"
+                );
+            }
+        }
+    }
+
+    /// The sum-to-one and nonzero invariants gate the fold before any scalar
+    /// leaves the field, and the constant IC coefficient of -1 depends on them.
+    #[test]
+    fn coefficients_that_break_the_sum_one_invariant_are_rejected() {
+        let (vk, proofs, _) = fixture(3);
+        let broken = [
+            vec![Fr::one(), Fr::one(), Fr::one()],
+            vec![Fr::one(), Fr::zero(), Fr::zero()],
+            sum_to_one(&[Fr::one(), Fr::from(3u64)])
+                .iter()
+                .map(|c| *c * Fr::from(2u64))
+                .collect(),
+            vec![Fr::zero().sub(Fr::one()); 3],
+        ];
+        for (index, randomizers) in broken.iter().enumerate() {
+            assert_eq!(
+                fold_same_vk_target_pairs(&vk, &proofs, randomizers),
+                Err(Groth16BatchError::InvalidSameVkRandomizers),
+                "case {index}"
+            );
+            assert_eq!(
+                fold_same_vk_target_pairs_prevalidated(&vk, &proofs, randomizers),
+                Err(Groth16BatchError::InvalidSameVkRandomizers),
+                "prevalidated case {index}"
+            );
+        }
+        assert_eq!(
+            fold_same_vk_target_pairs(&vk, &proofs, &[Fr::one()]),
+            Err(Groth16BatchError::RandomizerCountMismatch)
         );
     }
 }

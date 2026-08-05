@@ -75,6 +75,21 @@ fn with_bsb22_reduction(mut trace: OperationTrace) -> OperationTrace {
 /// so those widen to the proof count; a key with a single proof reuses the
 /// negation and its one column stays one term. Every zolana verifying key
 /// declares one public input.
+fn with_fp12_fold_lincombs(mut trace: OperationTrace, proofs: u32, keys: u32) -> OperationTrace {
+    // A shared key runs the same_vk fold: one negation per proof, then a single
+    // inner product across them per public-input column. Distinct keys run the
+    // guest's own fp12 fold, where each key holds one proof, so its negation,
+    // its column and its running sum are all one term.
+    trace.fr_lincomb_calls = if keys == 1 {
+        let mut calls = vec![FrLincombCall::one(1); proofs as usize];
+        calls.push(FrLincombCall::one(proofs));
+        calls
+    } else {
+        vec![FrLincombCall::one(1); 3 * proofs as usize]
+    };
+    trace
+}
+
 fn with_fold_lincombs(mut trace: OperationTrace, proofs: u32, keys: u32) -> OperationTrace {
     const PUBLIC_INPUT_COLUMNS: u32 = 1;
     let per_key = proofs.checked_div(keys).unwrap_or_default();
@@ -184,14 +199,18 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
                 } else {
                     vec![]
                 };
-                trace(
-                    vec![],
-                    vec![PairingCall::full(
-                        n.saturating_add(2u32.saturating_mul(k)),
-                        1,
-                    )],
-                    groth_msm(row, column),
-                    gt_target_multiexp_calls,
+                with_fp12_fold_lincombs(
+                    trace(
+                        vec![],
+                        vec![PairingCall::full(
+                            n.saturating_add(2u32.saturating_mul(k)),
+                            1,
+                        )],
+                        groth_msm(row, column),
+                        gt_target_multiexp_calls,
+                    ),
+                    n,
+                    k,
                 )
             }
         };

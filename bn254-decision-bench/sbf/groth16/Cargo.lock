@@ -171,6 +171,7 @@ version = "0.1.0"
 dependencies = [
  "ark-bn254",
  "ark-ff",
+ "ark-std",
  "groth16-solana",
  "pinocchio 0.11.2",
  "solana-address",
@@ -647,6 +648,7 @@ dependencies = [
  "ark-bn254",
  "ark-ec",
  "ark-ff",
+ "ark-std",
  "solana-bn254",
  "solana-bn254-batch-syscall",
  "solana-keccak-hasher",

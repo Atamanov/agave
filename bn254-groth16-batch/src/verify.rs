@@ -327,7 +327,7 @@ pub(crate) fn msm(
 }
 
 /// `r - 1`, the field's `-1`, big-endian.
-const MINUS_ONE_BE: PodScalar = PodScalar([
+pub(crate) const MINUS_ONE_BE: PodScalar = PodScalar([
     0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
     0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93, 0xf0, 0x00, 0x00, 0x00,
 ]);
@@ -385,6 +385,7 @@ pub(crate) fn is_canonical_fr_be(scalar: &PodScalar) -> bool {
     scalar.0 < MODULUS_BE
 }
 
+#[cfg(test)]
 pub(crate) fn fr_from_be(scalar: &PodScalar) -> Result<Fr, Groth16BatchError> {
     // Parse big-endian Fr without host-only PodScalar::to_fr (SBF-safe).
     use ark_ff::PrimeField;
