@@ -33,8 +33,9 @@ use crate::{
     pairing::{
         final_exponentiation,
         miller::{
-            PREPARED_G2_BYTES as MILLER_PREPARED_G2_BYTES, PreparedG2, multi_miller_loop_mixed,
-            prepare_g2,
+            PREPARED_G2_BYTES as MILLER_PREPARED_G2_BYTES,
+            PREPARED_G2_SCALAR_BYTES as MILLER_PREPARED_G2_SCALAR_BYTES, PreparedG2,
+            multi_miller_loop_mixed, prepare_g2,
         },
         miller_loop, multi_miller_loop, multi_pairing,
     },
@@ -59,6 +60,9 @@ pub const PAIRING_MAP_MAX_PAIRS: usize = 18;
 pub const TRUSTED_GT_MAX_TARGETS: usize = 16;
 /// Canonical account bytes for one Helius G2 Miller-line schedule.
 pub const PREPARED_G2_BYTES: usize = MILLER_PREPARED_G2_BYTES;
+/// Scalar-Montgomery wire block of one G2 Miller-line schedule: the stateless
+/// prepared-operand form. The radix-52 IFMA block is derived on restore.
+pub const PREPARED_G2_SCALAR_BYTES: usize = MILLER_PREPARED_G2_SCALAR_BYTES;
 /// Per-call cap on [`fr_lincomb`] and [`fr_batch_invert`] elements.
 pub const FR_MAX_ELEMS: usize = 2048;
 /// Encoded G1 point size: `x | y`, 32 bytes each.
@@ -148,6 +152,26 @@ pub struct RegisteredG2Pair {
     pub g1: G1Bytes,
     /// Opaque registry-resolved G2 operand.
     pub g2: RegisteredG2,
+}
+
+/// A G2 Miller-line schedule restored from caller-supplied wire bytes.
+///
+/// Unlike [`RegisteredG2`] this carries no provenance: the bytes bind to no
+/// G2 point and no subgroup fact. A caller that skips its own authentication
+/// only weakens its own verification; the restore still guarantees canonical
+/// limbs and a deterministic schedule on every host.
+#[derive(Clone, Debug)]
+pub struct PreparedG2Handle {
+    prepared: PreparedG2,
+}
+
+/// One dynamic G1 paired with a caller-supplied prepared G2 schedule.
+#[derive(Clone, Debug)]
+pub struct PreparedPair<'a> {
+    /// Dynamic G1 operand, validated on every call.
+    pub g1: G1Bytes,
+    /// Caller-authenticated prepared G2 operand.
+    pub g2: &'a PreparedG2Handle,
 }
 
 /// Opaque selected-backend Miller output for a standalone final-exponentiation
@@ -407,6 +431,39 @@ impl RegisteredG2 {
     }
 }
 
+/// Fully validate a canonical G2 source and compute its Miller line schedule.
+///
+/// This is the once-per-key registration step: canonical coordinates, curve
+/// equation, r-order subgroup, and infinity rejection all run here so the hot
+/// path never has to.
+pub fn g2_prepare(source: &G2Bytes) -> Result<PreparedG2Handle, InputError> {
+    let source = decode_g2(source)?;
+    if source.infinity {
+        return Err(InputError::ZeroInput);
+    }
+    Ok(PreparedG2Handle {
+        prepared: prepare_g2(&source),
+    })
+}
+
+impl PreparedG2Handle {
+    /// Scalar-Montgomery wire block, [`PREPARED_G2_SCALAR_BYTES`] long.
+    pub fn to_scalar_bytes(&self) -> Vec<u8> {
+        self.prepared.to_scalar_bytes()
+    }
+
+    /// Restore from wire bytes. Checks length and canonical limbs, derives the
+    /// IFMA block; binds to no G2 point and proves no subgroup membership.
+    pub fn from_scalar_bytes(bytes: &[u8]) -> Result<Self, InputError> {
+        if bytes.len() != PREPARED_G2_SCALAR_BYTES {
+            return Err(InputError::InvalidLength);
+        }
+        PreparedG2::from_scalar_bytes(bytes)
+            .map(|prepared| Self { prepared })
+            .ok_or(InputError::NonCanonical)
+    }
+}
+
 /// Agave-compatible spelling of [`g1_msm`].
 #[inline]
 pub fn alt_bn128_g1_msm(
@@ -515,39 +572,104 @@ pub fn pairing_product_registered(
     full: &[PairBytes],
     registered: &[RegisteredG2Pair],
 ) -> Result<bool, InputError> {
-    let count = full
-        .len()
-        .checked_add(registered.len())
-        .ok_or(InputError::CapExceeded)?;
+    check_mixed_pair_counts(full.len(), registered.len(), PAIRING_MAX_PAIRS)?;
+    let prepared: Vec<_> = registered
+        .iter()
+        .map(|pair| (pair.g1, &pair.g2.prepared))
+        .collect();
+    Ok(pairing_product_mixed_value(full, &prepared)?.is_one())
+}
+
+/// True iff the product over full pairs and caller-supplied prepared pairs is
+/// the GT identity. Full pairs keep complete validation; prepared operands
+/// execute no subgroup check and no line preparation. The caller vouches for
+/// them and only its own verification is at stake.
+pub fn pairing_check_prepared(
+    full: &[PairBytes],
+    prepared: &[PreparedPair],
+) -> Result<bool, InputError> {
+    check_mixed_pair_counts(full.len(), prepared.len(), PAIRING_MAX_PAIRS)?;
+    let prepared: Vec<_> = prepared
+        .iter()
+        .map(|pair| (pair.g1, &pair.g2.prepared))
+        .collect();
+    Ok(pairing_product_mixed_value(full, &prepared)?.is_one())
+}
+
+/// True iff the mixed product's canonical encoding equals `target` byte for
+/// byte. Callers must store exactly the bytes [`pairing_map`] returned; any
+/// other encoding, including a non-canonical one, deterministically
+/// compares unequal on every host.
+pub fn pairing_check_prepared_vs_target(
+    full: &[PairBytes],
+    prepared: &[PreparedPair],
+    target: &GtBytes,
+) -> Result<bool, InputError> {
+    check_mixed_pair_counts(full.len(), prepared.len(), PAIRING_MAX_PAIRS)?;
+    let prepared: Vec<_> = prepared
+        .iter()
+        .map(|pair| (pair.g1, &pair.g2.prepared))
+        .collect();
+    Ok(GtBytes::from_gt(&pairing_product_mixed_value(full, &prepared)?) == *target)
+}
+
+/// Canonical post-final-exponentiation product over mixed operands, for
+/// program-side comparison or combination.
+pub fn pairing_map_prepared(
+    full: &[PairBytes],
+    prepared: &[PreparedPair],
+) -> Result<GtBytes, InputError> {
+    check_mixed_pair_counts(full.len(), prepared.len(), PAIRING_MAP_MAX_PAIRS)?;
+    let prepared: Vec<_> = prepared
+        .iter()
+        .map(|pair| (pair.g1, &pair.g2.prepared))
+        .collect();
+    Ok(GtBytes::from_gt(&pairing_product_mixed_value(
+        full, &prepared,
+    )?))
+}
+
+fn check_mixed_pair_counts(full: usize, prepared: usize, cap: usize) -> Result<(), InputError> {
+    let count = full.checked_add(prepared).ok_or(InputError::CapExceeded)?;
     if count == 0 {
         return Err(InputError::ZeroInput);
     }
-    if count > PAIRING_MAX_PAIRS {
+    if count > cap {
         return Err(InputError::CapExceeded);
     }
+    Ok(())
+}
 
+/// Shared mixed-product core. Validation order is consensus-visible: full
+/// pairs decode first in input order (G1 before G2), then prepared-pair G1s
+/// in input order. The batch8 threshold counts full pairs before identity
+/// filtering, exactly as the registered path always has.
+fn pairing_product_mixed_value(
+    full: &[PairBytes],
+    prepared: &[(G1Bytes, &PreparedG2)],
+) -> Result<Fp12, InputError> {
     let decoded = decode_pairs(full)?;
-    let mut registered_g1 = Vec::with_capacity(registered.len());
-    for pair in registered {
-        let g1 = pair.g1.to_affine()?;
+    let mut prepared_g1 = Vec::with_capacity(prepared.len());
+    for (g1, schedule) in prepared {
+        let g1 = g1.to_affine()?;
         if !g1.infinity {
-            registered_g1.push((g1, &pair.g2.prepared));
+            prepared_g1.push((g1, *schedule));
         }
     }
     let full_refs: Vec<_> = decoded.iter().map(|(g1, g2)| (g1, g2)).collect();
-    let registered_refs: Vec<_> = registered_g1
+    let prepared_refs: Vec<_> = prepared_g1
         .iter()
-        .map(|(g1, prepared)| (g1, *prepared))
+        .map(|(g1, schedule)| (g1, *schedule))
         .collect();
     #[cfg(helius_avx512_ifma)]
-    let miller = if full_refs.len().saturating_add(registered_refs.len()) >= 8 {
-        crate::batch8::multi_miller8_mixed(&full_refs, &registered_refs)
+    let miller = if full_refs.len().saturating_add(prepared_refs.len()) >= 8 {
+        crate::batch8::multi_miller8_mixed(&full_refs, &prepared_refs)
     } else {
-        multi_miller_loop_mixed(&full_refs, &registered_refs)
+        multi_miller_loop_mixed(&full_refs, &prepared_refs)
     };
     #[cfg(not(helius_avx512_ifma))]
-    let miller = multi_miller_loop_mixed(&full_refs, &registered_refs);
-    Ok(final_exponentiation(&miller).is_one())
+    let miller = multi_miller_loop_mixed(&full_refs, &prepared_refs);
+    Ok(final_exponentiation(&miller))
 }
 
 /// Execute the standalone subgroup predicate after canonical/on-curve decode.
@@ -1029,5 +1151,153 @@ mod tests {
             TrustedGt::from_canonical_subgroup_bytes(&not_in_subgroup),
             Err(InputError::NotInSubgroup)
         ));
+    }
+
+    fn g1_point(k: u64) -> G1Bytes {
+        use core::ops::Mul;
+        G1Bytes::from_affine(
+            &crate::g1::G1Projective::from(G1Affine::generator())
+                .mul(Fr::from_u64(k))
+                .to_affine(),
+        )
+    }
+
+    fn g2_point(k: u64) -> G2Bytes {
+        use core::ops::Mul;
+        G2Bytes::from_affine(
+            &crate::g2::G2Projective::from(G2Affine::arkworks_generator())
+                .mul(Fr::from_u64(k))
+                .to_affine(),
+        )
+    }
+
+    #[test]
+    fn prepared_pairing_matches_full_pairing_at_every_split() {
+        for total in 1usize..=9 {
+            let pairs: Vec<PairBytes> = (0..total)
+                .map(|i| PairBytes {
+                    g1: g1_point(i as u64 + 2),
+                    g2: g2_point(i as u64 + 3),
+                })
+                .collect();
+            let expected = pairing_map(&pairs).unwrap();
+            for split in 0..=total {
+                let handles: Vec<PreparedG2Handle> = pairs[split..]
+                    .iter()
+                    .map(|pair| g2_prepare(&pair.g2).unwrap())
+                    .collect();
+                let prepared: Vec<PreparedPair> = pairs[split..]
+                    .iter()
+                    .zip(&handles)
+                    .map(|(pair, handle)| PreparedPair {
+                        g1: pair.g1,
+                        g2: handle,
+                    })
+                    .collect();
+                assert_eq!(
+                    pairing_map_prepared(&pairs[..split], &prepared).unwrap(),
+                    expected,
+                    "total {total} split {split}"
+                );
+                assert_eq!(
+                    pairing_check_prepared(&pairs[..split], &prepared).unwrap(),
+                    pairing_product_is_one(&pairs).unwrap(),
+                );
+                assert!(
+                    pairing_check_prepared_vs_target(&pairs[..split], &prepared, &expected)
+                        .unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prepared_wire_round_trip_preserves_the_product() {
+        let pair = PairBytes {
+            g1: g1_point(7),
+            g2: g2_point(11),
+        };
+        let handle = g2_prepare(&pair.g2).unwrap();
+        let bytes = handle.to_scalar_bytes();
+        assert_eq!(bytes.len(), PREPARED_G2_SCALAR_BYTES);
+        let restored = PreparedG2Handle::from_scalar_bytes(&bytes).unwrap();
+        let prepared = [PreparedPair {
+            g1: pair.g1,
+            g2: &restored,
+        }];
+        assert_eq!(
+            pairing_map_prepared(&[], &prepared).unwrap(),
+            pairing_map(core::slice::from_ref(&pair)).unwrap(),
+        );
+
+        assert_eq!(
+            PreparedG2Handle::from_scalar_bytes(&bytes[..bytes.len() - 1]).unwrap_err(),
+            InputError::InvalidLength,
+        );
+        let mut noncanonical = bytes;
+        noncanonical[..32].fill(0xff);
+        assert_eq!(
+            PreparedG2Handle::from_scalar_bytes(&noncanonical).unwrap_err(),
+            InputError::NonCanonical,
+        );
+    }
+
+    #[test]
+    fn prepared_vs_target_requires_the_exact_canonical_bytes() {
+        let pair = PairBytes {
+            g1: g1_point(5),
+            g2: g2_point(9),
+        };
+        let handle = g2_prepare(&pair.g2).unwrap();
+        let prepared = [PreparedPair {
+            g1: pair.g1,
+            g2: &handle,
+        }];
+        let target = pairing_map(core::slice::from_ref(&pair)).unwrap();
+        assert!(pairing_check_prepared_vs_target(&[], &prepared, &target).unwrap());
+
+        let mut wrong = target;
+        wrong.0[GT_BYTES - 1] ^= 1;
+        assert!(!pairing_check_prepared_vs_target(&[], &prepared, &wrong).unwrap());
+
+        // A non-canonical target is not an error; it deterministically fails.
+        let mut noncanonical = GtBytes([0xff; GT_BYTES]);
+        noncanonical.0[0] = 0xfe;
+        assert!(!pairing_check_prepared_vs_target(&[], &prepared, &noncanonical).unwrap());
+    }
+
+    #[test]
+    fn prepared_validation_precedence_matches_the_registered_path() {
+        assert_eq!(
+            pairing_check_prepared(&[], &[]).unwrap_err(),
+            InputError::ZeroInput,
+        );
+        let handle = g2_prepare(&g2_point(3)).unwrap();
+        let overflow: Vec<PreparedPair> = (0..PAIRING_MAX_PAIRS + 1)
+            .map(|_| PreparedPair {
+                g1: g1_point(2),
+                g2: &handle,
+            })
+            .collect();
+        assert_eq!(
+            pairing_check_prepared(&[], &overflow).unwrap_err(),
+            InputError::CapExceeded,
+        );
+        let map_overflow = &overflow[..PAIRING_MAP_MAX_PAIRS + 1];
+        assert_eq!(
+            pairing_map_prepared(&[], map_overflow).unwrap_err(),
+            InputError::CapExceeded,
+        );
+
+        assert_eq!(
+            g2_prepare(&G2Bytes([0; G2_BYTES])).unwrap_err(),
+            InputError::ZeroInput,
+        );
+        let mut noncanonical = G2Bytes([0; G2_BYTES]);
+        noncanonical.0[..32].fill(0xff);
+        assert_eq!(
+            g2_prepare(&noncanonical).unwrap_err(),
+            InputError::NonCanonical,
+        );
     }
 }

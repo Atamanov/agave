@@ -39,6 +39,10 @@ name = "pairing"
 harness = false
 
 [[bench]]
+name = "prepared"
+harness = false
+
+[[bench]]
 name = "field"
 harness = false
 

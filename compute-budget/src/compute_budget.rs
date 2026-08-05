@@ -158,6 +158,12 @@ pub struct ComputeBudget {
     pub alt_bn128_gt_multiexp_per_target_cost: u64,
     /// CU charge for each BN254 G2 subgroup check.
     pub alt_bn128_g2_subgroup_check_cost: u64,
+    /// CU credit per caller-supplied prepared G2 pairing operand.
+    pub alt_bn128_g2_line_prep_credit_cost: u64,
+    /// CU charge per prepared G2 wire-blob restore.
+    pub alt_bn128_prepared_g2_restore_cost: u64,
+    /// Fixed CU charge for one G2 prepare.
+    pub alt_bn128_g2_prepare_base_cost: u64,
     /// Fixed CU charge for a BN254 scalar inner product.
     pub alt_bn128_fr_lincomb_base_cost: u64,
     /// CU charge per declared scalar inner-product term.
@@ -264,6 +270,9 @@ impl ComputeBudget {
             alt_bn128_gt_multiexp_base_cost: cost.alt_bn128_gt_multiexp_base_cost,
             alt_bn128_gt_multiexp_per_target_cost: cost.alt_bn128_gt_multiexp_per_target_cost,
             alt_bn128_g2_subgroup_check_cost: cost.alt_bn128_g2_subgroup_check_cost,
+            alt_bn128_g2_line_prep_credit_cost: cost.alt_bn128_g2_line_prep_credit_cost,
+            alt_bn128_prepared_g2_restore_cost: cost.alt_bn128_prepared_g2_restore_cost,
+            alt_bn128_g2_prepare_base_cost: cost.alt_bn128_g2_prepare_base_cost,
             alt_bn128_fr_lincomb_base_cost: cost.alt_bn128_fr_lincomb_base_cost,
             alt_bn128_fr_lincomb_per_term_cost: cost.alt_bn128_fr_lincomb_per_term_cost,
             alt_bn128_fr_batch_invert_base_cost: cost.alt_bn128_fr_batch_invert_base_cost,
@@ -350,6 +359,9 @@ impl ComputeBudget {
             alt_bn128_gt_multiexp_base_cost: self.alt_bn128_gt_multiexp_base_cost,
             alt_bn128_gt_multiexp_per_target_cost: self.alt_bn128_gt_multiexp_per_target_cost,
             alt_bn128_g2_subgroup_check_cost: self.alt_bn128_g2_subgroup_check_cost,
+            alt_bn128_g2_line_prep_credit_cost: self.alt_bn128_g2_line_prep_credit_cost,
+            alt_bn128_prepared_g2_restore_cost: self.alt_bn128_prepared_g2_restore_cost,
+            alt_bn128_g2_prepare_base_cost: self.alt_bn128_g2_prepare_base_cost,
             alt_bn128_fr_lincomb_base_cost: self.alt_bn128_fr_lincomb_base_cost,
             alt_bn128_fr_lincomb_per_term_cost: self.alt_bn128_fr_lincomb_per_term_cost,
             alt_bn128_fr_batch_invert_base_cost: self.alt_bn128_fr_batch_invert_base_cost,

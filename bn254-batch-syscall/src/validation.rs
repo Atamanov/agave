@@ -34,6 +34,8 @@ pub enum AltBn128BatchError {
     DuplicateContext,
     #[error("atomic PLONK batch contains an unused verifying-key context")]
     UnusedContext,
+    #[error("prepared-G2 blob has an unknown header or non-canonical encoding")]
+    InvalidPreparedBlob,
     #[error("native backend invariant failed")]
     BackendInvariant,
     /// On the solana target the runtime reports every rejection as one nonzero

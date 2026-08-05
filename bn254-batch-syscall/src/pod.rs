@@ -183,6 +183,45 @@ pub struct PodG1RegisteredG2Pair {
     pub g2_id: [u8; 32],
 }
 
+/// VM-address reference to one prepared-G2 wire blob in caller memory.
+///
+/// Byte fields keep the record alignment-1, so a reference laid over any
+/// account-data offset stays valid. `len` must equal
+/// `PREPARED_G2_WIRE_BYTES`; the runtime translates and validates the
+/// referenced bytes on every call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodPreparedRef {
+    pub addr_le: [u8; 8],
+    pub len_le: [u8; 8],
+}
+
+impl PodPreparedRef {
+    pub const fn new(addr: u64, len: u64) -> Self {
+        Self {
+            addr_le: addr.to_le_bytes(),
+            len_le: len.to_le_bytes(),
+        }
+    }
+
+    pub const fn addr(&self) -> u64 {
+        u64::from_le_bytes(self.addr_le)
+    }
+
+    pub const fn len(&self) -> u64 {
+        u64::from_le_bytes(self.len_le)
+    }
+}
+
+/// One pairing operand whose G2 value is a caller-supplied prepared blob,
+/// referenced in place so the bytes are never copied out of account data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct PodG1PreparedG2Pair {
+    pub g1: PodG1Point,
+    pub prepared: PodPreparedRef,
+}
+
 /// One authenticated registry GT target plus its canonical Fr exponent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 #[repr(C)]
@@ -306,6 +345,8 @@ mod tests {
         assert_eq!(size_of::<PodScalar>(), SCALAR_BYTES);
         assert_eq!(size_of::<PodG1G2Pair>(), PAIR_BYTES);
         assert_eq!(size_of::<PodG1RegisteredG2Pair>(), G1_BYTES + 32);
+        assert_eq!(size_of::<PodPreparedRef>(), 16);
+        assert_eq!(size_of::<PodG1PreparedG2Pair>(), 80);
         assert_eq!(size_of::<PodTrustedGtExponent>(), 64);
         assert_eq!(size_of::<PodPairingResult>(), 32);
         assert_eq!(size_of::<PodGtElement>(), FQ12_BYTES);
@@ -317,6 +358,8 @@ mod tests {
         assert_eq!(size_of::<PodSnarkjsPlonkMultiVkInput>(), 776);
         assert_eq!(align_of::<PodG1G2Pair>(), 1);
         assert_eq!(align_of::<PodG1RegisteredG2Pair>(), 1);
+        assert_eq!(align_of::<PodPreparedRef>(), 1);
+        assert_eq!(align_of::<PodG1PreparedG2Pair>(), 1);
         assert_eq!(align_of::<PodTrustedGtExponent>(), 1);
         assert_eq!(align_of::<PodPlonkReductionContext>(), 1);
         assert_eq!(align_of::<PodPlonkReductionInput>(), 1);
@@ -326,6 +369,10 @@ mod tests {
         assert_eq!(align_of::<PodSnarkjsPlonkMultiVkInput>(), 1);
         assert_eq!(offset_of!(PodG1G2Pair, g1), 0);
         assert_eq!(offset_of!(PodG1G2Pair, g2), G1_BYTES);
+        assert_eq!(offset_of!(PodG1PreparedG2Pair, g1), 0);
+        assert_eq!(offset_of!(PodG1PreparedG2Pair, prepared), G1_BYTES);
+        assert_eq!(offset_of!(PodPreparedRef, addr_le), 0);
+        assert_eq!(offset_of!(PodPreparedRef, len_le), 8);
         assert_eq!(offset_of!(PodPlonkReductionContext, omega), 16);
         assert_eq!(offset_of!(PodPlonkReductionInput, evaluations), 192);
         assert_eq!(offset_of!(PodPlonkReductionInput, rho), 384);

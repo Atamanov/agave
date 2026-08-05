@@ -2,6 +2,7 @@ use {
     crate::{
         Version,
         pod::{PodG1G2Pair, PodG1Point, PodG2Point, PodGtElement, PodPairingResult, PodScalar},
+        prepared_abi::{PREPARED_G2_WIRE_BYTES, prepared_blob_header, prepared_blob_scalar_block},
         validation::{AltBn128BatchError, validate_equal_lengths},
     },
     core::mem::{align_of, offset_of, size_of},
@@ -11,10 +12,97 @@ use {
         G2SubgroupProbe as HeliusG2SubgroupProbe, InputError as HeliusInputError,
         PodG1G2Pair as HeliusPair, PodG1Point as HeliusG1Point, PodG2Point as HeliusG2Point,
         PodGt as HeliusGt, PodPairingResult as HeliusPairingResult, PodScalar as HeliusScalar,
+        PreparedG2Handle as HeliusPreparedG2Handle, PreparedPair as HeliusPreparedPair,
         RegisteredG2 as HeliusRegisteredG2, RegisteredG2Pair as HeliusRegisteredG2Pair,
         TrustedGt as HeliusTrustedGt, Version as HeliusVersion,
     },
 };
+
+#[derive(Clone, Debug)]
+pub struct PreparedG2(HeliusPreparedG2Handle);
+
+impl PreparedG2 {
+    /// Full wire blob: self-describing header plus the scalar block.
+    pub fn to_wire_bytes(&self) -> Vec<u8> {
+        let mut wire = Vec::with_capacity(PREPARED_G2_WIRE_BYTES);
+        wire.extend_from_slice(&prepared_blob_header());
+        wire.extend_from_slice(&self.0.to_scalar_bytes());
+        debug_assert_eq!(wire.len(), PREPARED_G2_WIRE_BYTES);
+        wire
+    }
+}
+
+/// Fully validate a canonical G2 source and compute its wire-form schedule.
+pub fn g2_prepare(source: &PodG2Point) -> Result<PreparedG2, AltBn128BatchError> {
+    helius_bn254::g2_prepare(&HeliusG2Point(source.0))
+        .map(PreparedG2)
+        .map_err(map_error)
+}
+
+/// Restore a prepared operand from caller-supplied wire bytes. Header and
+/// canonical limbs are checked; nothing binds the blob to a G2 point.
+pub fn prepared_g2_from_wire(blob: &[u8]) -> Result<PreparedG2, AltBn128BatchError> {
+    let block =
+        prepared_blob_scalar_block(blob).ok_or(AltBn128BatchError::InvalidPreparedBlob)?;
+    HeliusPreparedG2Handle::from_scalar_bytes(block)
+        .map(PreparedG2)
+        .map_err(|error| match error {
+            HeliusInputError::NonCanonical => AltBn128BatchError::NonCanonical,
+            _ => AltBn128BatchError::InvalidPreparedBlob,
+        })
+}
+
+pub fn pairing_check_prepared(
+    full: &[PodG1G2Pair],
+    prepared: &[(PodG1Point, &PreparedG2)],
+) -> Result<bool, AltBn128BatchError> {
+    let full = bytemuck::try_cast_slice::<_, HeliusPair>(full)
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?;
+    let prepared: Vec<HeliusPreparedPair> = prepared
+        .iter()
+        .map(|(g1, handle)| HeliusPreparedPair {
+            g1: HeliusG1Point(g1.0),
+            g2: &handle.0,
+        })
+        .collect();
+    helius_bn254::pairing_check_prepared(full, &prepared).map_err(map_error)
+}
+
+pub fn pairing_check_prepared_vs_target(
+    full: &[PodG1G2Pair],
+    prepared: &[(PodG1Point, &PreparedG2)],
+    target: &PodGtElement,
+) -> Result<bool, AltBn128BatchError> {
+    let full = bytemuck::try_cast_slice::<_, HeliusPair>(full)
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?;
+    let prepared: Vec<HeliusPreparedPair> = prepared
+        .iter()
+        .map(|(g1, handle)| HeliusPreparedPair {
+            g1: HeliusG1Point(g1.0),
+            g2: &handle.0,
+        })
+        .collect();
+    helius_bn254::pairing_check_prepared_vs_target(full, &prepared, &HeliusGt(target.0))
+        .map_err(map_error)
+}
+
+pub fn pairing_map_prepared(
+    full: &[PodG1G2Pair],
+    prepared: &[(PodG1Point, &PreparedG2)],
+) -> Result<PodGtElement, AltBn128BatchError> {
+    let full = bytemuck::try_cast_slice::<_, HeliusPair>(full)
+        .map_err(|_| AltBn128BatchError::BackendInvariant)?;
+    let prepared: Vec<HeliusPreparedPair> = prepared
+        .iter()
+        .map(|(g1, handle)| HeliusPreparedPair {
+            g1: HeliusG1Point(g1.0),
+            g2: &handle.0,
+        })
+        .collect();
+    helius_bn254::pairing_map_prepared(full, &prepared)
+        .map(|target| PodGtElement(target.0))
+        .map_err(map_error)
+}
 
 #[derive(Clone, Debug)]
 pub struct RegisteredG2(HeliusRegisteredG2);
@@ -246,6 +334,94 @@ const fn map_error(error: HeliusInputError) -> AltBn128BatchError {
         HeliusInputError::ZeroInput => AltBn128BatchError::ZeroInput,
         HeliusInputError::CapExceeded => AltBn128BatchError::CapExceeded,
         HeliusInputError::LengthMismatch => AltBn128BatchError::LengthMismatch,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::{
+            pod::PodG1G2Pair,
+            prepared_abi::PREPARED_G2_WIRE_BYTES,
+            test_utils::{g1_bytes, g2_bytes, non_subgroup_g2, random_g1, random_g2, rng},
+        },
+    };
+
+    fn random_pairs(count: usize) -> Vec<PodG1G2Pair> {
+        let mut rng = rng();
+        (0..count)
+            .map(|_| PodG1G2Pair {
+                g1: PodG1Point(g1_bytes(&random_g1(&mut rng))),
+                g2: PodG2Point(g2_bytes(&random_g2(&mut rng))),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn prepared_wire_round_trip_matches_the_full_pairing() {
+        let pairs = random_pairs(3);
+        let expected = alt_bn128_pairing_map(Version::V0, &pairs).unwrap();
+
+        let handles: Vec<PreparedG2> = pairs
+            .iter()
+            .map(|pair| {
+                let wire = g2_prepare(&pair.g2).unwrap().to_wire_bytes();
+                assert_eq!(wire.len(), PREPARED_G2_WIRE_BYTES);
+                prepared_g2_from_wire(&wire).unwrap()
+            })
+            .collect();
+        let prepared: Vec<(PodG1Point, &PreparedG2)> = pairs
+            .iter()
+            .zip(&handles)
+            .map(|(pair, handle)| (pair.g1, handle))
+            .collect();
+
+        assert_eq!(
+            pairing_map_prepared(&pairs[..1], &prepared[1..]).unwrap(),
+            expected
+        );
+        assert!(pairing_check_prepared_vs_target(&pairs[..1], &prepared[1..], &expected).unwrap());
+        assert_eq!(
+            pairing_check_prepared(&[], &prepared).unwrap(),
+            alt_bn128_pairing_check(Version::V0, &pairs).unwrap()
+        );
+
+        let mut wrong = expected;
+        wrong.0[0] ^= 1;
+        assert!(!pairing_check_prepared_vs_target(&pairs[..1], &prepared[1..], &wrong).unwrap());
+    }
+
+    #[test]
+    fn prepared_wire_rejects_bad_frames_and_bad_sources() {
+        let pair = &random_pairs(1)[0];
+        let wire = g2_prepare(&pair.g2).unwrap().to_wire_bytes();
+
+        let mut bad_header = wire.clone();
+        bad_header[4] ^= 1;
+        assert_eq!(
+            prepared_g2_from_wire(&bad_header).unwrap_err(),
+            AltBn128BatchError::InvalidPreparedBlob
+        );
+        assert_eq!(
+            prepared_g2_from_wire(&wire[..wire.len() - 1]).unwrap_err(),
+            AltBn128BatchError::InvalidPreparedBlob
+        );
+        let mut noncanonical = wire;
+        noncanonical[8..40].fill(0xff);
+        assert_eq!(
+            prepared_g2_from_wire(&noncanonical).unwrap_err(),
+            AltBn128BatchError::NonCanonical
+        );
+
+        assert_eq!(
+            g2_prepare(&PodG2Point([0u8; crate::G2_BYTES])).unwrap_err(),
+            AltBn128BatchError::ZeroInput
+        );
+        assert_eq!(
+            g2_prepare(&PodG2Point(g2_bytes(&non_subgroup_g2()))).unwrap_err(),
+            AltBn128BatchError::NotInSubgroup
+        );
     }
 }
 

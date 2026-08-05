@@ -15,10 +15,14 @@ use {
             snarkjs_plonk_multi_vk_output_count, snarkjs_plonk_multi_vk_shape,
         },
         pod::{
-            PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair, PodGtElement, PodPairingResult,
-            PodPlonkReductionContext, PodPlonkReductionInput, PodScalar,
+            PodG1G2Pair, PodG1Point, PodG1PreparedG2Pair, PodG1RegisteredG2Pair, PodGtElement,
+            PodPairingResult, PodPlonkReductionContext, PodPlonkReductionInput, PodScalar,
             PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput,
             PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput, PodTrustedGtExponent,
+        },
+        prepared_abi::{
+            MAX_PREPARED_PAIRS, PREPARED_G2_WIRE_BYTES, pack_g2_prepare_shape,
+            pack_prepared_pairing_shape,
         },
         registry_abi::{
             REGISTRY_MAX_G2_ENTRIES, REGISTRY_MAX_GT_ENTRIES, REGISTRY_MAX_REGISTERED_PAIRS,
@@ -37,6 +41,9 @@ define_syscall!(fn sol_alt_bn128_pairing_map(num_pairs: u64, pairs_addr: *const 
 define_syscall!(fn sol_alt_bn128_vk_registry_init(packed_shape: u64, g2_sources_addr: *const u8, gt_sources_addr: *const u8, keyset_digest_addr: *const u8, registry_data_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_pairing_check_registered(packed_shape: u64, full_addr: *const u8, registered_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_trusted_gt_multiexp(packed_shape: u64, operands_addr: *const u8, result_addr: *mut u8) -> u64);
+define_syscall!(fn sol_alt_bn128_g2_prepare(packed_shape: u64, g2_source_addr: *const u8, prepared_out_addr: *mut u8) -> u64);
+define_syscall!(fn sol_alt_bn128_pairing_check_prepared(packed_shape: u64, full_addr: *const u8, prepared_addr: *const u8, target_addr: *const u8, result_addr: *mut u8) -> u64);
+define_syscall!(fn sol_alt_bn128_pairing_map_prepared(packed_shape: u64, full_addr: *const u8, prepared_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_fr_lincomb(num_elems: u64, a_addr: *const u8, b_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_fr_batch_invert(num_elems: u64, a_addr: *const u8, result_addr: *mut u8) -> u64);
 define_syscall!(fn sol_alt_bn128_plonk_batch_reduce(shape: u64, context_addr: *const u8, inputs_addr: *const u8, public_inputs_addr: *const u8, result_addr: *mut u8) -> u64);
@@ -185,6 +192,139 @@ pub fn alt_bn128_pairing_check_registered(
     };
     check(code)?;
     Ok(result.verdict())
+}
+
+/// Fully validate one canonical G2 point and write its prepared wire blob
+/// (header plus scalar-Montgomery line schedule) into `prepared_out`.
+pub fn alt_bn128_g2_prepare(
+    _version: Version,
+    source: &crate::PodG2Point,
+    prepared_out: &mut [u8],
+) -> Result<(), AltBn128BatchError> {
+    if prepared_out.len() != PREPARED_G2_WIRE_BYTES {
+        return Err(AltBn128BatchError::LengthMismatch);
+    }
+    let code = unsafe {
+        sol_alt_bn128_g2_prepare(
+            pack_g2_prepare_shape(),
+            source.0.as_ptr(),
+            prepared_out.as_mut_ptr(),
+        )
+    };
+    check(code)
+}
+
+/// Mixed product check against the GT identity. Prepared operands reference
+/// wire blobs in place (typically borrowed account data); the runtime
+/// validates their encoding but the caller alone vouches for their provenance.
+pub fn alt_bn128_pairing_check_prepared(
+    _version: Version,
+    full: &[PodG1G2Pair],
+    prepared: &[PodG1PreparedG2Pair],
+) -> Result<bool, AltBn128BatchError> {
+    prepared_pairing_call(full, prepared, core::ptr::null())
+}
+
+/// Mixed product check against a caller-supplied canonical GT target. Pass
+/// exactly the bytes `sol_alt_bn128_pairing_map` returned; any other encoding
+/// deterministically compares unequal.
+pub fn alt_bn128_pairing_check_prepared_vs_target(
+    _version: Version,
+    full: &[PodG1G2Pair],
+    prepared: &[PodG1PreparedG2Pair],
+    target: &PodGtElement,
+) -> Result<bool, AltBn128BatchError> {
+    prepared_pairing_call(full, prepared, target.0.as_ptr())
+}
+
+fn prepared_pairing_call(
+    full: &[PodG1G2Pair],
+    prepared: &[PodG1PreparedG2Pair],
+    target_addr: *const u8,
+) -> Result<bool, AltBn128BatchError> {
+    validate_prepared_counts(full.len(), prepared.len(), crate::PAIRING_MAX_PAIRS)?;
+    validate_prepared_refs(prepared)?;
+    let shape = pack_prepared_pairing_shape(full.len() as u16, prepared.len() as u16);
+    let mut result = PodPairingResult([0u8; 32]);
+    let fallback = result.0.as_ptr();
+    let full_addr = if full.is_empty() {
+        fallback
+    } else {
+        full.as_ptr().cast()
+    };
+    let prepared_addr = if prepared.is_empty() {
+        fallback
+    } else {
+        prepared.as_ptr().cast()
+    };
+    let code = unsafe {
+        sol_alt_bn128_pairing_check_prepared(
+            shape,
+            full_addr,
+            prepared_addr,
+            target_addr,
+            result.0.as_mut_ptr(),
+        )
+    };
+    check(code)?;
+    Ok(result.verdict())
+}
+
+/// Mixed product mapped to its canonical post-final-exponentiation encoding.
+pub fn alt_bn128_pairing_map_prepared(
+    _version: Version,
+    full: &[PodG1G2Pair],
+    prepared: &[PodG1PreparedG2Pair],
+) -> Result<PodGtElement, AltBn128BatchError> {
+    validate_prepared_counts(full.len(), prepared.len(), crate::PAIRING_MAP_MAX_PAIRS)?;
+    validate_prepared_refs(prepared)?;
+    let shape = pack_prepared_pairing_shape(full.len() as u16, prepared.len() as u16);
+    let mut result = PodGtElement([0u8; crate::encoding::FQ12_BYTES]);
+    let fallback = result.0.as_ptr();
+    let full_addr = if full.is_empty() {
+        fallback
+    } else {
+        full.as_ptr().cast()
+    };
+    let prepared_addr = if prepared.is_empty() {
+        fallback
+    } else {
+        prepared.as_ptr().cast()
+    };
+    let code = unsafe {
+        sol_alt_bn128_pairing_map_prepared(shape, full_addr, prepared_addr, result.0.as_mut_ptr())
+    };
+    check(code)?;
+    Ok(result)
+}
+
+fn validate_prepared_counts(
+    full: usize,
+    prepared: usize,
+    cap: usize,
+) -> Result<(), AltBn128BatchError> {
+    let total = full
+        .checked_add(prepared)
+        .ok_or(AltBn128BatchError::CapExceeded)?;
+    if total == 0 {
+        return Err(AltBn128BatchError::ZeroInput);
+    }
+    if total > cap || prepared > MAX_PREPARED_PAIRS {
+        return Err(AltBn128BatchError::CapExceeded);
+    }
+    Ok(())
+}
+
+// The raw ABI trusts each reference's declared length; reject a wrong one
+// locally before any pointer crosses the syscall boundary.
+fn validate_prepared_refs(prepared: &[PodG1PreparedG2Pair]) -> Result<(), AltBn128BatchError> {
+    if prepared
+        .iter()
+        .any(|pair| pair.prepared.len() != PREPARED_G2_WIRE_BYTES as u64)
+    {
+        return Err(AltBn128BatchError::InvalidPreparedBlob);
+    }
+    Ok(())
 }
 
 /// Resolve authenticated post-final-exponentiation targets by registry ID and

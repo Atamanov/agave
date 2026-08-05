@@ -122,6 +122,7 @@ fn error_code(e: &AltBn128BatchError) -> u8 {
         AltBn128BatchError::UnusedContext => 14,
         // A valid external input cannot reach a backend invariant error.
         AltBn128BatchError::BackendInvariant => 15,
+        AltBn128BatchError::InvalidPreparedBlob => 16,
     }
 }
 

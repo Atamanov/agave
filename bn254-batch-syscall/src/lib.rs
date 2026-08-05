@@ -18,10 +18,17 @@ pub use crate::{
         unpack_snarkjs_plonk_multi_vk_shape,
     },
     pod::{
-        PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair, PodG2Point, PodGtElement, PodPairingResult,
-        PodPlonkReductionContext, PodPlonkReductionInput, PodScalar, PodSnarkjsPlonkMultiVkContext,
-        PodSnarkjsPlonkMultiVkInput, PodSnarkjsPlonkReductionContext,
-        PodSnarkjsPlonkReductionInput, PodTrustedGtExponent,
+        PodG1G2Pair, PodG1Point, PodG1PreparedG2Pair, PodG1RegisteredG2Pair, PodG2Point,
+        PodGtElement, PodPairingResult, PodPlonkReductionContext, PodPlonkReductionInput,
+        PodPreparedRef, PodScalar, PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput,
+        PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput, PodTrustedGtExponent,
+    },
+    prepared_abi::{
+        MAX_PREPARED_PAIRS, PREPARED_ABI_VERSION, PREPARED_BLOB_BACKEND_B5,
+        PREPARED_BLOB_CURVE_BN254, PREPARED_BLOB_FORMAT_VERSION, PREPARED_BLOB_HEADER_BYTES,
+        PREPARED_BLOB_MAGIC, PREPARED_G2_SCALAR_BLOCK_BYTES, PREPARED_G2_WIRE_BYTES,
+        pack_g2_prepare_shape, pack_prepared_pairing_shape, prepared_blob_header,
+        prepared_blob_scalar_block, unpack_g2_prepare_shape, unpack_prepared_pairing_shape,
     },
     registry_abi::{
         REGISTRY_ABI_VERSION, REGISTRY_G2_ENTRY_BYTES, REGISTRY_GT_ENTRY_BYTES,
@@ -35,8 +42,10 @@ pub use crate::{
 // targets. Off-chain the arithmetic runs here, on-chain the runtime performs it.
 #[cfg(target_os = "solana")]
 pub use crate::syscalls::{
-    alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
-    alt_bn128_pairing_check_registered, alt_bn128_pairing_map, alt_bn128_plonk_batch_reduce,
+    alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_g2_prepare,
+    alt_bn128_pairing_check, alt_bn128_pairing_check_prepared,
+    alt_bn128_pairing_check_prepared_vs_target, alt_bn128_pairing_check_registered,
+    alt_bn128_pairing_map, alt_bn128_pairing_map_prepared, alt_bn128_plonk_batch_reduce,
     alt_bn128_snarkjs_plonk_batch_reduce, alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
     alt_bn128_trusted_gt_multiexp, alt_bn128_vk_registry_init,
 };
@@ -56,8 +65,10 @@ pub use crate::{
     not(feature = "backend-b3-mcl")
 ))]
 pub use crate::backend::{
-    RegisteredG2, RegisteredG2Pair, TrustedGt, registered_g2_from_authenticated_bytes,
-    trusted_gt_from_authenticated_bytes, trusted_gt_from_pair, trusted_gt_to_bytes,
+    PreparedG2, RegisteredG2, RegisteredG2Pair, TrustedGt, g2_prepare, pairing_check_prepared,
+    pairing_check_prepared_vs_target, pairing_map_prepared, prepared_g2_from_wire,
+    registered_g2_from_authenticated_bytes, trusted_gt_from_authenticated_bytes,
+    trusted_gt_from_pair, trusted_gt_to_bytes,
 };
 
 #[cfg(not(target_os = "solana"))]
@@ -322,6 +333,7 @@ pub(crate) mod pairing;
 #[cfg(not(target_os = "solana"))]
 pub(crate) mod plonk;
 pub(crate) mod pod;
+pub(crate) mod prepared_abi;
 pub(crate) mod registry_abi;
 #[cfg(all(not(target_os = "solana"), feature = "research-observer"))]
 pub mod research_observer;

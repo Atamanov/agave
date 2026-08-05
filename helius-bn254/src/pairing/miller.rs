@@ -41,7 +41,7 @@ type EllCoeff = (F2, F2, F2);
 
 /// Number of D-twist line triples in one non-identity BN254 G2 schedule.
 pub(crate) const PREPARED_G2_COEFFICIENTS: usize = 87;
-const PREPARED_G2_SCALAR_BYTES: usize = PREPARED_G2_COEFFICIENTS * 3 * 2 * 32;
+pub(crate) const PREPARED_G2_SCALAR_BYTES: usize = PREPARED_G2_COEFFICIENTS * 3 * 2 * 32;
 const PREPARED_G2_IFMA_BYTES: usize = PREPARED_G2_COEFFICIENTS * 3 * 2 * 5 * 8;
 /// Backend state for scalar Montgomery coefficients plus their radix-52 IFMA
 /// form. The latter removes every hot-path coefficient-domain conversion.
@@ -84,6 +84,47 @@ impl PreparedG2 {
         output
     }
 
+    /// Wire form for stateless-syscall consumers: the scalar-Montgomery block
+    /// alone. The radix-52 IFMA form is derived on restore, so the two limb
+    /// domains can never disagree and split a fleet with mixed IFMA support.
+    pub(crate) fn to_scalar_bytes(&self) -> Vec<u8> {
+        let mut output = Vec::with_capacity(PREPARED_G2_SCALAR_BYTES);
+        for triple in &self.coefficients {
+            for coefficient in [triple.0, triple.1, triple.2] {
+                for component in [coefficient.c0, coefficient.c1] {
+                    for limb in component.to_montgomery_limbs() {
+                        output.extend_from_slice(&limb.to_le_bytes());
+                    }
+                }
+            }
+        }
+        debug_assert_eq!(output.len(), PREPARED_G2_SCALAR_BYTES);
+        output
+    }
+
+    /// Restore from the scalar-Montgomery wire block, deriving the IFMA form.
+    /// Rejects non-canonical limbs; never returns an ill-defined schedule.
+    pub(crate) fn from_scalar_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != PREPARED_G2_SCALAR_BYTES {
+            return None;
+        }
+        let coefficients = parse_scalar_block(bytes)?;
+        let coefficients_ifma = coefficients
+            .iter()
+            .map(|triple| {
+                (
+                    fp2_to_ifma(triple.0),
+                    fp2_to_ifma(triple.1),
+                    fp2_to_ifma(triple.2),
+                )
+            })
+            .collect();
+        Some(Self {
+            coefficients,
+            coefficients_ifma,
+        })
+    }
+
     /// Restore an authenticated backend-versioned account schedule without
     /// repeating 522 canonical-to-Montgomery field conversions.
     pub(crate) fn from_registry_bytes(bytes: &[u8]) -> Option<Self> {
@@ -91,25 +132,7 @@ impl PreparedG2 {
             return None;
         }
         let (scalar_bytes, ifma_bytes) = bytes.split_at(PREPARED_G2_SCALAR_BYTES);
-        let mut coefficients = Vec::with_capacity(PREPARED_G2_COEFFICIENTS);
-        for triple in scalar_bytes.chunks_exact(3 * 2 * 32) {
-            let mut fp2 = [Fp2::ZERO; 3];
-            for (output, encoded) in fp2.iter_mut().zip(triple.chunks_exact(64)) {
-                let mut components = [Fp::ZERO; 2];
-                for (component, encoded_component) in
-                    components.iter_mut().zip(encoded.chunks_exact(32))
-                {
-                    let mut limbs = [0u64; 4];
-                    for (limb, bytes) in limbs.iter_mut().zip(encoded_component.chunks_exact(8)) {
-                        *limb = u64::from_le_bytes(bytes.try_into().ok()?);
-                    }
-                    *component = Fp::from_montgomery_limbs(limbs)?;
-                }
-                let [c0, c1] = components;
-                *output = Fp2::new(c0, c1);
-            }
-            coefficients.push((fp2[0], fp2[1], fp2[2]));
-        }
+        let coefficients = parse_scalar_block(scalar_bytes)?;
         let mut coefficients_ifma = Vec::with_capacity(PREPARED_G2_COEFFICIENTS);
         for triple in ifma_bytes.chunks_exact(3 * 2 * 5 * 8) {
             let mut fp2 = [([0u64; 5], [0u64; 5]); 3];
@@ -137,6 +160,28 @@ impl PreparedG2 {
                 coefficients_ifma,
             })
     }
+}
+
+fn parse_scalar_block(bytes: &[u8]) -> Option<Vec<(Fp2, Fp2, Fp2)>> {
+    let mut coefficients = Vec::with_capacity(PREPARED_G2_COEFFICIENTS);
+    for triple in bytes.chunks_exact(3 * 2 * 32) {
+        let mut fp2 = [Fp2::ZERO; 3];
+        for (output, encoded) in fp2.iter_mut().zip(triple.chunks_exact(64)) {
+            let mut components = [Fp::ZERO; 2];
+            for (component, encoded_component) in components.iter_mut().zip(encoded.chunks_exact(32))
+            {
+                let mut limbs = [0u64; 4];
+                for (limb, bytes) in limbs.iter_mut().zip(encoded_component.chunks_exact(8)) {
+                    *limb = u64::from_le_bytes(bytes.try_into().ok()?);
+                }
+                *component = Fp::from_montgomery_limbs(limbs)?;
+            }
+            let [c0, c1] = components;
+            *output = Fp2::new(c0, c1);
+        }
+        coefficients.push((fp2[0], fp2[1], fp2[2]));
+    }
+    (coefficients.len() == PREPARED_G2_COEFFICIENTS).then_some(coefficients)
 }
 
 fn radix52_montgomery_is_canonical(limbs: &[u64; 5]) -> bool {
@@ -717,5 +762,33 @@ mod tests {
         noncanonical[..32].fill(0xff);
         assert!(PreparedG2::from_registry_bytes(&noncanonical).is_none());
         assert!(PreparedG2::from_registry_bytes(&noncanonical[..32]).is_none());
+    }
+
+    #[test]
+    fn scalar_wire_restore_derives_the_exact_ifma_schedule() {
+        let q = G2Projective::from(G2Affine::arkworks_generator())
+            .mul(Fr::from_u64(5))
+            .to_affine();
+        let prepared = prepare_g2(&q);
+        let bytes = prepared.to_scalar_bytes();
+        assert_eq!(bytes.len(), PREPARED_G2_SCALAR_BYTES);
+        let restored = PreparedG2::from_scalar_bytes(&bytes).unwrap();
+        assert_eq!(restored.coefficients, prepared.coefficients);
+        assert_eq!(restored.coefficients_ifma, prepared.coefficients_ifma);
+        assert_eq!(restored.to_registry_bytes(), prepared.to_registry_bytes());
+
+        let p = G1Affine::generator();
+        assert_eq!(
+            multi_miller_loop_mixed(&[], &[(&p, &restored)]),
+            multi_miller_loop(&[(&p, &q)]),
+        );
+
+        let mut noncanonical = bytes.clone();
+        noncanonical[..32].fill(0xff);
+        assert!(PreparedG2::from_scalar_bytes(&noncanonical).is_none());
+        assert!(PreparedG2::from_scalar_bytes(&bytes[..bytes.len() - 1]).is_none());
+        let mut extended = bytes;
+        extended.push(0);
+        assert!(PreparedG2::from_scalar_bytes(&extended).is_none());
     }
 }

@@ -221,6 +221,27 @@ pub struct SVMTransactionExecutionCost {
     /// separately so the surcharge stays auditable and reusable by any future
     /// G2-input syscall.
     pub alt_bn128_g2_subgroup_check_cost: u64,
+    /// Per-pair credit for a caller-supplied prepared G2 operand, on top of
+    /// the subgroup-check credit: the pair skips all G2 double/add line
+    /// computation.
+    ///
+    /// UNMEASURED: line preparation is not separable in any committed capture.
+    /// Bounded above by the 2,576 net per-pair remainder; held at ~35% of it
+    /// as a deliberate under-credit until a mixed-shape capture re-fits it.
+    pub alt_bn128_g2_line_prep_credit_cost: u64,
+    /// Per-operand surcharge for restoring a prepared G2 wire blob: a 16,712
+    /// byte read, 522 canonical-limb checks, and the radix-52 derivation.
+    ///
+    /// UNMEASURED: estimated from 522 x 4 modular doublings at 33 ns/CU;
+    /// needs a standalone restore capture.
+    pub alt_bn128_prepared_g2_restore_cost: u64,
+    /// Base compute units for `sol_alt_bn128_g2_prepare`, on top of the
+    /// full-validation pair price it charges: syscall overhead plus the
+    /// 16,712-byte output write.
+    ///
+    /// UNMEASURED: rounded up hard from the cpi-bytes rate; a once-per-key
+    /// setup op, so conservative by construction.
+    pub alt_bn128_g2_prepare_base_cost: u64,
     /// Base compute units for an alt_bn128 scalar-field inner product.
     pub alt_bn128_fr_lincomb_base_cost: u64,
     /// Per-term compute units for an alt_bn128 scalar-field inner product.
@@ -319,6 +340,9 @@ impl Default for SVMTransactionExecutionCost {
             alt_bn128_pairing_check_per_pair_cost: 4_188,
             alt_bn128_pairing_check_lane_cost: 20_338,
             alt_bn128_g2_subgroup_check_cost: 1_612,
+            alt_bn128_g2_line_prep_credit_cost: 900,
+            alt_bn128_prepared_g2_restore_cost: 300,
+            alt_bn128_g2_prepare_base_cost: 700,
             // The scalar charges use the same B1 host data and 33 ns per CU.
             alt_bn128_fr_lincomb_base_cost: 100,
             alt_bn128_fr_lincomb_per_term_cost: 2,
