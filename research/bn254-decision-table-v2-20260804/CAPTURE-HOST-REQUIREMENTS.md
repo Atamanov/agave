@@ -51,3 +51,29 @@ Charged CU is a consensus price. A host slower than validator-class hardware
 inflates every charge, and mixing hosts within one schedule reintroduces exactly
 the cross-host splicing this campaign exists to remove. One host, fast, quiet,
 retail silicon, or no capture.
+
+## Measuring the residual (no special host needed)
+
+The transaction table is `core + residual`. The core comes from the runtime
+schedule and is host-independent. The residual is guest-side sBPF CU and needs
+LiteSVM, but it is also a charge rather than a timing, so any host serves.
+
+```bash
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+cd bn254-decision-bench/sbf/groth16 && cargo-build-sbf --sbf-out-dir /tmp/progs
+cargo build -p solana-bn254-decision-collector
+./target/debug/solana-bn254-decision-collector \
+    --workspace-root . --program-dir /tmp/progs \
+    --plonk-fixture-dir research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions \
+    --runtime-revision "$(git rev-parse HEAD)" \
+    < research/bn254-decision-table-v2-20260804/example-execution-request.json
+```
+
+One `ExecutionRequest` in, one `ResidualCell` out. Verified on
+`groth16_n2_distinct_vk` / `current`: residual 3,769 CU, observed trace equal to
+the contract. A stale guest binary fails with `invalid account data for
+instruction`, so rebuild the four guests (`groth16`, `groth-recursion`,
+`plonk-direct`, `plonk-recursion`) before a full run.
+
+`run_campaign` with `ExecutorConfig::Command { argv }` already drives this
+per cell, so the 30-cell sweep needs the campaign spec, not a new driver.
