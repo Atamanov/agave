@@ -1,5 +1,12 @@
 # Reproducible BN254 decision campaign
 
+> Two columns of `TRANSACTION-TABLE.md` do not measure the features they name.
+> "Recursion over B5" verifies a fixed-arity payload in a synthetic guest, not
+> `aggregate_transact`; "Batching + VK registry (B5)" models a keyset registry
+> against a stale prepared-blob size. Both are owned by other sessions and
+> measured independently there. See `CONFORMANCE-PLAN.md` before quoting either.
+> The remaining four columns and the whole charge schedule are unaffected.
+
 Run the complete campaign through one public entrypoint:
 
 ```sh
