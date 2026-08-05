@@ -3485,12 +3485,11 @@ declare_builtin_function!(
         };
 
         let execution_cost = invoke_context.get_execution_cost();
-        // Full-validation pair price: prepare runs the subgroup check and the
-        // line schedule a full pair would run, once, at setup time.
+        // The per-pair price is all-in (it already carries the subgroup
+        // check); adding the subgroup term again would double-charge it.
         let cost = execution_cost
             .alt_bn128_g2_prepare_base_cost
-            .saturating_add(execution_cost.alt_bn128_pairing_check_per_pair_cost)
-            .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost);
+            .saturating_add(execution_cost.alt_bn128_pairing_check_per_pair_cost);
         invoke_context.compute_meter.consume_checked(cost)?;
 
         if !unpack_g2_prepare_shape(packed_shape) {

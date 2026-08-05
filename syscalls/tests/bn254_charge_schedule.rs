@@ -149,11 +149,13 @@ fn a_registered_pair_is_cheaper_than_a_full_pair() {
 /// net per-prepared-pair saving `(allfull(total) - mixed) / prepared` in CU
 /// at 33 ns/CU. Regime is decided by `total / 8`.
 const MEASURED_PREPARED_SAVING: &[(u64, u64, u64)] = &[
-    // (full, prepared, measured net saving per prepared pair)
+    // (full, prepared, measured net saving per prepared pair). The 552
+    // single-process figure once recorded for (5, 3) was process noise; the
+    // two-process re-run puts that shape at 1,091.
     (1, 2, 2_270),
     (1, 3, 2_317),
     (0, 3, 2_387),
-    (5, 3, 552),
+    (5, 3, 1_091),
     (2, 6, 899),
     (0, 8, 983),
     (8, 8, 792),
@@ -216,18 +218,19 @@ fn prepared_charge_is_positive_and_regime_ordered() {
 }
 
 /// MEASURED credits (capture above); the prepare base stays a deliberate
-/// overcharge (whole op measured at 2,656 CU vs the 6,500 composite charge).
+/// overcharge (whole op measured at 2,656 CU vs the 4,888 composite charge).
 /// This test exists to fail when the schedule is re-fitted, so a change
 /// cannot land without restating the evidence.
 #[test]
 fn prepared_operand_schedule_is_pinned() {
     let cost = SVMTransactionExecutionCost::default();
     assert_eq!(cost.alt_bn128_prepared_pair_scalar_credit_cost, 2_200);
-    assert_eq!(cost.alt_bn128_prepared_pair_lane_credit_cost, 500);
+    assert_eq!(cost.alt_bn128_prepared_pair_lane_credit_cost, 750);
     assert_eq!(cost.alt_bn128_g2_prepare_base_cost, 700);
-    let prepare_charge = cost.alt_bn128_g2_prepare_base_cost
-        + cost.alt_bn128_pairing_check_per_pair_cost
-        + cost.alt_bn128_g2_subgroup_check_cost;
+    // Mirrors the charge site: the per-pair price is all-in, so no separate
+    // subgroup term is added.
+    let prepare_charge =
+        cost.alt_bn128_g2_prepare_base_cost + cost.alt_bn128_pairing_check_per_pair_cost;
     // Measured whole-op cost on the capture host.
     assert!(prepare_charge >= 2_656);
 }

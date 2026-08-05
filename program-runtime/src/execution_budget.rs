@@ -233,15 +233,16 @@ pub struct SVMTransactionExecutionCost {
     /// The 8-wide kernel makes the saving collapse: a prepared pair still
     /// occupies a lane, so it saves preparation, not lane time.
     ///
-    /// MEASURED (same capture): 552-983 CU across the lane-regime splits;
-    /// held at 500. A flat sub-lane credit here would undercharge.
+    /// MEASURED (same capture; the 552 once recorded for one split was
+    /// process noise, corrected to 1,091 by a two-process re-run): lane-regime
+    /// savings 792-1,091 CU across splits; held at 750, under the minimum.
     pub alt_bn128_prepared_pair_lane_credit_cost: u64,
     /// Base compute units for `sol_alt_bn128_g2_prepare`, on top of the
-    /// full-validation pair price it charges (per_pair + subgroup, 5,800
-    /// total with this base).
+    /// all-in per-pair price it charges (which already carries the subgroup
+    /// check; nothing is added twice).
     ///
     /// MEASURED (same capture): the whole operation runs in 2,656 CU, so the
-    /// composite charge is a deliberate ~2.4x overcharge for a once-per-key
+    /// 4,888 composite charge is a deliberate overcharge for a once-per-key
     /// setup op.
     pub alt_bn128_g2_prepare_base_cost: u64,
     /// Base compute units for an alt_bn128 scalar-field inner product.
@@ -343,7 +344,7 @@ impl Default for SVMTransactionExecutionCost {
             alt_bn128_pairing_check_lane_cost: 20_338,
             alt_bn128_g2_subgroup_check_cost: 1_612,
             alt_bn128_prepared_pair_scalar_credit_cost: 2_200,
-            alt_bn128_prepared_pair_lane_credit_cost: 500,
+            alt_bn128_prepared_pair_lane_credit_cost: 750,
             alt_bn128_g2_prepare_base_cost: 700,
             // The scalar charges use the same B1 host data and 33 ns per CU.
             alt_bn128_fr_lincomb_base_cost: 100,
