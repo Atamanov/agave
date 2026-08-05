@@ -84,6 +84,13 @@ pub mod layout {
     pub const OPAQUE_G2_ID_BYTES: usize = 32;
     pub const REGISTRY_HOT_INSTRUCTION_BYTES: usize = 1 + 2 * OPAQUE_G2_ID_BYTES;
     pub const REGISTERED_PAIR_BYTES: usize = 64 + OPAQUE_G2_ID_BYTES;
+    /// This branch's prepared-G2 wire size. It is not the format the stateless
+    /// prepare syscalls emit, which `bn254-batch-syscall::prepared_abi` pins at
+    /// `PREPARED_G2_WIRE_BYTES = 16_712` on `local/bn254-prepared-stateless`.
+    /// Two formats exist because the two branches grew apart; converging them
+    /// changes every sealed registry digest, so it is a deliberate change and
+    /// not a constant to quietly retune. `registry_account_size_is_pinned`
+    /// fails if this moves untracked.
     pub const G2_PREPARED_BYTES: usize = 37_584;
     pub const REGISTRY_ENTRY_BYTES: usize =
         OPAQUE_G2_ID_BYTES + REGISTRY_SOURCE_BYTES + G2_PREPARED_BYTES;
@@ -2552,6 +2559,18 @@ mod exporter_tests {
     /// A verifying key carries its domain size but not its omega, so the guest
     /// derives one from the other. A wrong entry would evaluate the vanishing
     /// polynomial on the wrong domain and the proof would still parse.
+    /// The registry account size the collector installs. It is derived, so it
+    /// moves silently when the prepared-blob size does, and the collector then
+    /// measures a registry that no fork would accept. Pinned here so the
+    /// divergence from `PREPARED_G2_WIRE_BYTES = 16_712` stays one tracked
+    /// number in one place.
+    #[test]
+    fn registry_account_size_is_pinned() {
+        assert_eq!(layout::G2_PREPARED_BYTES, 37_584);
+        assert_eq!(layout::REGISTRY_ENTRY_BYTES, 37_744);
+        assert_eq!(layout::REGISTRY_BYTES, 75_568);
+    }
+
     #[test]
     fn authenticated_omega_matches_every_fixture() {
         use {ark_bn254::Fr, ark_ff::FftField};
