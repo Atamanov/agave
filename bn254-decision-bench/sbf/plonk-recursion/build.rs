@@ -67,7 +67,7 @@ fn main() {
             .unwrap_or_else(|error| panic!("decode {}: {error}", generation_path.display()));
         assert!(
             generation.contains(
-                "\"schema\": \"helius.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3\""
+                "\"schema\": \"helios.genuine-snarkjs-plonk-recursion.secure-os-random.fixed-statement.v3\""
             ),
             "{} is not the fixed-statement-v3 PLONK recursion export",
             generation_path.display()

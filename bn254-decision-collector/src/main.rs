@@ -532,12 +532,17 @@ fn require_b5_dispatch_attestation(snapshot: &ObserverSnapshot) -> Result<(), St
             .registered_pairing_checks
             .iter()
             .any(|event| event.full_pairs.saturating_add(event.registered_pairs) >= 8);
-        if ordinary_eight && snapshot.ifma_batch8_dispatches == 0 {
+        // The lane kernel only exists under compile-time IFMA. Without it the
+        // portable path runs and dispatches nothing, which is expected, not a
+        // fault: charges and the guest residual are identical either way.
+        let lane_kernel_present =
+            solana_bn254_decision_litesvm::selected_backend_compiled_with_avx512_ifma();
+        if lane_kernel_present && ordinary_eight && snapshot.ifma_batch8_dispatches == 0 {
             return Err(
                 "B5 transaction reached an 8-pair shape without ordinary IFMA dispatch".into(),
             );
         }
-        if mixed_eight && snapshot.ifma_mixed_batch8_dispatches == 0 {
+        if lane_kernel_present && mixed_eight && snapshot.ifma_mixed_batch8_dispatches == 0 {
             return Err(
                 "B5 transaction reached an 8-pair registered shape without mixed IFMA dispatch"
                     .into(),

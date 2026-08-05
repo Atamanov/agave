@@ -1,5 +1,5 @@
 {
-  "schema": "helius.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4",
+  "schema": "helios.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4",
   "stage": "full",
   "n_inner_proofs": 5,
   "distinct_inner_vks": false,

@@ -55,7 +55,7 @@ fn main() {
         std::str::from_utf8(&compact_manifest).expect("compact recursion manifest UTF-8");
     assert!(
         compact_manifest
-            .contains("\"schema\": \"helius.bn254-real-zolana-recursion-runtime-compact.v4\"")
+            .contains("\"schema\": \"helios.bn254-real-zolana-recursion-runtime-compact.v4\"")
     );
     assert!(compact_manifest.contains(SOURCE_ZOLANA_MANIFEST_SHA256));
     println!("cargo:rustc-env=HELIUS_GROTH_RECURSION_MANIFEST_SHA256={COMPACT_MANIFEST_SHA256}");
@@ -111,7 +111,7 @@ fn main() {
         );
         let generation = std::str::from_utf8(&generation).expect("generation JSON UTF-8");
         assert!(generation.contains(
-            "\"schema\": \"helius.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
+            "\"schema\": \"helios.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
         ));
         assert!(generation.contains(&format!("\"n_inner_proofs\": {}", fixture.expected_n)));
         assert!(generation.contains(&format!(
