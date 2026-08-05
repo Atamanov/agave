@@ -8,8 +8,8 @@ guest-side sBPF residual. Core is a tariff and is identical on every host.
 | 5 real Zolana Groth16 proofs — same VK | 392829 | 105330 | 103448 | 191297 | 357603 | 118432 |
 | 2 real Zolana Groth16 proofs — distinct VKs | 157571 | 73430 | 68975 | 166877 | 146573 | 82580 |
 | 3 real Zolana Groth16 proofs — distinct VKs | 236061 | 119320 | 112288 | 175067 | 219141 | 106872 |
-| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | 547952 | 324920 | 319574 | 175068 | 548200 | 324983 |
-| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | 818279 | 475198 | 469879 | 199339 | 818638 | 475261 |
+| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | 518681 | 295649 | 290303 | 175068 | 518929 | 295712 |
+| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | 774385 | 431304 | 425985 | 199339 | 774744 | 431367 |
 
 30 of 30 cells carry a measured residual.
 The batch columns price the AVX-512 IFMA kernel. A validator without avx512ifma cannot reach these charges, so adopting them raises the hardware floor above docs/src/operations/requirements.md.

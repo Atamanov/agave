@@ -787,6 +787,12 @@ fn optimized_proof(proof: &Proof) -> Option<OptimizedProof> {
     })
 }
 
+/// Structural checks only. Scalar canonicality is deliberately NOT repeated
+/// here: every evaluation is converted by `optimized_fr` in `optimized_proof`
+/// and every public input by `Raw::from_be_bytes` in `prepare`, both of which
+/// reject a value at or above the modulus and fail the whole verification. All
+/// three callers reach both. Repeating it cost 31,207 CU of the n=2 cell, a
+/// tenth of the transaction, for no security property.
 fn validate_group(group: &Group) -> Option<()> {
     if group.proofs.is_empty()
         || authenticated_vk_digest(&group.vk) != group.vk_digest
@@ -812,17 +818,6 @@ fn validate_group(group: &Group) -> Option<()> {
             ]
             .iter()
             .any(|point| point.0 == [0u8; 64])
-            || [
-                &proof.evaluations.a,
-                &proof.evaluations.b,
-                &proof.evaluations.c,
-                &proof.evaluations.s_sigma1,
-                &proof.evaluations.s_sigma2,
-                &proof.evaluations.z_omega,
-            ]
-            .into_iter()
-            .chain(proof.public_inputs.iter())
-            .any(|scalar| optimized_fr(scalar).is_none())
         {
             return None;
         }
