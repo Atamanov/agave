@@ -52,8 +52,45 @@ fn with_multi_vk_reduce(mut trace: OperationTrace, n: u32) -> OperationTrace {
 
 /// The BSB22 hash-to-field reduction, one three-term inner product per outer
 /// proof. It replaced an ark-ff byte-at-a-time loop that cost 75,000 CU.
+///
+/// The outer verification is itself a one-proof fold, so it also carries the
+/// fold's own inner products: one negation plus one per public-input column,
+/// and the outer statement width is the gamma MSM slot.
 fn with_bsb22_reduction(mut trace: OperationTrace) -> OperationTrace {
-    trace.fr_lincomb_calls = vec![FrLincombCall::one(3)];
+    let gamma_width = trace
+        .msm_calls
+        .get(2)
+        .map(|call| call.points)
+        .unwrap_or_default();
+    let mut calls = vec![FrLincombCall::one(3)];
+    calls.extend(core::iter::repeat_n(FrLincombCall::one(1), gamma_width as usize));
+    trace.fr_lincomb_calls = calls;
+    trace
+}
+
+/// Inner products the batched fold hands to the runtime, per verifying key.
+///
+/// Each proof of a key needs its randomizer negated, one term each. A key with
+/// several proofs then folds `-sum r` and each public-input column across them,
+/// so those widen to the proof count; a key with a single proof reuses the
+/// negation and its one column stays one term. Every zolana verifying key
+/// declares one public input.
+fn with_fold_lincombs(mut trace: OperationTrace, proofs: u32, keys: u32) -> OperationTrace {
+    const PUBLIC_INPUT_COLUMNS: u32 = 1;
+    let per_key = proofs.checked_div(keys).unwrap_or_default();
+    let mut calls = Vec::new();
+    for _ in 0..keys {
+        for _ in 0..per_key {
+            calls.push(FrLincombCall::one(1));
+        }
+        if per_key > 1 {
+            calls.push(FrLincombCall::one(per_key));
+        }
+        for _ in 0..PUBLIC_INPUT_COLUMNS {
+            calls.push(FrLincombCall::one(per_key));
+        }
+    }
+    trace.fr_lincomb_calls = calls;
     trace
 }
 
@@ -101,20 +138,28 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
                 n,
                 n,
             ),
-            ColumnId::BatchB5 => trace(
-                vec![PairingCall::full(
-                    n.saturating_add(3u32.saturating_mul(k)),
-                    1,
-                )],
-                vec![],
-                groth_msm(row, column),
-                vec![],
+            ColumnId::BatchB5 => with_fold_lincombs(
+                trace(
+                    vec![PairingCall::full(
+                        n.saturating_add(3u32.saturating_mul(k)),
+                        1,
+                    )],
+                    vec![],
+                    groth_msm(row, column),
+                    vec![],
+                ),
+                n,
+                k,
             ),
-            ColumnId::RegistryB5 => trace(
-                vec![PairingCall::registered(n, 3u32.saturating_mul(k))],
-                vec![],
-                groth_msm(row, column),
-                vec![],
+            ColumnId::RegistryB5 => with_fold_lincombs(
+                trace(
+                    vec![PairingCall::registered(n, 3u32.saturating_mul(k))],
+                    vec![],
+                    groth_msm(row, column),
+                    vec![],
+                ),
+                n,
+                k,
             ),
             ColumnId::RecursionB5 => with_bsb22_reduction(trace(
                 vec![PairingCall::full(6, 1)],

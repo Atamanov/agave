@@ -28,8 +28,8 @@
       "transaction_cu": 392829,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "2b3e52462d79f273e6ec77b73c426def26cc9d84526dc4f8c6300e44ae24d7b2"
     },
     {
@@ -84,16 +84,45 @@
         "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 58567,
-      "transaction_cu": 182915,
+      "non_core_transaction_cu": 12057,
+      "transaction_cu": 136427,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "254cf12e37ef089e6a3d82f0fceb32072e700cb5199eebbe7d6ecef5d0e7e421"
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "b82b94a86feb55242e7742c29f4a6842a61d7cbedd525737d69ab41edd4c0f2b"
     },
     {
       "row_id": "groth16_n5_same_vk",
@@ -147,16 +176,45 @@
         "g2_subgroup_checks": 5,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 60111,
-      "transaction_cu": 173674,
+      "non_core_transaction_cu": 13601,
+      "transaction_cu": 127186,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "5da2197f71cd783e17650d013460f78cf3b48e8c1dabd134f1c3bfa564e5bc3f"
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "4ac60ce225548788e72fac8f4a13a06da476a4fd95047e4d52562bdf62e70d6f"
     },
     {
       "row_id": "groth16_n5_same_vk",
@@ -206,17 +264,53 @@
           {
             "terms": 3,
             "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
           }
         ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 60855,
-      "transaction_cu": 160898,
+      "non_core_transaction_cu": 11230,
+      "transaction_cu": 111291,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "9650e227df2889bd4a1e31fb290c436b02d796d73398886c4d0476b0b575d34c",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "c1269ddfd293b0c6b37f20d8287b780179d9e2274b1342c2ca12551a47494de1"
+      "program_sha256": "bb080bef42e0b714bb94dfad04debb21fac13bd0e3b759b71168fbdd6fd56c0f",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "c0ab099bc9ec365a6b3598ea7c3d98f789210ed52615272209fcceb52d54344e"
     },
     {
       "row_id": "groth16_n5_same_vk",
@@ -244,8 +338,8 @@
       "transaction_cu": 267163,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "4ba8a27b53db2df0d6c3eb384a42987cf2952c6563f57170bad0c802e36e3ea7"
     },
     {
@@ -299,13 +393,13 @@
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 63221,
-      "transaction_cu": 174811,
+      "non_core_transaction_cu": 62674,
+      "transaction_cu": 174264,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "f8621f2ce5b21c2db8b94cef484f4586e2d263ed7f71e9a5eb69fa983e902deb"
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "cc7acee35a2b80c48d990e5a4953a2a76e2a9da67bb590ac06f630c1c55c5161"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -333,8 +427,8 @@
       "transaction_cu": 157571,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "83388618ea5504861131bd0fcbca4460aac04917fdf0a9baf86cbb4a6f4a88bf"
     },
     {
@@ -389,16 +483,33 @@
         "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 33884,
-      "transaction_cu": 155000,
+      "non_core_transaction_cu": 9238,
+      "transaction_cu": 130362,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "53739b446d08c8624b16cff113c29e259a6759043701778ce214fdfd5eb687c6"
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "b65d74004c7333813f5f71e4d8d49b0fd0a742c7f2ca8fa0f2c0fa167dc3b16c"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -452,16 +563,33 @@
         "g2_subgroup_checks": 2,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 36281,
-      "transaction_cu": 135827,
+      "non_core_transaction_cu": 11635,
+      "transaction_cu": 111189,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "2606d2ae052ade29bed071c6d17a708d9fb5b6d85c695d027523e79252b374d7"
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "0ffdac6897e87308176d7e4da3c9d4e2ee8aaa2153f51ffee58f0fb3dff7c1ea"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -511,17 +639,41 @@
           {
             "terms": 3,
             "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
           }
         ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 43788,
-      "transaction_cu": 143213,
+      "non_core_transaction_cu": 10018,
+      "transaction_cu": 109455,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "9650e227df2889bd4a1e31fb290c436b02d796d73398886c4d0476b0b575d34c",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "b65fd51730fcc590799bdc34f47f489f73da209d714512ad1bbd7c720dc5ce41"
+      "program_sha256": "bb080bef42e0b714bb94dfad04debb21fac13bd0e3b759b71168fbdd6fd56c0f",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "5c5a266af11b2a2d6fb89789df749ba14ccb5e5689817fad73fb1786f36930ad"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -549,8 +701,8 @@
       "transaction_cu": 110398,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "290bdc8bc10479adc3e0a4d1caed4688df08d6960175987b1d3547e21efab428"
     },
     {
@@ -606,8 +758,8 @@
       "transaction_cu": 153906,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "5644c04bc91c51bc8b1ad917ca6eed9cf3773752f72e200073b2cee87043a2fc"
     },
     {
@@ -636,8 +788,8 @@
       "transaction_cu": 236061,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "53a25da83eb8ef989727466cdf2c2da8006f036526d4c5f4e5bbdaf12c65f5cd"
     },
     {
@@ -708,16 +860,41 @@
         "g2_subgroup_checks": 12,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 50115,
-      "transaction_cu": 223166,
+      "non_core_transaction_cu": 13159,
+      "transaction_cu": 186222,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "176ebe4deda97e044cd917ccaefb51c44e1cf509c99c7759bdb3b68685501373"
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "41ccd05c4acba307c308ef33208a5d9d23fd4a74540ec9eefd7fa7d3866995d7"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -787,16 +964,41 @@
         "g2_subgroup_checks": 3,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 53361,
-      "transaction_cu": 194057,
+      "non_core_transaction_cu": 16405,
+      "transaction_cu": 157113,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "3579e92bddb5a3f0b1a0cd90a4dfa99a45763f78f7a136fa398990ac33fd3826"
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "e07a5960fe9a8dc32b41d905c9a376afcb221f2b667a52b1777663ee61fd603d"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -846,17 +1048,45 @@
           {
             "terms": 3,
             "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
           }
         ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 49440,
-      "transaction_cu": 150357,
+      "non_core_transaction_cu": 10360,
+      "transaction_cu": 111291,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "9650e227df2889bd4a1e31fb290c436b02d796d73398886c4d0476b0b575d34c",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "06bc5c01c19e4879a306ecc15ac8aeef38f8cea2abc7938c91663394c12dc4a6"
+      "program_sha256": "bb080bef42e0b714bb94dfad04debb21fac13bd0e3b759b71168fbdd6fd56c0f",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "c0ab099bc9ec365a6b3598ea7c3d98f789210ed52615272209fcceb52d54344e"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -884,8 +1114,8 @@
       "transaction_cu": 164871,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "aa065ca37c9969c181fe4ca6b0056d5af0274f1dbeaba3160c71431121a4c735"
     },
     {
@@ -953,8 +1183,8 @@
       "transaction_cu": 214896,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "28fb302e6e5ac843e747cbfad4c78a5c76823b4ef995de573383082c7c89bbc4",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "program_sha256": "9538d34616b173891d3d3478ee0b3560e6b0f48a1f5e5fc46c0b5bd50c0f96be",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "a21be46ef3c595a336f224b5fbf489b504ec9316e9befca6d7ec1fafc6b6b6c2"
     },
     {
@@ -984,7 +1214,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "3d3aa594463488503b375d754eaf7f98bd32da445400af5a343a0c638ff36b96"
     },
     {
@@ -1030,7 +1260,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "71e27b35d17358136ac4bfb48e11320938dfd0abedfc3daf7ca21422f1c9191c"
     },
     {
@@ -1076,7 +1306,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "ce2ef0364f0f7e5512f624119afe6b36a01c58912c45cdb64ab3502c15723a0c"
     },
     {
@@ -1127,17 +1357,45 @@
           {
             "terms": 3,
             "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
           }
         ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 49433,
-      "transaction_cu": 150350,
+      "non_core_transaction_cu": 10348,
+      "transaction_cu": 111279,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "2d5e18b8fe30b47c3956a3844028334cbf1d8ffc3c4de570cd7a6cce92b160a5",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "4adf7f1668a6fa4c3fb1338db059a0c13dc06d8e779b5b6da13e4f22b775dcf8"
+      "program_sha256": "58890bf870c9b50f2901ef02ce4b0303f6699dd6493a107e9f13900a91e30475",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "745c629da9ad1f9b2349400ee1839a61eda58b292037ebbf54a93b811768c3d8"
     },
     {
       "row_id": "plonk_n2_distinct_vk_shared_srs",
@@ -1166,7 +1424,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "4ed430a89d1babbae84cdb8f1b69932e9523ef46fe7661d6e57b0f7c0e3306ff"
     },
     {
@@ -1212,7 +1470,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "a4f9ae5f2f248caa77e9905ac7b54122bf89445b1c548593d6cbdd8a7d602e18"
     },
     {
@@ -1242,7 +1500,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "af9a5d5e37d15296a563794c44667be109733036b0dc5c3082f85df3f60e1bfa"
     },
     {
@@ -1288,7 +1546,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "a2948d4354bcfa2d58ed8b59ef0600175857677cedb2c69ff79f4c4534f273d0"
     },
     {
@@ -1334,7 +1592,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "535b0aeaeeb02337d978dcfbbbdfddf673766ae505aae36bb2956ca7ded8e431"
     },
     {
@@ -1385,17 +1643,57 @@
           {
             "terms": 3,
             "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
           }
         ],
         "plonk_multi_vk_reduce_calls": []
       },
-      "non_core_transaction_cu": 66487,
-      "transaction_cu": 167593,
+      "non_core_transaction_cu": 11570,
+      "transaction_cu": 112696,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "2d5e18b8fe30b47c3956a3844028334cbf1d8ffc3c4de570cd7a6cce92b160a5",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
-      "transaction_log_sha256": "3f171681fe8270e69ed684e8501c97e21a5d747dc3085f99b7cceadb515739bf"
+      "program_sha256": "58890bf870c9b50f2901ef02ce4b0303f6699dd6493a107e9f13900a91e30475",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
+      "transaction_log_sha256": "d2072a04ef7d9db6831605f584c8975b91cce10b89ce4a307ed0710a314f63e8"
     },
     {
       "row_id": "plonk_n3_distinct_vk_shared_srs",
@@ -1424,7 +1722,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "805b760f7832591b92c823678dd8eb1f6ae94d2821306a39de5c53961525b01b"
     },
     {
@@ -1470,7 +1768,7 @@
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
       "program_sha256": "d93e48f06c679eba2bc6dc539634cacc413fac85f44613f9b4ce14afa695fbe6",
-      "runtime_revision": "c8a0718bbadd93e03a7b0802885ee017a9b7ea05",
+      "runtime_revision": "1badad7183a153cd92d95ecb5ffcd064c11aeed6",
       "transaction_log_sha256": "4cdd160a38e130c61ed59acc1757d457901fada56126379516552cb1463bdc4d"
     }
   ]

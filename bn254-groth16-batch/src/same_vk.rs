@@ -11,15 +11,15 @@ use {
     crate::{
         Groth16BatchError,
         transcript::{RandomizerMode, derive_seed},
-        verify::{Proof, fr_from_be, msm, validate_batch_shape},
+        verify::{Proof, fr_from_be, fr_to_pod, msm, validate_batch_shape},
         vk::ValidatedVerifyingKey,
     },
     ark_bn254::Fr,
     ark_ff::{One, Zero},
     core::ops::{AddAssign, Mul, Neg, Sub},
     solana_bn254_batch_syscall::{
-        PAIRING_MAP_MAX_PAIRS, PodG1G2Pair, PodG1Point, PodGtElement, Version as SyscallVersion,
-        alt_bn128_pairing_map,
+        PAIRING_MAP_MAX_PAIRS, PodG1G2Pair, PodG1Point, PodGtElement, PodScalar,
+        Version as SyscallVersion, alt_bn128_pairing_map,
     },
     solana_keccak_hasher::hashv,
 };
@@ -196,7 +196,7 @@ fn fold_same_vk_target_pairs_prevalidated(
         pairs.push(PodG1G2Pair {
             g1: msm(
                 core::slice::from_ref(&proof.a),
-                core::slice::from_ref(coefficient),
+                core::slice::from_ref(&fr_to_pod(coefficient)),
             )?,
             g2: proof.b,
         });
@@ -217,15 +217,16 @@ fn fold_same_vk_target_pairs_prevalidated(
         gamma_points.push(*ic);
         gamma_scalars.push(coefficient.neg());
     }
+    let gamma_scalars: Vec<PodScalar> = gamma_scalars.iter().map(fr_to_pod).collect();
     pairs.push(PodG1G2Pair {
         g1: msm(&gamma_points, &gamma_scalars)?,
         g2: key.gamma_g2,
     });
 
     let delta_points: Vec<PodG1Point> = proofs.iter().map(|proof| proof.c).collect();
-    let delta_scalars: Vec<Fr> = randomizers
+    let delta_scalars: Vec<PodScalar> = randomizers
         .iter()
-        .map(|coefficient| coefficient.neg())
+        .map(|coefficient| fr_to_pod(&coefficient.neg()))
         .collect();
     pairs.push(PodG1G2Pair {
         g1: msm(&delta_points, &delta_scalars)?,

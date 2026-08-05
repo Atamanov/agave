@@ -77,7 +77,36 @@
         "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       }
     },
@@ -133,7 +162,36 @@
         "g2_subgroup_checks": 5,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       }
     },
@@ -184,6 +242,42 @@
         "fr_lincomb_calls": [
           {
             "terms": 3,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
             "calls": 1
           }
         ],
@@ -340,7 +434,24 @@
         "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       }
     },
@@ -396,7 +507,24 @@
         "g2_subgroup_checks": 2,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       }
     },
@@ -447,6 +575,30 @@
         "fr_lincomb_calls": [
           {
             "terms": 3,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
             "calls": 1
           }
         ],
@@ -617,7 +769,32 @@
         "g2_subgroup_checks": 12,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       }
     },
@@ -689,7 +866,32 @@
         "g2_subgroup_checks": 3,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
-        "fr_lincomb_calls": [],
+        "fr_lincomb_calls": [
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          }
+        ],
         "plonk_multi_vk_reduce_calls": []
       }
     },
@@ -740,6 +942,34 @@
         "fr_lincomb_calls": [
           {
             "terms": 3,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
             "calls": 1
           }
         ],
@@ -980,6 +1210,34 @@
           {
             "terms": 3,
             "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
           }
         ],
         "plonk_multi_vk_reduce_calls": []
@@ -1195,6 +1453,46 @@
         "fr_lincomb_calls": [
           {
             "terms": 3,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
+            "calls": 1
+          },
+          {
+            "terms": 1,
             "calls": 1
           }
         ],

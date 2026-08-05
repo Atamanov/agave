@@ -1,8 +1,12 @@
 use {
-    crate::{verify::Proof, vk::ValidatedVerifyingKey},
+    crate::{
+        verify::{Proof, fr_to_pod},
+        vk::ValidatedVerifyingKey,
+    },
     ark_bn254::Fr,
     ark_ff::One,
     core::ops::{Add, MulAssign},
+    solana_bn254_batch_syscall::PodScalar,
     solana_keccak_hasher::hashv,
 };
 
@@ -93,6 +97,50 @@ pub fn derive_randomizers(seed: &[u8; 32], num_equations: u64, mode: RandomizerM
                 .collect()
         }
     }
+}
+
+/// [`derive_randomizers`] in the canonical big-endian encoding the MSM and
+/// inner-product syscalls consume, which is the form the fold actually needs.
+///
+/// `Independent` never leaves the byte domain: `1 + lo128(digest)` is at most
+/// `2^128`, so the carry stops inside the top half and the result is below r
+/// with no reduction. `Powers` needs field multiplication and converts once.
+/// `randomizer_scalars_are_the_field_derivation` pins both modes against
+/// [`derive_randomizers`] element by element.
+pub(crate) fn derive_randomizer_scalars(
+    seed: &[u8; 32],
+    num_equations: u64,
+    mode: RandomizerMode,
+) -> Vec<PodScalar> {
+    match mode {
+        RandomizerMode::Independent => (1..=num_equations).map(|k| draw_scalar(seed, k)).collect(),
+        RandomizerMode::Powers => derive_randomizers(seed, num_equations, mode)
+            .iter()
+            .map(fr_to_pod)
+            .collect(),
+    }
+}
+
+fn draw_scalar(seed: &[u8; 32], k: u64) -> PodScalar {
+    let digest = keccak_parts(&[seed, &k.to_be_bytes()]);
+    let mut lo = [0u8; 16];
+    lo.copy_from_slice(&digest[16..]);
+    one_plus_lo128(&lo)
+}
+
+/// `1 + x` for a 128-bit big-endian `x`. The sum is at most `2^128 < r`, so
+/// the carry cannot leave the 32-byte buffer and the result is canonical.
+fn one_plus_lo128(lo: &[u8; 16]) -> PodScalar {
+    let mut bytes = [0u8; 32];
+    bytes[16..].copy_from_slice(lo);
+    for byte in bytes.iter_mut().rev() {
+        let (incremented, carry) = byte.overflowing_add(1);
+        *byte = incremented;
+        if !carry {
+            break;
+        }
+    }
+    PodScalar(bytes)
 }
 
 impl RandomizerMode {
@@ -249,6 +297,56 @@ mod tests {
         assert_eq!(randomizers[1], r2);
         assert_eq!(randomizers[2], r3);
         assert_eq!(randomizers[3], r4);
+    }
+
+    /// The byte derivation must reproduce the field derivation exactly. It
+    /// feeds the MSM scalars, so a divergence changes the statement the
+    /// pairing check proves while still verifying.
+    #[test]
+    fn randomizer_scalars_are_the_field_derivation() {
+        let (vks, proofs) = setup();
+        for mode in [RandomizerMode::Independent, RandomizerMode::Powers] {
+            let seed = derive_seed(mode, &vks, &proofs);
+            for count in [1u64, 2, 3, 6, 17] {
+                let expected: Vec<PodScalar> = derive_randomizers(&seed, count, mode)
+                    .iter()
+                    .map(fr_to_pod)
+                    .collect();
+                let scalars = derive_randomizer_scalars(&seed, count, mode);
+                assert_eq!(scalars.len(), count as usize);
+                for (index, (scalar, expected)) in scalars.iter().zip(&expected).enumerate() {
+                    assert_eq!(scalar, expected, "{mode:?} count {count} index {index}");
+                }
+            }
+        }
+    }
+
+    /// `1 + lo128` at both ends of the 128-bit range, where the carry chain
+    /// is longest and the result is largest.
+    #[test]
+    fn one_plus_lo128_matches_the_field_addition() {
+        let reference = |lo: u128| fr_to_pod(&Fr::from(lo).add(Fr::one()));
+        let mut cases = vec![
+            0u128,
+            1,
+            2,
+            u128::MAX,
+            u128::MAX - 1,
+            1 << 127,
+            (1 << 64) - 1,
+        ];
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..1024 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            cases.push(u128::from(state) << 64 | u128::from(state.rotate_left(17)));
+        }
+        for lo in cases {
+            assert_eq!(one_plus_lo128(&lo.to_be_bytes()), reference(lo), "{lo:#x}");
+        }
+        // the largest draw is 2^128, still far below r
+        assert_eq!(one_plus_lo128(&u128::MAX.to_be_bytes()).0[15], 1);
     }
 
     #[test]
