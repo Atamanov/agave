@@ -7550,6 +7550,7 @@ dependencies = [
  "serde_json",
  "solana-bn254",
  "solana-bn254-batch-syscall",
+ "solana-program-runtime 4.1.2",
  "solana-pubkey 4.2.0",
  "solana-sha256-hasher",
  "solana-syscalls",

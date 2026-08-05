@@ -42,6 +42,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 solana-bn254 = { workspace = true, optional = true }
 solana-bn254-batch-syscall = { workspace = true, default-features = false, optional = true }
+solana-program-runtime = { workspace = true }
 solana-pubkey = { workspace = true, optional = true }
 solana-sha256-hasher = { workspace = true, features = ["sha2"] }
 solana-syscalls = { workspace = true, default-features = false, optional = true }
