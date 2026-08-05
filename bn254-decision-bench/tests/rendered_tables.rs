@@ -34,8 +34,8 @@ fn assert_matches_committed(example: &str, file: &str) {
 }
 
 #[test]
-fn core_table_matches_the_committed_markdown() {
-    assert_matches_committed("render_core_table", "CORE-TABLE.md");
+fn transaction_table_matches_the_committed_markdown() {
+    assert_matches_committed("render_core_table", "TRANSACTION-TABLE.md");
 }
 
 #[test]

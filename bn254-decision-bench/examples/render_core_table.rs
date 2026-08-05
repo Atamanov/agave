@@ -9,7 +9,45 @@
 use {
     solana_bn254_decision_bench::{ColumnId, OperationTrace, RowId, expected_trace},
     solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
+    std::{collections::BTreeMap, path::PathBuf},
 };
+
+/// Guest-side sBPF CU per cell, measured by the collector. A cell absent here
+/// has no measurement and is reported as core-only, never silently as a total.
+fn residuals() -> BTreeMap<String, u64> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .join("research/bn254-decision-table-v2-20260804/residuals.json");
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut out = BTreeMap::new();
+    for line in text.lines() {
+        let line = line.trim().trim_end_matches(',');
+        if let Some((key, value)) = line.split_once(':') {
+            let key = key.trim().trim_matches('"');
+            if let Ok(cu) = value.trim().parse::<u64>() {
+                out.insert(key.to_owned(), cu);
+            }
+        }
+    }
+    out
+}
+
+fn key(row: RowId, column: ColumnId) -> String {
+    let r = format!("{row:?}");
+    let c = format!("{column:?}");
+    fn snake(s: &str) -> String {
+        let mut out = String::new();
+        for (i, ch) in s.chars().enumerate() {
+            if ch.is_uppercase() && i > 0 {
+                out.push('_');
+            }
+            out.extend(ch.to_lowercase());
+        }
+        out
+    }
+    format!("{}/{}", snake(&r), snake(&c))
+}
 
 /// The stock `alt_bn128_group_op` pairing charge, which is consensus today and
 /// not part of the batch schedule.
@@ -51,9 +89,12 @@ fn core_cu(cost: &SVMTransactionExecutionCost, column: ColumnId, trace: &Operati
 
 fn main() {
     let cost = SVMTransactionExecutionCost::default();
-    println!("# BN254 decision table, syscall core\n");
-    println!("Charged CU from the committed runtime schedule. Host-independent.");
-    println!("Excludes the guest-side sBPF residual, so each cell is a lower bound.\n");
+    let residual = residuals();
+    println!("# BN254 decision table, transaction CU\n");
+    println!("Syscall core from the committed runtime schedule, plus the measured");
+    println!("guest-side sBPF residual. Core is a tariff and is identical on every host.\n");
+    println!("A cell shown as `N +?` has no residual measurement and is core only, so it");
+    println!("is a lower bound. See CAPTURE-HOST-REQUIREMENTS.md for why.\n");
     print!("| Scenario |");
     for column in ColumnId::ALL {
         print!(" {} |", column.label());
@@ -62,13 +103,22 @@ fn main() {
     for row in RowId::ALL {
         print!("| {} |", row.label());
         for column in ColumnId::ALL {
-            print!(" {} |", core_cu(&cost, column, &expected_trace(row, column)));
+            let core = core_cu(&cost, column, &expected_trace(row, column));
+            match residual.get(&key(row, column)) {
+                Some(r) => print!(" {} |", core + r),
+                None => print!(" {core} +? |"),
+            }
         }
         println!();
     }
+    let measured = RowId::ALL
+        .iter()
+        .flat_map(|row| ColumnId::ALL.iter().map(move |c| key(*row, *c)))
+        .filter(|k| residual.contains_key(k))
+        .count();
+    println!("\n{measured} of 30 cells carry a measured residual.");
     println!(
-        "\nGT multiexp is provisional at {} + {}t and inflates the fold-all column \
-         on multi-key rows.",
+        "GT multiexp is provisional at {} + {}t and inflates the fold-all column on multi-key rows.",
         cost.alt_bn128_gt_multiexp_base_cost, cost.alt_bn128_gt_multiexp_per_target_cost
     );
 }
