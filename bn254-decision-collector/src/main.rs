@@ -513,7 +513,20 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
         .chain(&pairing_maps)
         .map(|call| call.full_pairs.saturating_mul(call.calls))
         .sum();
+    let mut stock_g1_additions = 0u32;
+    let mut stock_g1_multiplications = 0u32;
+    for event in &snapshot.stock_group_ops.events {
+        match event.kind {
+            GroupOpKind::G1Add => stock_g1_additions = stock_g1_additions.saturating_add(1),
+            GroupOpKind::G1Mul => {
+                stock_g1_multiplications = stock_g1_multiplications.saturating_add(1)
+            }
+            GroupOpKind::Pairing => {}
+        }
+    }
     Ok(OperationTrace {
+        stock_g1_additions,
+        stock_g1_multiplications,
         pairing_checks,
         pairing_maps,
         msm_calls: snapshot

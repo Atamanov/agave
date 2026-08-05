@@ -35,6 +35,17 @@ pub fn syscall_cu(
             ),
         ));
     }
+    // The unbatched path forms its public-input commitment with stock G1
+    // operations rather than an MSM syscall. They are metered, and the residual
+    // subtracts them, so omitting them here understates the baseline.
+    cu = cu.saturating_add(
+        cost.alt_bn128_g1_addition_cost
+            .saturating_mul(u64::from(trace.stock_g1_additions)),
+    );
+    cu = cu.saturating_add(
+        cost.alt_bn128_g1_multiplication_cost
+            .saturating_mul(u64::from(trace.stock_g1_multiplications)),
+    );
     for call in &trace.gt_target_multiexp_calls {
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
             cost.alt_bn128_gt_multiexp_base_cost.saturating_add(

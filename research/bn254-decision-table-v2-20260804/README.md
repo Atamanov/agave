@@ -46,3 +46,16 @@ and the independent 5-by-6 operation-count contract. It writes exactly:
 remains independent per proof: Groth16 performs `n` three-pair maps and PLONK
 performs `n` two-pair maps, with `n` final exponentiations and no MSM syscall.
 Only Batching + Fp12 performs one folded map and folded MSMs.
+
+## Seals
+
+`cargo test -p solana-bn254-decision-bench --test seals` recomputes every
+committed digest from the bytes it names. Run it after any edit under this
+directory.
+
+`recursion-v2/manifest.json` records the Zolana manifest it was built from at an
+absolute path that resolves on no current machine. Read `fixtures-v3/manifest.json`
+instead; it is that manifest, committed. The recorded digest describes the copy
+before the helios/helius rename edited it, and the seals test proves the rename
+is the whole difference. The recorded path stays because the manifest is frozen
+by its own digest.

@@ -211,6 +211,14 @@ pub struct OperationTrace {
     pub gt_target_multiexp_calls: Vec<GtTargetMultiexpCall>,
     pub final_exponentiations: u32,
     pub g2_subgroup_checks: u32,
+    /// Stock `alt_bn128_group_op` G1 additions, used by the unbatched path to
+    /// build the public-input commitment. The residual subtracts them, so the
+    /// table has to charge them or the baseline is short by their whole cost.
+    #[serde(default)]
+    pub stock_g1_additions: u32,
+    /// Stock `alt_bn128_group_op` G1 multiplications, same reason.
+    #[serde(default)]
+    pub stock_g1_multiplications: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

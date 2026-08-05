@@ -30,7 +30,18 @@ fn trace(
         gt_target_multiexp_calls,
         final_exponentiations,
         g2_subgroup_checks,
+        stock_g1_additions: 0,
+        stock_g1_multiplications: 0,
     }
+}
+
+/// The unbatched columns build their public-input commitment with stock G1
+/// operations. Counts come from the observer, never from a guess: the
+/// `observed_traces` test fails if the model and the guest disagree.
+fn with_stock_g1(mut trace: OperationTrace, additions: u32, multiplications: u32) -> OperationTrace {
+    trace.stock_g1_additions = additions;
+    trace.stock_g1_multiplications = multiplications;
+    trace
 }
 
 fn groth_msm(row: RowId, column: ColumnId) -> Vec<MsmCall> {
@@ -63,7 +74,11 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
         let n = row.proof_count();
         let k = row.vk_count();
         return match column {
-            ColumnId::Current => trace(vec![PairingCall::full(4, n)], vec![], vec![], vec![]),
+            ColumnId::Current => with_stock_g1(
+                trace(vec![PairingCall::full(4, n)], vec![], vec![], vec![]),
+                n,
+                n,
+            ),
             ColumnId::BatchB5 => trace(
                 vec![PairingCall::full(
                     n.saturating_add(3u32.saturating_mul(k)),
@@ -87,7 +102,11 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
             ),
             // This is deliberately n independent current-verifier maps. It is
             // not the batched FP12 fold and therefore has no MSM syscall.
-            ColumnId::CurrentFp12 => trace(vec![], vec![PairingCall::full(3, n)], vec![], vec![]),
+            ColumnId::CurrentFp12 => with_stock_g1(
+                trace(vec![], vec![PairingCall::full(3, n)], vec![], vec![]),
+                n,
+                n,
+            ),
             ColumnId::BatchFp12B5 => {
                 let gt_target_multiexp_calls = if k > 1 {
                     vec![GtTargetMultiexpCall {
@@ -114,7 +133,11 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
     let n = row.proof_count();
     let folded_msm = || msm(&[2u32.saturating_mul(n), 18u32.saturating_mul(n)]);
     match column {
-        ColumnId::Current => trace(vec![PairingCall::full(2, n)], vec![], vec![], vec![]),
+        ColumnId::Current => with_stock_g1(
+            trace(vec![PairingCall::full(2, n)], vec![], vec![], vec![]),
+            18u32.saturating_mul(n),
+            20u32.saturating_mul(n),
+        ),
         ColumnId::BatchB5 => trace(vec![PairingCall::full(2, 1)], vec![], folded_msm(), vec![]),
         ColumnId::RegistryB5 => trace(
             vec![PairingCall::registered(0, 2)],
@@ -136,7 +159,11 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
             )
         }
         // As above, preserve one independent current-verifier map per proof.
-        ColumnId::CurrentFp12 => trace(vec![], vec![PairingCall::full(2, n)], vec![], vec![]),
+        ColumnId::CurrentFp12 => with_stock_g1(
+            trace(vec![], vec![PairingCall::full(2, n)], vec![], vec![]),
+            18u32.saturating_mul(n),
+            20u32.saturating_mul(n),
+        ),
         ColumnId::BatchFp12B5 => trace(vec![], vec![PairingCall::full(2, 1)], folded_msm(), vec![]),
     }
 }
