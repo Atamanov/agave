@@ -6,7 +6,10 @@ mod runner;
 mod tariff;
 
 pub use {
-    contract::{builtin_expected_counts, expected_trace, validate_expected_counts},
+    contract::{
+        builtin_expected_counts, expected_trace, reject_deprecated_or_derived_json,
+        validate_expected_counts,
+    },
     model::*,
     report::render_report,
     runner::{Cli, OutputPaths, TransactionExecutor, run_campaign, run_cli},

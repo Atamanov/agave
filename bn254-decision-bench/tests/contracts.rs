@@ -740,3 +740,50 @@ fn cli_requires_the_public_flags_and_absolute_output() {
     let _: Option<OutputPaths> = None;
     let _: Option<MsmCall> = None;
 }
+
+/// The forbidden-token screen matched substrings, so `fp12_b5` inside the live
+/// column id `batch_fp12_b5` and `ratio` inside `operation` rejected every real
+/// document. That took the whole campaign entrypoint offline, and with it every
+/// seal and trace check it performs.
+#[test]
+fn forbidden_token_screen_admits_the_documents_the_campaign_actually_reads() {
+    use solana_bn254_decision_bench::reject_deprecated_or_derived_json as screen;
+
+    for (label, raw) in [
+        ("column id", r#"{"column_id":"batch_fp12_b5"}"#),
+        ("pricing id", r#"{"pricing_id":"batch_fp12_b5"}"#),
+        ("tariff key", r#"{"operation":"PairingCheck"}"#),
+        ("both", r#"{"operation":"G1Msm","pricing_id":"batch_fp12_b5"}"#),
+    ] {
+        assert!(screen(raw, label).is_ok(), "{label} must be readable: {raw}");
+    }
+
+    for (label, raw) in [
+        ("retired column", r#"{"column_id":"fp12_b5"}"#),
+        ("retired b1", r#"{"column_id":"batch_b1"}"#),
+        ("derived value", r#"{"derived_cu":1}"#),
+        ("ratio field", r#"{"ratio":1.23}"#),
+    ] {
+        assert!(screen(raw, label).is_err(), "{label} must be rejected: {raw}");
+    }
+}
+
+/// Every JSON document the campaign reads must survive its own screen. This is
+/// the regression that the substring bug was: the committed files were
+/// unreadable by the code meant to validate them.
+#[test]
+fn every_committed_campaign_document_passes_its_own_screen() {
+    use solana_bn254_decision_bench::reject_deprecated_or_derived_json as screen;
+
+    let research = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../research/bn254-decision-table-v2-20260804");
+    for name in [
+        "expected-counts.v1.json",
+        "campaign.template.json",
+        "fixture-manifest.real-20260805.json",
+    ] {
+        let path = research.join(name);
+        let raw = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        screen(&raw, name).unwrap_or_else(|e| panic!("{name} is unreadable by the campaign: {e}"));
+    }
+}

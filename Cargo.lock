@@ -7588,6 +7588,7 @@ dependencies = [
  "litesvm",
  "serde",
  "solana-bn254-batch-syscall",
+ "solana-bn254-decision-bench",
  "solana-program-runtime 3.1.14",
  "solana-pubkey 4.2.0",
  "solana-syscalls",

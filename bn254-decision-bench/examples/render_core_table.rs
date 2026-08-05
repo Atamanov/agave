@@ -7,7 +7,9 @@
 //! bound on the transaction, and the full table adds the residual per cell.
 
 use {
-    solana_bn254_decision_bench::{ColumnId, OperationTrace, RowId, expected_trace},
+    solana_bn254_decision_bench::{
+        ColumnId, OperationTrace, RowId, expected_trace, stock_group_op_pairing_cu,
+    },
     solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
     std::{collections::BTreeMap, path::PathBuf},
 };
@@ -49,18 +51,12 @@ fn key(row: RowId, column: ColumnId) -> String {
     format!("{}/{}", snake(&r), snake(&c))
 }
 
-/// The stock `alt_bn128_group_op` pairing charge, which is consensus today and
-/// not part of the batch schedule.
-fn stock_pairing(pairs: u64) -> u64 {
-    36_364 + 12_121 * pairs.saturating_sub(1) + 85 + 192 * pairs + 32
-}
-
 fn core_cu(cost: &SVMTransactionExecutionCost, column: ColumnId, trace: &OperationTrace) -> u64 {
     let stock = matches!(column, ColumnId::Current | ColumnId::CurrentFp12);
     let mut cu = 0u64;
     for call in trace.pairing_checks.iter().chain(&trace.pairing_maps) {
         let each = if stock {
-            stock_pairing(call.pairs.into())
+            stock_group_op_pairing_cu(call.pairs.into())
         } else {
             cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into())
         };

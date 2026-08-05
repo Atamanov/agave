@@ -51,6 +51,7 @@ pub const CURRENT_GROUP_OP_G1_ADD_CU: u64 = 334;
 pub const CURRENT_GROUP_OP_G1_MUL_CU: u64 = 3_840;
 pub const CURRENT_GROUP_OP_PAIRING_FIRST_CU: u64 = 36_364;
 pub const CURRENT_GROUP_OP_PAIRING_OTHER_CU: u64 = 12_121;
+pub use solana_bn254_decision_bench::stock_group_op_pairing_cu;
 
 const MSM_DISCOUNT_PER_THOUSAND: [u64; 12] =
     [1000, 636, 449, 320, 246, 199, 166, 131, 113, 98, 85, 79];
@@ -158,11 +159,9 @@ pub fn current_stock_group_op_cu(event: &StockGroupOpEvent) -> u64 {
     match event.kind {
         GroupOpKind::G1Add => CURRENT_GROUP_OP_G1_ADD_CU,
         GroupOpKind::G1Mul => CURRENT_GROUP_OP_G1_MUL_CU,
-        GroupOpKind::Pairing => event.pairing_elements.map_or(0, |pairs| {
-            CURRENT_GROUP_OP_PAIRING_FIRST_CU.saturating_add(
-                CURRENT_GROUP_OP_PAIRING_OTHER_CU.saturating_mul(pairs.saturating_sub(1)),
-            )
-        }),
+        GroupOpKind::Pairing => event
+            .pairing_elements
+            .map_or(0, stock_group_op_pairing_cu),
     }
 }
 

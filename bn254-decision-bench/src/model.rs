@@ -6,6 +6,27 @@ use {
 pub const SCHEMA_PREFIX: &str = "helius.bn254-decision-table-v3";
 pub const MAX_TRANSACTION_CU: u64 = 1_400_000;
 
+/// The stock `alt_bn128_group_op` pairing charge, which is consensus today and
+/// not part of the batch schedule.
+///
+/// The per-pair terms are not the whole charge: the syscall also adds
+/// `sha256_base_cost`, the input byte count and the output size. The residual
+/// subtractor once omitted those three, so they stayed inside the residual
+/// while the renderer added them again, overstating every Current cell by
+/// between 1,002 and 4,425 CU. One definition now serves both.
+pub fn stock_group_op_pairing_cu(pairs: u64) -> u64 {
+    const FIRST: u64 = 36_364;
+    const OTHER: u64 = 12_121;
+    const SHA256_BASE: u64 = 85;
+    const ELEMENT_BYTES: u64 = 192;
+    const OUTPUT_BYTES: u64 = 32;
+    FIRST
+        .saturating_add(OTHER.saturating_mul(pairs.saturating_sub(1)))
+        .saturating_add(SHA256_BASE)
+        .saturating_add(ELEMENT_BYTES.saturating_mul(pairs))
+        .saturating_add(OUTPUT_BYTES)
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RowId {

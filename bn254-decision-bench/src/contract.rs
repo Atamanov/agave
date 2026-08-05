@@ -264,6 +264,16 @@ pub fn validate_expected_counts(contract: &ExpectedCountContract) -> Result<(), 
     Ok(())
 }
 
+/// Rejects a document that names a retired B1 column or a derived, rather than
+/// measured, value.
+///
+/// Matching is on whole identifiers. A substring match rejected every real
+/// document: `fp12_b5` occurs inside the live column id `batch_fp12_b5`, and
+/// `ratio` occurs inside `operation`, a key in every tariff entry. That made
+/// the entire campaign entrypoint unreachable, and with it the fixture seal,
+/// the tariff attestation and the observed-versus-expected trace comparison.
+/// The published tables came from the renderer path instead, which performs
+/// none of those checks.
 pub fn reject_deprecated_or_derived_json(raw: &str, label: &str) -> Result<(), Error> {
     const FORBIDDEN: &[&str] = &[
         "batch_b1",
@@ -277,10 +287,21 @@ pub fn reject_deprecated_or_derived_json(raw: &str, label: &str) -> Result<(), E
         "derived_cu",
     ];
     let lowered = raw.to_ascii_lowercase();
-    if let Some(token) = FORBIDDEN.iter().find(|token| lowered.contains(**token)) {
-        return Err(Error::Contract(format!(
-            "{label} contains forbidden legacy/derived token `{token}`"
-        )));
+    let boundary = |byte: u8| !byte.is_ascii_alphanumeric() && byte != b'_';
+    for token in FORBIDDEN {
+        let mut from = 0usize;
+        while let Some(offset) = lowered[from..].find(token) {
+            let start = from + offset;
+            let end = start + token.len();
+            let before_ok = start == 0 || boundary(lowered.as_bytes()[start - 1]);
+            let after_ok = end == lowered.len() || boundary(lowered.as_bytes()[end]);
+            if before_ok && after_ok {
+                return Err(Error::Contract(format!(
+                    "{label} contains forbidden legacy/derived token `{token}`"
+                )));
+            }
+            from = start + 1;
+        }
     }
     Ok(())
 }
