@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Produces both decision tables from committed inputs. Runs on any host: the
+# Produces the decision tables from committed inputs. Runs on any host: the
 # charge schedule is a tariff, and the residual is guest-side sBPF CU, which
 # LiteSVM counts deterministically.
 #
@@ -24,12 +24,68 @@ done
 cargo build -p solana-bn254-decision-collector
 bash bn254-decision-bench/collect-residuals.sh
 
-cargo run -q -p solana-bn254-decision-bench --example render_core_table > "$RESEARCH/TRANSACTION-TABLE.md"
-cargo run -q -p solana-bn254-decision-bench --example render_ops_table > "$RESEARCH/OPERATIONS-TABLE.md"
-cargo test -q -p solana-bn254-decision-bench
-cargo test -q -p solana-syscalls --test bn254_charge_schedule
+# A null cell means a collector run failed. Rendering it produces a core-only
+# table that looks finished, so stop before writing anything.
+if grep -q ': *null' "$RESEARCH/residuals.json"; then
+    echo "FAIL: residuals.json carries a null cell; a collector run failed" >&2
+    grep -n ': *null' "$RESEARCH/residuals.json" >&2
+    exit 1
+fi
+cells=$(grep -c '": *[0-9]' "$RESEARCH/residuals.json")
+if [ "$cells" -ne 30 ]; then
+    echo "FAIL: residuals.json has $cells measured cells, expected 30" >&2
+    exit 1
+fi
+
+# Render to a scratch dir and diff BEFORE overwriting. Writing first and testing
+# after makes the golden test compare the renderer against its own fresh output,
+# which cannot fail.
+GENERATED=(TRANSACTION-TABLE.md OPERATIONS-TABLE.md STRUCTURE-TABLE.md expected-counts.v1.json)
+EXAMPLES=(render_core_table render_ops_table render_structure_table render_expected_counts)
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+for i in "${!GENERATED[@]}"; do
+    cargo run -q -p solana-bn254-decision-bench --example "${EXAMPLES[$i]}" \
+        > "$tmp/${GENERATED[$i]}"
+    if [ ! -s "$tmp/${GENERATED[$i]}" ]; then
+        echo "FAIL: ${EXAMPLES[$i]} produced nothing" >&2
+        exit 1
+    fi
+done
+
+for f in "${GENERATED[@]}"; do
+    if [ -f "$RESEARCH/$f" ] && ! diff -q "$RESEARCH/$f" "$tmp/$f" >/dev/null; then
+        echo "NOTE: $f changed" >&2
+        diff -u "$RESEARCH/$f" "$tmp/$f" >&2 || true
+    fi
+    cp "$tmp/$f" "$RESEARCH/$f"
+done
+
+# Every generated file must now equal what the renderer emits. This is the
+# check the old write-then-test order could not make.
+for i in "${!GENERATED[@]}"; do
+    cargo run -q -p solana-bn254-decision-bench --example "${EXAMPLES[$i]}" \
+        | diff -q - "$RESEARCH/${GENERATED[$i]}" >/dev/null || {
+        echo "FAIL: ${GENERATED[$i]} does not reproduce from ${EXAMPLES[$i]}" >&2
+        exit 1
+    }
+done
 
 if grep -q '^|.*+?' "$RESEARCH/TRANSACTION-TABLE.md"; then
-    echo "WARNING: unmeasured cells remain in TRANSACTION-TABLE.md" >&2
+    echo "FAIL: unmeasured cells remain in TRANSACTION-TABLE.md" >&2
+    exit 1
 fi
-echo "wrote TRANSACTION-TABLE.md, OPERATIONS-TABLE.md and STRUCTURE-TABLE.md in $RESEARCH"
+
+# A syscall column that is mostly guest sBPF is not measuring its syscall. This
+# is a smell detector, not a physical law, so it reports every run and only
+# aborts under BN254_STRUCTURE_STRICT.
+if grep -q '^## Structural breaches' "$RESEARCH/STRUCTURE-TABLE.md"; then
+    echo "STRUCTURAL BREACH: a syscall column is dominated by guest sBPF" >&2
+    sed -n '/^## Structural breaches/,$p' "$RESEARCH/STRUCTURE-TABLE.md" >&2
+    if [ "${BN254_STRUCTURE_STRICT:-0}" = 1 ]; then exit 1; fi
+fi
+
+cargo test -q -p solana-bn254-decision-bench
+cargo test -q -p solana-syscalls --test bn254_charge_schedule
+printf 'wrote %s in %s\n' "${GENERATED[*]}" "$RESEARCH"
