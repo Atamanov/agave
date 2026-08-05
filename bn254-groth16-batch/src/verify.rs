@@ -135,7 +135,12 @@ pub fn validate_batch_shape(
             }
         }
         for input in &proof.public_inputs {
-            fr_from_be(input)?;
+            // Canonicality only: the value itself is never used here. Building
+            // the field element to test it costs a Montgomery conversion per
+            // input, ~2,000 CU on SBF against ~60 for the comparison.
+            if !is_canonical_fr_be(input) {
+                return Err(Groth16BatchError::NonCanonicalInput);
+            }
         }
     }
     Ok(())
@@ -298,6 +303,21 @@ fn fr_to_pod(scalar: &Fr) -> PodScalar {
     let mut bytes = [0u8; 32];
     bytes.copy_from_slice(&scalar.into_bigint().to_bytes_be());
     PodScalar(bytes)
+}
+
+/// Big-endian `x < r`, without building the field element.
+///
+/// Lexicographic comparison of equal-length big-endian byte strings is integer
+/// comparison, so this is the same predicate `Fr::from_bigint` applies when it
+/// returns `None`, and `fr_from_be_rejects_exactly_what_the_byte_compare_does`
+/// pins the equivalence over the boundary values and a random sweep.
+pub(crate) fn is_canonical_fr_be(scalar: &PodScalar) -> bool {
+    const MODULUS_BE: [u8; 32] = [
+        0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58,
+        0x5d, 0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93, 0xf0, 0x00,
+        0x00, 0x01,
+    ];
+    scalar.0 < MODULUS_BE
 }
 
 pub(crate) fn fr_from_be(scalar: &PodScalar) -> Result<Fr, Groth16BatchError> {
@@ -697,5 +717,64 @@ mod tests {
             groth16_batch_verify(Version::V0, &vks, &proofs, RandomizerMode::Powers),
             Ok(true)
         );
+    }
+}
+
+#[cfg(test)]
+mod canonicality_tests {
+    use super::*;
+
+    /// The byte compare must accept and reject exactly what building the field
+    /// element does. It replaced that construction on the hot path, so any
+    /// divergence is a validation hole, not a performance regression.
+    #[test]
+    fn fr_from_be_rejects_exactly_what_the_byte_compare_does() {
+        const R_MINUS_ONE: [u8; 32] = [
+            0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81,
+            0x58, 0x5d, 0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93,
+            0xf0, 0x00, 0x00, 0x00,
+        ];
+        let mut r = R_MINUS_ONE;
+        r[31] = 0x01;
+        let mut r_plus_one = r;
+        r_plus_one[31] = 0x02;
+
+        let mut cases: Vec<[u8; 32]> = vec![
+            [0u8; 32],
+            [0xff; 32],
+            R_MINUS_ONE,
+            r,
+            r_plus_one,
+            {
+                let mut top = [0u8; 32];
+                top[0] = 0x30;
+                top
+            },
+        ];
+        // A deterministic sweep either side of the modulus, so the agreement is
+        // not only checked at the boundaries.
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..4096 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let mut value = r;
+            let offset = (state % 512) as u8;
+            if state & 1 == 0 {
+                value[31] = value[31].wrapping_sub(offset);
+            } else {
+                value[0] = (state >> 32) as u8;
+            }
+            cases.push(value);
+        }
+
+        for bytes in cases {
+            let scalar = PodScalar(bytes);
+            assert_eq!(
+                is_canonical_fr_be(&scalar),
+                fr_from_be(&scalar).is_ok(),
+                "disagreement on {bytes:02x?}"
+            );
+        }
     }
 }
