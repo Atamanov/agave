@@ -332,7 +332,7 @@ pub(crate) const MINUS_ONE_BE: PodScalar = PodScalar([
     0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93, 0xf0, 0x00, 0x00, 0x00,
 ]);
 
-const ONE_BE: PodScalar = PodScalar([
+pub(crate) const ONE_BE: PodScalar = PodScalar([
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
 ]);
 

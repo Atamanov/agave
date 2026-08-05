@@ -77,8 +77,9 @@ const REGISTRY_V3_CONSUMER: [u8; 32] = [41u8; 32];
 /// for what a real consumer emits at codegen time. The address is
 /// `find_program_address([REGISTRY_V3_PDA_SEED, digest], REGISTRY_V3_CONSUMER)`
 /// and `pinned_registry_addresses_derive` re-runs that derivation. Lookup is
-/// keyed by the digest the guest recomputes from the fixture, so a fixture
-/// cannot present another keyset's registry account.
+/// keyed by the account address, which admits only a registry of this
+/// consumer; binding that account to the fixture is the source comparison in
+/// [`verify_registry_v3`], not a table lookup.
 #[cfg(any(target_os = "solana", test))]
 const REGISTRY_V3_PINNED: [([u8; 32], [u8; 32]); 3] = [
     // n=5 k=1
@@ -550,15 +551,15 @@ fn registry_keyset_digest_v3(f: &Fixture<'_>) -> [u8; 32] {
     .to_bytes()
 }
 
-/// Pinned registry address for a recomputed keyset digest. An unknown digest
-/// has no pinned address and the caller must reject; deriving one here would
-/// re-introduce the per-bump hashing this guest exists to keep out of the
-/// measurement.
+/// Keyset digest pinned to a registry address. An address outside the table is
+/// not one of this consumer's registries and the caller must reject. Deriving
+/// the address here instead would re-introduce the per-bump hashing this guest
+/// exists to keep out of the measurement.
 #[cfg(any(target_os = "solana", test))]
-fn pinned_registry_address(digest: &[u8; 32]) -> Option<&'static [u8; 32]> {
+fn pinned_registry_digest(address: &[u8; 32]) -> Option<&'static [u8; 32]> {
     REGISTRY_V3_PINNED
         .iter()
-        .find_map(|(pinned, address)| (pinned == digest).then_some(address))
+        .find_map(|(digest, pinned)| (pinned == address).then_some(digest))
 }
 
 fn registry_header_matches(
@@ -582,12 +583,46 @@ fn registry_header_matches(
                 + f.k * REGISTRY_V3_GT_ENTRY_BYTES
 }
 
-fn registry_g2_id(data: &[u8], index: usize, f: &Fixture<'_>) -> Option<[u8; 32]> {
-    if index >= 3 * f.k {
-        return None;
-    }
+/// `(opaque id, canonical source)` of one G2 entry.
+fn registry_g2_entry(data: &[u8], index: usize) -> Option<(&[u8], &[u8])> {
     let start = REGISTRY_V3_HEADER_BYTES + index * REGISTRY_V3_G2_ENTRY_BYTES;
-    data.get(start..start + 32)?.try_into().ok()
+    let head = data.get(start..start + 160)?;
+    Some((head.get(..32)?, head.get(32..)?))
+}
+
+/// Replace the fold's fixed-G2 suffix with registry IDs.
+///
+/// Substituting entry `3 * key + fixed` for the fold's own G2 is sound only if
+/// that entry stands for the same point, so every substitution compares the
+/// entry's canonical source against the G2 it replaces. That is what stops a
+/// fixture from pairing its own G1 terms against another keyset's registry;
+/// the address check upstream only proves the account is a registry of this
+/// consumer, not that it is this fixture's registry.
+fn registered_suffix(
+    f: &Fixture<'_>,
+    pairs: &[PodG1G2Pair],
+    registry_data: &[u8],
+) -> Option<Vec<PodG1RegisteredG2Pair>> {
+    let mut registered = Vec::with_capacity(3 * f.k);
+    let mut cursor = f.n;
+    for key in 0..f.k {
+        if !f.vk_index.iter().any(|index| usize::from(*index) == key) {
+            continue;
+        }
+        for fixed in 0..3 {
+            let pair = pairs.get(cursor)?;
+            cursor += 1;
+            let (id, source) = registry_g2_entry(registry_data, 3 * key + fixed)?;
+            if source != pair.g2.0.as_slice() {
+                return None;
+            }
+            registered.push(PodG1RegisteredG2Pair {
+                g1: pair.g1,
+                g2_id: id.try_into().ok()?,
+            });
+        }
+    }
+    (cursor == pairs.len()).then_some(registered)
 }
 
 fn registry_gt_record(
@@ -628,24 +663,7 @@ fn verify_registry_v3(f: &Fixture<'_>, registry_data: &[u8]) -> Option<bool> {
     let (keys, proofs) = batch_inputs(f)?;
     let pairs = fold_pairs_for_verification(&keys, &proofs, RandomizerMode::Independent).ok()?;
     let full = pairs.get(..f.n)?;
-    let mut registered = Vec::with_capacity(3 * f.k);
-    let mut cursor = f.n;
-    for key in 0..f.k {
-        if !f.vk_index.iter().any(|index| usize::from(*index) == key) {
-            continue;
-        }
-        for fixed in 0..3 {
-            let pair = *pairs.get(cursor)?;
-            cursor += 1;
-            registered.push(PodG1RegisteredG2Pair {
-                g1: pair.g1,
-                g2_id: registry_g2_id(registry_data, 3 * key + fixed, f)?,
-            });
-        }
-    }
-    if cursor != pairs.len() {
-        return None;
-    }
+    let registered = registered_suffix(f, &pairs, registry_data)?;
     alt_bn128_pairing_check_registered(Version::V0, 0, full, &registered).ok()
 }
 
@@ -808,13 +826,15 @@ mod entrypoint {
                 .try_borrow()
                 .map_err(|_| ProgramError::AccountBorrowFailed)?;
             let parsed = super::parse(&fixture_data).ok_or(ProgramError::InvalidAccountData)?;
-            let digest = super::registry_keyset_digest_v3(&parsed);
             if _program_id.as_array() != &super::REGISTRY_V3_CONSUMER {
                 return Err(ProgramError::IncorrectProgramId);
             }
-            let expected =
-                super::pinned_registry_address(&digest).ok_or(ProgramError::InvalidSeeds)?;
-            if registry.address().as_array() != expected || !registry.owned_by(_program_id) {
+            // Address in, digest out. The hot Registry path never recomputes
+            // the keyset digest: it binds the account by comparing each
+            // registry source against the G2 that source replaces.
+            let pinned_digest = super::pinned_registry_digest(registry.address().as_array())
+                .ok_or(ProgramError::InvalidSeeds)?;
+            if !registry.owned_by(_program_id) {
                 return Err(ProgramError::InvalidAccountOwner);
             }
             let expected_len =
@@ -826,6 +846,9 @@ mod entrypoint {
             if ix_tag == super::tag::REGISTRY_INIT {
                 if !registry.is_writable() {
                     return Err(ProgramError::InvalidAccountData);
+                }
+                if &super::registry_keyset_digest_v3(&parsed) != pinned_digest {
+                    return Err(ProgramError::InvalidSeeds);
                 }
                 let mut registry_data = registry
                     .try_borrow_mut()
@@ -842,14 +865,15 @@ mod entrypoint {
             // The registered-pairing syscall authenticates the immutable
             // program-owned PDA, complete v3 header and every opaque ID.  Do
             // not repeat that work in the guest's measured Registry path.
-            // The Fp12 paths read registry bytes directly, so they retain the
-            // guest-side header check.
+            // The Fp12 paths read registry bytes directly and take their G2
+            // and GT operands from the header, so they keep the guest-side
+            // header check against the digest recomputed from the fixture.
             if ix_tag != super::tag::REGISTRY
                 && !super::registry_header_matches(
                     &registry_data,
                     &parsed,
                     _program_id.as_array(),
-                    &digest,
+                    &super::registry_keyset_digest_v3(&parsed),
                 )
             {
                 return Err(ProgramError::InvalidAccountData);
@@ -899,26 +923,111 @@ mod registry_pin_tests {
     }
 
     #[test]
-    fn pinned_digests_are_distinct() {
-        for (index, (digest, _)) in REGISTRY_V3_PINNED.iter().enumerate() {
-            assert!(
-                pinned_registry_address(digest).is_some(),
+    fn pinned_addresses_are_distinct() {
+        for (index, (digest, address)) in REGISTRY_V3_PINNED.iter().enumerate() {
+            assert_eq!(
+                pinned_registry_digest(address),
+                Some(digest),
                 "entry {index} is not reachable by lookup"
             );
             assert_eq!(
                 REGISTRY_V3_PINNED
                     .iter()
-                    .filter(|(other, _)| other == digest)
+                    .filter(|(_, other)| other == address)
                     .count(),
                 1,
-                "entry {index} shares its digest with another row"
+                "entry {index} shares its address with another row"
             );
         }
     }
 
     #[test]
-    fn unpinned_digest_has_no_address() {
-        assert!(pinned_registry_address(&[0u8; 32]).is_none());
+    fn unpinned_address_has_no_digest() {
+        assert!(pinned_registry_digest(&[0u8; 32]).is_none());
+    }
+}
+
+/// The fixture-to-registry binding that replaced the hot-path keyset digest.
+/// Point encodings are arbitrary here: the suffix builder compares bytes and
+/// never interprets them.
+#[cfg(all(test, not(target_os = "solana")))]
+mod registered_suffix_tests {
+    use super::*;
+
+    const N: usize = 2;
+    const K: usize = 2;
+
+    /// `[n][k][vk_index][k x vk][n x proof][n x pubinput]` filled with a
+    /// position-dependent pattern, so every G2 in the fold is distinct.
+    fn fixture_bytes() -> Vec<u8> {
+        let mut data = vec![N as u8, K as u8, 0, 1];
+        data.extend((0..K * VK_BYTES + N * PROOF_BYTES + N * 32).map(|index| (index % 251) as u8));
+        data
+    }
+
+    /// A registry image whose G2 sources are the fold's own fixed-G2 suffix.
+    fn registry_image(pairs: &[PodG1G2Pair]) -> Vec<u8> {
+        let mut data = vec![0u8; REGISTRY_V3_HEADER_BYTES + 3 * K * REGISTRY_V3_G2_ENTRY_BYTES];
+        for slot in 0..3 * K {
+            let start = REGISTRY_V3_HEADER_BYTES + slot * REGISTRY_V3_G2_ENTRY_BYTES;
+            data[start..start + 32].copy_from_slice(&[slot as u8; 32]);
+            data[start + 32..start + 160].copy_from_slice(&pairs[N + slot].g2.0);
+        }
+        data
+    }
+
+    /// `n + 3k` pairs with a distinct G2 per position.
+    fn fold_pairs() -> Vec<PodG1G2Pair> {
+        (0..N + 3 * K)
+            .map(|index| PodG1G2Pair {
+                g1: PodG1Point([index as u8; 64]),
+                g2: PodG2Point([0x80 | index as u8; 128]),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn matching_sources_carry_the_entry_ids() {
+        let bytes = fixture_bytes();
+        let fixture = parse(&bytes).expect("synthetic fixture parses");
+        let pairs = fold_pairs();
+        let registered =
+            registered_suffix(&fixture, &pairs, &registry_image(&pairs)).expect("suffix binds");
+        assert_eq!(registered.len(), 3 * K);
+        for (slot, pair) in registered.iter().enumerate() {
+            assert_eq!(pair.g2_id, [slot as u8; 32], "slot {slot} took the wrong id");
+            assert_eq!(pair.g1, pairs[N + slot].g1, "slot {slot} took the wrong G1");
+        }
+    }
+
+    /// One byte of one source is enough: another keyset's registry differs in
+    /// every source, so it cannot reach the pairing.
+    #[test]
+    fn a_substituted_source_is_rejected() {
+        let bytes = fixture_bytes();
+        let fixture = parse(&bytes).expect("synthetic fixture parses");
+        let pairs = fold_pairs();
+        for slot in 0..3 * K {
+            let mut image = registry_image(&pairs);
+            let source = REGISTRY_V3_HEADER_BYTES + slot * REGISTRY_V3_G2_ENTRY_BYTES + 32;
+            image[source] ^= 1;
+            assert!(
+                registered_suffix(&fixture, &pairs, &image).is_none(),
+                "slot {slot} accepted a source it does not pair against"
+            );
+        }
+    }
+
+    /// The suffix must consume the fold to its end, so a registry that is short
+    /// of entries cannot silently drop a key's pairs.
+    #[test]
+    fn a_truncated_registry_is_rejected() {
+        let bytes = fixture_bytes();
+        let fixture = parse(&bytes).expect("synthetic fixture parses");
+        let pairs = fold_pairs();
+        let mut image = registry_image(&pairs);
+        image.truncate(REGISTRY_V3_HEADER_BYTES + (3 * K - 1) * REGISTRY_V3_G2_ENTRY_BYTES);
+        assert!(registered_suffix(&fixture, &pairs, &image).is_none());
     }
 }
 

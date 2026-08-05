@@ -110,9 +110,9 @@ const AUTHENTICATED_REGISTRY_KEYSET_DIGEST_V3: [u8; 32] = [
     0xdb, 0xfc, 0x97, 0x77, 0x92, 0xf6, 0xa6, 0x90, 0x01, 0x99, 0x55, 0x24, 0x1f, 0xac, 0x84,
     0x43, 0x05,
 ];
-/// Consumer the pinned registry address below is derived under. A guest loaded
-/// at any other program id must reject: the pinned address would not be a
-/// program-derived address of the running program.
+/// Consumer both pinned address tables are derived under. A guest loaded at
+/// any other program id must reject: the pinned addresses would not be
+/// program-derived addresses of the running program.
 #[cfg(any(target_os = "solana", test))]
 const REGISTRY_V3_CONSUMER: [u8; 32] = [42u8; 32];
 
@@ -165,6 +165,47 @@ const POLICY_KEYSET_DIGESTS: [[u8; 32]; 5] = [
         0x4c, 0x9d, 0xa2, 0x24, 0x2e, 0x41, 0x6b, 0x52, 0x8b, 0x92, 0x3e, 0x76, 0x32, 0x6b,
         0x1b, 0xc5, 0xd3, 0xe0, 0xe6, 0x14, 0xd6, 0x24, 0x38, 0x4a, 0xfe, 0xe6, 0x30, 0xf7,
         0x34, 0x6a, 0x6b, 0xb1,
+    ],
+];
+
+/// Input-account PDA of each allowlisted keyset, index-aligned with
+/// [`POLICY_KEYSET_DIGESTS`], standing in for what a real consumer emits at
+/// codegen time. Each entry is
+/// `find_program_address([INPUT_PDA_SEED, digest], REGISTRY_V3_CONSUMER)` and
+/// `pinned_input_addresses_derive` re-runs that derivation. Membership in this
+/// table is the keyset allowlist, so a keyset outside the policy has no
+/// address and cannot reach a verifier.
+#[cfg(any(target_os = "solana", test))]
+const POLICY_INPUT_ADDRESSES: [[u8; 32]; POLICY_KEYSET_DIGESTS.len()] = [
+    // transact_1_1 alone
+    [
+        0x4f, 0xe3, 0x1f, 0x3c, 0xd0, 0xe0, 0x82, 0x87, 0x0f, 0xa1, 0xfb, 0x63, 0x1c, 0x41,
+        0xbe, 0xdc, 0xfb, 0x52, 0xc5, 0x2d, 0x08, 0x31, 0x7e, 0x6c, 0x78, 0x96, 0x11, 0xf2,
+        0x2a, 0xe1, 0x0b, 0xfc,
+    ],
+    // transact_2_2 alone
+    [
+        0x9e, 0x46, 0xf4, 0x4b, 0x62, 0x62, 0xe1, 0x2d, 0x05, 0xed, 0x37, 0x13, 0xa4, 0xd2,
+        0xa7, 0x41, 0x59, 0x05, 0x2b, 0xd0, 0x26, 0x78, 0x10, 0x0a, 0x45, 0xfd, 0x6f, 0x84,
+        0xdb, 0x44, 0xe5, 0x61,
+    ],
+    // transact_2_3 alone
+    [
+        0x1f, 0xe4, 0xb9, 0xd8, 0xa1, 0x0d, 0x9c, 0xff, 0xde, 0xed, 0x92, 0x9b, 0x69, 0x81,
+        0x02, 0xc9, 0x28, 0x2b, 0x4b, 0x0c, 0x66, 0x4e, 0x04, 0xd3, 0xee, 0xbd, 0xda, 0x05,
+        0x97, 0x64, 0xc0, 0x0c,
+    ],
+    // row n2
+    [
+        0x07, 0x2c, 0x47, 0x46, 0xe2, 0xa0, 0xb6, 0x4e, 0xa8, 0xc3, 0x0d, 0xc8, 0x4a, 0x31,
+        0xc1, 0x1c, 0x85, 0x99, 0x28, 0x4b, 0x2e, 0x99, 0xb8, 0xae, 0x6e, 0xf7, 0x3f, 0x63,
+        0x62, 0x5b, 0x91, 0xb6,
+    ],
+    // row n3
+    [
+        0x90, 0xfa, 0xfc, 0x74, 0xa7, 0xbb, 0xe0, 0x21, 0xec, 0xdf, 0x3e, 0x26, 0x70, 0x53,
+        0x8e, 0x6f, 0x7c, 0x83, 0x70, 0x0b, 0x2e, 0x2a, 0x07, 0x80, 0xa4, 0x53, 0x90, 0xa0,
+        0x56, 0x5a, 0xe6, 0xd8,
     ],
 ];
 
@@ -480,6 +521,18 @@ fn policy_allows_keyset(digest: &[u8; 32]) -> bool {
     POLICY_KEYSET_DIGESTS
         .iter()
         .any(|allowed| allowed == digest)
+}
+
+/// Pinned input-account address of an allowlisted keyset. A keyset outside the
+/// policy has no address and the caller must reject. One scan answers both
+/// questions; deriving the address here instead would charge
+/// `create_program_address` per bump attempt on every measured column.
+#[cfg(any(target_os = "solana", test))]
+fn pinned_input_address(digest: &[u8; 32]) -> Option<&'static [u8; 32]> {
+    let index = POLICY_KEYSET_DIGESTS
+        .iter()
+        .position(|allowed| allowed == digest)?;
+    POLICY_INPUT_ADDRESSES.get(index)
 }
 
 /// Common identity policy for every measured PLONK column. Account metadata
@@ -2679,6 +2732,12 @@ mod entrypoint {
                 fixtures.first().ok_or(ProgramError::NotEnoughAccountKeys)?,
             )
         };
+        // Both pinned address tables are derived under this consumer, so a
+        // guest loaded at any other program id must reject rather than compare
+        // against addresses that are not its own PDAs.
+        if program_id.as_array() != &super::REGISTRY_V3_CONSUMER {
+            return Err(ProgramError::IncorrectProgramId);
+        }
         if !batch.owned_by(program_id) || batch.is_writable() {
             return Err(ProgramError::InvalidAccountData);
         }
@@ -2686,13 +2745,13 @@ mod entrypoint {
             .try_borrow()
             .map_err(|_| ProgramError::AccountBorrowFailed)?;
         let groups = super::parse_account(&data).ok_or(ProgramError::InvalidAccountData)?;
-        let input_digest =
-            super::authenticated_input_digest(&groups).ok_or(ProgramError::InvalidAccountData)?;
-        let (expected_batch, _) = Address::find_program_address(
-            &[super::layout::INPUT_PDA_SEED, &input_digest],
-            program_id,
-        );
-        if batch.address() != &expected_batch {
+        // The keyset digest is recomputed from the account on every column, so
+        // the account still commits to its exact ordered key set. Only the
+        // bump search is pinned.
+        let input_digest = super::keyset_digest(&groups).ok_or(ProgramError::InvalidAccountData)?;
+        let expected_batch =
+            super::pinned_input_address(&input_digest).ok_or(ProgramError::InvalidSeeds)?;
+        if batch.address().as_array() != expected_batch {
             return Err(ProgramError::InvalidSeeds);
         }
 
@@ -2709,9 +2768,6 @@ mod entrypoint {
         let registry = registry.ok_or(ProgramError::NotEnoughAccountKeys)?;
         let registry_digest = super::sealed_registry_keyset_digest_v3(&groups)
             .ok_or(ProgramError::InvalidAccountData)?;
-        if program_id.as_array() != &super::REGISTRY_V3_CONSUMER {
-            return Err(ProgramError::IncorrectProgramId);
-        }
         let expected_registry =
             super::pinned_registry_address(&registry_digest).ok_or(ProgramError::InvalidSeeds)?;
         if registry.address().as_array() != expected_registry || !registry.owned_by(program_id) {
@@ -2799,6 +2855,31 @@ mod registry_pin_tests {
     #[test]
     fn unpinned_digest_has_no_address() {
         assert!(pinned_registry_address(&[0u8; 32]).is_none());
+    }
+
+    #[test]
+    fn pinned_input_addresses_derive() {
+        for (index, digest) in POLICY_KEYSET_DIGESTS.iter().enumerate() {
+            let (derived, _) = Address::find_program_address(
+                &[layout::INPUT_PDA_SEED, digest],
+                &Address::new_from_array(REGISTRY_V3_CONSUMER),
+            );
+            assert_eq!(
+                derived.to_bytes(),
+                POLICY_INPUT_ADDRESSES[index],
+                "pinned input address {index} is not the PDA of its keyset digest"
+            );
+            assert_eq!(
+                pinned_input_address(digest),
+                Some(&POLICY_INPUT_ADDRESSES[index]),
+                "allowlisted keyset {index} is not reachable by lookup"
+            );
+        }
+    }
+
+    #[test]
+    fn unpinned_keyset_has_no_input_address() {
+        assert!(pinned_input_address(&[0u8; 32]).is_none());
     }
 }
 

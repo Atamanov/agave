@@ -125,20 +125,23 @@ fn draw_scalar(seed: &[u8; 32], k: u64) -> PodScalar {
     let digest = keccak_parts(&[seed, &k.to_be_bytes()]);
     let mut lo = [0u8; 16];
     lo.copy_from_slice(&digest[16..]);
-    one_plus_lo128(&lo)
+    small_plus_lo128(1, &lo)
 }
 
-/// `1 + x` for a 128-bit big-endian `x`. The sum is at most `2^128 < r`, so
-/// the carry cannot leave the 32-byte buffer and the result is canonical.
-fn one_plus_lo128(lo: &[u8; 16]) -> PodScalar {
+/// `addend + x` for a 128-bit big-endian `x`. The sum is at most
+/// `2^128 + 254 < r`, so the carry stops inside the top half of the buffer and
+/// the result is canonical without a reduction.
+pub(crate) fn small_plus_lo128(addend: u8, lo: &[u8; 16]) -> PodScalar {
     let mut bytes = [0u8; 32];
     bytes[16..].copy_from_slice(lo);
+    let mut carry = u16::from(addend);
     for byte in bytes.iter_mut().rev() {
-        let (incremented, carry) = byte.overflowing_add(1);
-        *byte = incremented;
-        if !carry {
+        if carry == 0 {
             break;
         }
+        let [low, high] = u16::from(*byte).saturating_add(carry).to_le_bytes();
+        *byte = low;
+        carry = u16::from(high);
     }
     PodScalar(bytes)
 }
@@ -321,17 +324,18 @@ mod tests {
         }
     }
 
-    /// `1 + lo128` at both ends of the 128-bit range, where the carry chain
-    /// is longest and the result is largest.
+    /// `addend + lo128` at both ends of the 128-bit range, where the carry
+    /// chain is longest and the result is largest. Addend two is the same-VK
+    /// tail offset.
     #[test]
-    fn one_plus_lo128_matches_the_field_addition() {
-        let reference = |lo: u128| fr_to_pod(&Fr::from(lo).add(Fr::one()));
+    fn small_plus_lo128_matches_the_field_addition() {
         let mut cases = vec![
             0u128,
             1,
             2,
             u128::MAX,
             u128::MAX - 1,
+            u128::MAX - 2,
             1 << 127,
             (1 << 64) - 1,
         ];
@@ -342,11 +346,20 @@ mod tests {
             state ^= state << 17;
             cases.push(u128::from(state) << 64 | u128::from(state.rotate_left(17)));
         }
-        for lo in cases {
-            assert_eq!(one_plus_lo128(&lo.to_be_bytes()), reference(lo), "{lo:#x}");
+        for addend in [0u8, 1, 2, 3, u8::MAX] {
+            for lo in &cases {
+                let expected = fr_to_pod(&Fr::from(*lo).add(Fr::from(u64::from(addend))));
+                assert_eq!(
+                    small_plus_lo128(addend, &lo.to_be_bytes()),
+                    expected,
+                    "{addend} + {lo:#x}"
+                );
+            }
+            // the largest draw carries into the top half and stops there
+            let largest = small_plus_lo128(addend, &u128::MAX.to_be_bytes());
+            assert_eq!(largest.0[15], u8::from(addend > 0));
+            assert_eq!(largest.0[..15], [0u8; 15]);
         }
-        // the largest draw is 2^128, still far below r
-        assert_eq!(one_plus_lo128(&u128::MAX.to_be_bytes()).0[15], 1);
     }
 
     #[test]

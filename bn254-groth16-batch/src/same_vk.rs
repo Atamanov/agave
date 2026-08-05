@@ -10,10 +10,10 @@
 use {
     crate::{
         Groth16BatchError,
-        transcript::{RandomizerMode, derive_seed},
+        transcript::{RandomizerMode, derive_seed, small_plus_lo128},
         verify::{
-            MINUS_ONE_BE, Proof, fr_inner_product, fr_negate, fr_to_pod, is_canonical_fr_be, msm,
-            validate_batch_shape,
+            MINUS_ONE_BE, ONE_BE, Proof, fr_inner_product, fr_negate, fr_sum, fr_to_pod,
+            is_canonical_fr_be, msm, validate_batch_shape,
         },
         vk::ValidatedVerifyingKey,
     },
@@ -32,6 +32,13 @@ pub const SAME_VK_FP12_MAX_PROOFS: usize = PAIRING_MAP_MAX_PAIRS - 2;
 
 const TRANSCRIPT_DOMAIN: &[u8] = b"solana-bn254-groth16-same-vk-target:v1:affine-sum-one";
 const COEFFICIENT_DOMAIN: &[u8] = b"coef";
+
+/// The offset that lifts a 128-bit draw off zero and off one. It also puts the
+/// tail sum strictly above one, which is what makes the affine first
+/// coefficient nonzero.
+const TAIL_OFFSET: u8 = 2;
+
+const ZERO_BE: [u8; 32] = [0u8; 32];
 
 /// A canonical GT target paired with one complete validated verifying-key
 /// digest.
@@ -86,8 +93,12 @@ pub fn groth16_same_vk_fp12_verify(
 ) -> Result<bool, Groth16BatchError> {
     validate_same_vk_target_shape(vk, proofs)?;
     let target = authenticated_target.for_key(vk)?;
-    let randomizers =
-        derive_same_vk_sum_one_randomizers_prevalidated(vk, proofs, application_context, target)?;
+    let randomizers = derive_same_vk_sum_one_randomizer_scalars_prevalidated(
+        vk,
+        proofs,
+        application_context,
+        target,
+    )?;
     let pairs = fold_same_vk_target_pairs_prevalidated(vk, proofs, &randomizers)?;
     let mapped = alt_bn128_pairing_map(SyscallVersion::V0, &pairs)?;
     Ok(mapped == *target)
@@ -129,29 +140,14 @@ fn derive_same_vk_sum_one_randomizers_prevalidated(
     application_context: &[u8; 32],
     target: &PodGtElement,
 ) -> Result<Vec<Fr>, Groth16BatchError> {
-    let batch_seed = derive_seed(
-        RandomizerMode::Independent,
-        core::slice::from_ref(vk),
-        proofs,
-    );
-    let seed = hashv(&[
-        TRANSCRIPT_DOMAIN,
-        application_context,
-        &batch_seed,
-        &target.0,
-    ])
-    .to_bytes();
+    let seed = same_vk_transcript_seed(vk, proofs, application_context, target);
 
     let mut randomizers = Vec::with_capacity(proofs.len());
     randomizers.push(Fr::zero());
     let mut tail_sum = Fr::zero();
     for index in 1..proofs.len() {
-        let index = (index as u64).to_be_bytes();
-        let digest = hashv(&[&seed, COEFFICIENT_DOMAIN, &index]).to_bytes();
-        let mut low = [0u8; 16];
-        low.copy_from_slice(&digest[16..]);
-        let mut coefficient = Fr::from(u128::from_be_bytes(low));
-        coefficient.add_assign(Fr::from(2u64));
+        let mut coefficient = Fr::from(u128::from_be_bytes(tail_draw(&seed, index)));
+        coefficient.add_assign(Fr::from(u64::from(TAIL_OFFSET)));
         debug_assert!(!coefficient.is_zero());
         tail_sum.add_assign(coefficient);
         randomizers.push(coefficient);
@@ -165,6 +161,100 @@ fn derive_same_vk_sum_one_randomizers_prevalidated(
     Ok(randomizers)
 }
 
+/// [`derive_same_vk_sum_one_randomizers`] in the canonical big-endian encoding
+/// the MSM and inner-product syscalls consume, which is the form the fold
+/// actually needs.
+///
+/// A tail is `TAIL_OFFSET + lo128(digest)`, at most `2^128 + 1`, so it is built
+/// in bytes with no reduction. Only the affine first coefficient wraps, and it
+/// is one inner product against `-1`.
+/// `derived_scalars_are_the_field_derivation` pins the whole vector against
+/// [`reference_derive_same_vk_sum_one_randomizers`] element by element.
+fn derive_same_vk_sum_one_randomizer_scalars_prevalidated(
+    vk: &ValidatedVerifyingKey,
+    proofs: &[Proof],
+    application_context: &[u8; 32],
+    target: &PodGtElement,
+) -> Result<Vec<PodScalar>, Groth16BatchError> {
+    let seed = same_vk_transcript_seed(vk, proofs, application_context, target);
+
+    let mut randomizers = Vec::with_capacity(proofs.len());
+    randomizers.push(ONE_BE);
+    for index in 1..proofs.len() {
+        randomizers.push(small_plus_lo128(TAIL_OFFSET, &tail_draw(&seed, index)));
+    }
+    let first = affine_first_coefficient(randomizers.get(1..).unwrap_or_default())?;
+    randomizers[0] = first;
+
+    check_sum_one_randomizers(&randomizers)?;
+    Ok(randomizers)
+}
+
+/// The Fiat-Shamir seed both derivations draw from, so neither can drift from
+/// the other's transcript.
+fn same_vk_transcript_seed(
+    vk: &ValidatedVerifyingKey,
+    proofs: &[Proof],
+    application_context: &[u8; 32],
+    target: &PodGtElement,
+) -> [u8; 32] {
+    let batch_seed = derive_seed(
+        RandomizerMode::Independent,
+        core::slice::from_ref(vk),
+        proofs,
+    );
+    hashv(&[
+        TRANSCRIPT_DOMAIN,
+        application_context,
+        &batch_seed,
+        &target.0,
+    ])
+    .to_bytes()
+}
+
+/// The low 128 bits of the coefficient digest for a one-based tail position.
+fn tail_draw(seed: &[u8; 32], index: usize) -> [u8; 16] {
+    let index = (index as u64).to_be_bytes();
+    let digest = hashv(&[seed, COEFFICIENT_DOMAIN, &index]).to_bytes();
+    let mut low = [0u8; 16];
+    low.copy_from_slice(&digest[16..]);
+    low
+}
+
+/// `1 - sum(tails)` in one inner product.
+///
+/// Every tail is at most `2^128 + 1` and there are at most
+/// `SAME_VK_FP12_MAX_PROOFS - 1` of them, so the integer tail sum stays inside
+/// `[2, r)` and can never equal one. The difference is therefore nonzero
+/// without rejection sampling, which is the invariant the fold's constant IC
+/// coefficient of `-1` rests on.
+/// `the_tail_sum_stays_between_one_and_the_modulus` pins the bound.
+fn affine_first_coefficient(tails: &[PodScalar]) -> Result<PodScalar, Groth16BatchError> {
+    if tails.is_empty() {
+        return Ok(ONE_BE);
+    }
+    let mut left = Vec::with_capacity(tails.len().saturating_add(1));
+    left.push(ONE_BE);
+    left.extend_from_slice(tails);
+    let mut right = vec![MINUS_ONE_BE; left.len()];
+    right[0] = ONE_BE;
+    fr_inner_product(&left, &right)
+}
+
+/// Reject any coefficient vector that would invalidate the fold's constant IC
+/// coefficient of `-1`: every entry must be a canonical nonzero scalar and the
+/// whole vector must sum to exactly one in Fr.
+fn check_sum_one_randomizers(randomizers: &[PodScalar]) -> Result<(), Groth16BatchError> {
+    let usable = !randomizers.is_empty()
+        && randomizers
+            .iter()
+            .all(|randomizer| randomizer.0 != ZERO_BE && is_canonical_fr_be(randomizer));
+    if !usable || fr_sum(randomizers)? != ONE_BE {
+        return Err(Groth16BatchError::InvalidSameVkRandomizers);
+    }
+    Ok(())
+}
+
 /// Build exactly `n + 2` dynamic pairs, excluding `alpha/beta` entirely.
 /// The caller may supply coefficients from a joint transcript, but this
 /// checked surface requires all of them to be nonzero and their sum to be one.
@@ -174,27 +264,26 @@ pub fn fold_same_vk_target_pairs(
     randomizers: &[Fr],
 ) -> Result<Vec<PodG1G2Pair>, Groth16BatchError> {
     validate_same_vk_target_shape(vk, proofs)?;
-    fold_same_vk_target_pairs_prevalidated(vk, proofs, randomizers)
+    let coefficients: Vec<PodScalar> = randomizers.iter().map(fr_to_pod).collect();
+    fold_same_vk_target_pairs_prevalidated(vk, proofs, &coefficients)
 }
 
 fn fold_same_vk_target_pairs_prevalidated(
     vk: &ValidatedVerifyingKey,
     proofs: &[Proof],
-    randomizers: &[Fr],
+    coefficients: &[PodScalar],
 ) -> Result<Vec<PodG1G2Pair>, Groth16BatchError> {
-    if randomizers.len() != proofs.len() {
+    if coefficients.len() != proofs.len() {
         return Err(Groth16BatchError::RandomizerCountMismatch);
     }
-    if randomizers.iter().any(Zero::is_zero) || randomizers.iter().copied().sum::<Fr>() != Fr::one()
-    {
-        return Err(Groth16BatchError::InvalidSameVkRandomizers);
-    }
+    // the derivation is the producer of these and checks the same invariant,
+    // but the fold is also a public surface and its -1 constant depends on it
+    check_sum_one_randomizers(coefficients)?;
 
     let pair_count = proofs
         .len()
         .checked_add(2)
         .ok_or(Groth16BatchError::TooManyPairs)?;
-    let coefficients: Vec<PodScalar> = randomizers.iter().map(fr_to_pod).collect();
     // every key-side term of a coefficient enters the fold negated, so -c_i is
     // derived once and serves both the gamma columns and the delta MSM
     let neg_coefficients = coefficients
@@ -203,7 +292,7 @@ fn fold_same_vk_target_pairs_prevalidated(
         .collect::<Result<Vec<PodScalar>, _>>()?;
 
     let mut pairs = Vec::with_capacity(pair_count);
-    for (proof, coefficient) in proofs.iter().zip(&coefficients) {
+    for (proof, coefficient) in proofs.iter().zip(coefficients) {
         pairs.push(PodG1G2Pair {
             g1: msm(
                 core::slice::from_ref(&proof.a),
@@ -507,6 +596,53 @@ mod tests {
     }
 }
 
+/// The derivation this module shipped before the coefficients moved into the
+/// byte domain, self-contained down to the digest so that a change to either
+/// the shared transcript helpers or the byte arithmetic fails
+/// [`derived_scalars_are_the_field_derivation`].
+#[cfg(test)]
+fn reference_derive_same_vk_sum_one_randomizers(
+    vk: &ValidatedVerifyingKey,
+    proofs: &[Proof],
+    application_context: &[u8; 32],
+    target: &PodGtElement,
+) -> Result<Vec<Fr>, Groth16BatchError> {
+    let batch_seed = derive_seed(
+        RandomizerMode::Independent,
+        core::slice::from_ref(vk),
+        proofs,
+    );
+    let seed = hashv(&[
+        TRANSCRIPT_DOMAIN,
+        application_context,
+        &batch_seed,
+        &target.0,
+    ])
+    .to_bytes();
+
+    let mut randomizers = Vec::with_capacity(proofs.len());
+    randomizers.push(Fr::zero());
+    let mut tail_sum = Fr::zero();
+    for index in 1..proofs.len() {
+        let index = (index as u64).to_be_bytes();
+        let digest = hashv(&[&seed, COEFFICIENT_DOMAIN, &index]).to_bytes();
+        let mut low = [0u8; 16];
+        low.copy_from_slice(&digest[16..]);
+        let mut coefficient = Fr::from(u128::from_be_bytes(low));
+        coefficient.add_assign(Fr::from(2u64));
+        debug_assert!(!coefficient.is_zero());
+        tail_sum.add_assign(coefficient);
+        randomizers.push(coefficient);
+    }
+    randomizers[0] = Fr::one().sub(tail_sum);
+
+    if randomizers.iter().any(Zero::is_zero) || randomizers.iter().copied().sum::<Fr>() != Fr::one()
+    {
+        return Err(Groth16BatchError::InvalidSameVkRandomizers);
+    }
+    Ok(randomizers)
+}
+
 /// The fold this module shipped before the coefficients moved into the
 /// scalar-field syscall, kept as the bit-exactness reference for
 /// [`fold_identity_tests`].
@@ -589,7 +725,7 @@ mod fold_identity_tests {
     use {
         super::*,
         crate::test_utils::{fr_bytes, make_proof, make_vk, rng},
-        ark_ff::UniformRand,
+        ark_ff::{BigInteger, PrimeField, UniformRand},
         ark_std::rand::rngs::StdRng,
     };
 
@@ -665,8 +801,9 @@ mod fold_identity_tests {
         proofs: &[Proof],
         randomizers: &[Fr],
     ) {
+        let coefficients: Vec<PodScalar> = randomizers.iter().map(fr_to_pod).collect();
         let expected = reference_fold_same_vk_target_pairs(vk, proofs, randomizers);
-        let folded = fold_same_vk_target_pairs_prevalidated(vk, proofs, randomizers);
+        let folded = fold_same_vk_target_pairs_prevalidated(vk, proofs, &coefficients);
         match (&expected, &folded) {
             (Ok(expected), Ok(folded)) => {
                 assert_eq!(expected.len(), folded.len(), "{label}: pair count");
@@ -694,7 +831,162 @@ mod fold_identity_tests {
             .expect("derivation must produce a sum-one vector");
             assert_eq!(randomizers.len(), proofs.len());
             assert_same_fold(label, &vk, &proofs, &randomizers);
+
+            let scalars = derive_same_vk_sum_one_randomizer_scalars_prevalidated(
+                &vk,
+                &proofs,
+                &CONTEXT,
+                target.target(),
+            )
+            .expect("byte derivation must produce a sum-one vector");
+            let expected = reference_fold_same_vk_target_pairs(&vk, &proofs, &randomizers);
+            let folded = fold_same_vk_target_pairs_prevalidated(&vk, &proofs, &scalars);
+            assert_eq!(expected, folded, "{label}: byte-derived fold");
         }
+    }
+
+    /// The byte derivation must reproduce the field derivation exactly. It
+    /// feeds the MSM scalars, so a divergence changes the statement the
+    /// pairing check proves while still verifying.
+    #[test]
+    fn derived_scalars_are_the_field_derivation() {
+        for (label, vk, proofs) in batches() {
+            for context in [CONTEXT, [0u8; 32], [0xff; 32]] {
+                let target = SameVkTarget::new(*vk.digest(), PodGtElement([7u8; 384]));
+                let expected: Vec<PodScalar> = reference_derive_same_vk_sum_one_randomizers(
+                    &vk,
+                    &proofs,
+                    &context,
+                    target.target(),
+                )
+                .expect("reference derivation")
+                .iter()
+                .map(fr_to_pod)
+                .collect();
+                let live = derive_same_vk_sum_one_randomizers_prevalidated(
+                    &vk,
+                    &proofs,
+                    &context,
+                    target.target(),
+                )
+                .expect("field derivation");
+                let scalars = derive_same_vk_sum_one_randomizer_scalars_prevalidated(
+                    &vk,
+                    &proofs,
+                    &context,
+                    target.target(),
+                )
+                .expect("byte derivation");
+                assert_eq!(scalars.len(), proofs.len(), "{label}");
+                for (index, expected) in expected.iter().enumerate() {
+                    assert_eq!(scalars.get(index), Some(expected), "{label} scalar {index}");
+                    assert_eq!(
+                        live.get(index).map(fr_to_pod).as_ref(),
+                        Some(expected),
+                        "{label} field {index}"
+                    );
+                }
+            }
+        }
+    }
+
+    type Big = <Fr as PrimeField>::BigInt;
+
+    /// A 32-byte big-endian scalar as an exact integer, so the wrap can be
+    /// checked outside the field the code under test computes in.
+    fn big_from_be(bytes: &[u8; 32]) -> Big {
+        let mut limbs = [0u64; 4];
+        for (limb, chunk) in limbs.iter_mut().zip(bytes.rchunks_exact(8)) {
+            let mut buffer = [0u8; 8];
+            buffer.copy_from_slice(chunk);
+            *limb = u64::from_be_bytes(buffer);
+        }
+        Big::new(limbs)
+    }
+
+    /// The affine first coefficient over tail vectors the keccak draw cannot be
+    /// steered to: both ends of the 128-bit range, every admissible length, and
+    /// mixed vectors. Every nonempty case wraps, and the wrap is pinned against
+    /// exact integer arithmetic, not against the subtraction under test.
+    #[test]
+    fn affine_first_coefficient_matches_the_field_subtraction() {
+        let draws = [
+            0u128,
+            1,
+            2,
+            1 << 127,
+            u128::MAX - 2,
+            u128::MAX - 1,
+            u128::MAX,
+        ];
+        let mut vectors: Vec<Vec<u128>> = Vec::new();
+        for draw in draws {
+            for count in 0..SAME_VK_FP12_MAX_PROOFS {
+                vectors.push(vec![draw; count]);
+            }
+        }
+        vectors.push(draws.to_vec());
+        vectors.push(draws.iter().rev().copied().collect());
+
+        let one = Big::new([1, 0, 0, 0]);
+        for draws in vectors {
+            let tails: Vec<PodScalar> = draws
+                .iter()
+                .map(|draw| small_plus_lo128(TAIL_OFFSET, &draw.to_be_bytes()))
+                .collect();
+            let first = affine_first_coefficient(&tails).expect("affine coefficient");
+
+            let field_sum: Fr = draws
+                .iter()
+                .map(|draw| Fr::from(*draw) + Fr::from(u64::from(TAIL_OFFSET)))
+                .sum();
+            assert_eq!(first, fr_to_pod(&Fr::one().sub(field_sum)));
+
+            let mut integer_sum = Big::new([0; 4]);
+            for tail in &tails {
+                assert!(!integer_sum.add_with_carry(&big_from_be(&tail.0)));
+            }
+            if draws.is_empty() {
+                assert_eq!(first, ONE_BE);
+                continue;
+            }
+            // the tail sum never reduces and never reaches one, so 1 - tail_sum
+            // is negative in the integers and the canonical answer is
+            // r + 1 - tail_sum
+            assert!(integer_sum < Fr::MODULUS, "tail sum must not reduce");
+            assert!(integer_sum > one, "1 - tail_sum must wrap");
+            let mut expected = Fr::MODULUS;
+            assert!(!expected.add_with_carry(&one));
+            assert!(!expected.sub_with_borrow(&integer_sum));
+            assert_eq!(first.0.as_slice(), expected.to_bytes_be());
+        }
+    }
+
+    /// The bound the nonzero claim rests on, at the largest batch the surface
+    /// admits: the widest possible tail sum still cannot reach r, so it cannot
+    /// reduce, and the narrowest is already above one.
+    #[test]
+    fn the_tail_sum_stays_between_one_and_the_modulus() {
+        let tails = SAME_VK_FP12_MAX_PROOFS
+            .checked_sub(1)
+            .expect("the surface admits at least one proof");
+        assert!(tails >= 1);
+        // (2^128 - 1) + TAIL_OFFSET, the largest tail the draw can produce
+        let largest = big_from_be(&small_plus_lo128(TAIL_OFFSET, &u128::MAX.to_be_bytes()).0);
+        let mut expected = Big::new([0, 0, 1, 0]);
+        assert!(!expected.sub_with_borrow(&Big::new([1, 0, 0, 0])));
+        assert!(!expected.add_with_carry(&Big::new([u64::from(TAIL_OFFSET), 0, 0, 0])));
+        assert_eq!(largest, expected);
+
+        let mut widest = Big::new([0; 4]);
+        for _ in 0..tails {
+            assert!(
+                !widest.add_with_carry(&largest),
+                "tail sum overflowed 256 bits"
+            );
+        }
+        assert!(widest < Fr::MODULUS, "the widest tail sum must not reduce");
+        assert!(u64::from(TAIL_OFFSET) > 1, "the narrowest tail exceeds one");
     }
 
     /// Coefficient vectors at the edges of the field, still nonzero and still
@@ -800,13 +1092,14 @@ mod fold_identity_tests {
         let mut r_plus_one = R_BE;
         r_plus_one[31] = 0x02;
         let coefficients = sum_to_one(&[Fr::from(2u64)]);
+        let scalars: Vec<PodScalar> = coefficients.iter().map(fr_to_pod).collect();
 
         for bad in [R_BE, r_plus_one, [0xffu8; 32]] {
             for position in [0usize, 1] {
                 let mut mutated = proofs.clone();
                 mutated[position].public_inputs[0] = PodScalar(bad);
                 assert_eq!(
-                    fold_same_vk_target_pairs_prevalidated(&vk, &mutated, &coefficients),
+                    fold_same_vk_target_pairs_prevalidated(&vk, &mutated, &scalars),
                     Err(Groth16BatchError::NonCanonicalInput),
                     "prevalidated fold, position {position}"
                 );
@@ -844,13 +1137,14 @@ mod fold_identity_tests {
             vec![Fr::zero().sub(Fr::one()); 3],
         ];
         for (index, randomizers) in broken.iter().enumerate() {
+            let scalars: Vec<PodScalar> = randomizers.iter().map(fr_to_pod).collect();
             assert_eq!(
                 fold_same_vk_target_pairs(&vk, &proofs, randomizers),
                 Err(Groth16BatchError::InvalidSameVkRandomizers),
                 "case {index}"
             );
             assert_eq!(
-                fold_same_vk_target_pairs_prevalidated(&vk, &proofs, randomizers),
+                fold_same_vk_target_pairs_prevalidated(&vk, &proofs, &scalars),
                 Err(Groth16BatchError::InvalidSameVkRandomizers),
                 "prevalidated case {index}"
             );
@@ -859,5 +1153,47 @@ mod fold_identity_tests {
             fold_same_vk_target_pairs(&vk, &proofs, &[Fr::one()]),
             Err(Groth16BatchError::RandomizerCountMismatch)
         );
+    }
+
+    /// The byte fold reaches the same verdict on vectors the field surface
+    /// cannot express: a zero, a scalar at or above r, and a sum that misses
+    /// one by the modulus itself.
+    #[test]
+    fn byte_coefficients_that_break_the_sum_one_invariant_are_rejected() {
+        let (vk, proofs, _) = fixture(3);
+        let two = small_plus_lo128(TAIL_OFFSET, &[0u8; 16]);
+        let broken: [Vec<PodScalar>; 6] = [
+            vec![],
+            vec![ONE_BE, ONE_BE, ONE_BE],
+            vec![PodScalar(ZERO_BE), ONE_BE, MINUS_ONE_BE],
+            vec![PodScalar(R_BE), two, MINUS_ONE_BE],
+            vec![PodScalar([0xff; 32]), two, MINUS_ONE_BE],
+            vec![two, two, MINUS_ONE_BE],
+        ];
+        for (index, scalars) in broken.iter().enumerate() {
+            assert_eq!(
+                check_sum_one_randomizers(scalars),
+                Err(Groth16BatchError::InvalidSameVkRandomizers),
+                "check case {index}"
+            );
+            if scalars.len() == proofs.len() {
+                assert_eq!(
+                    fold_same_vk_target_pairs_prevalidated(&vk, &proofs, scalars),
+                    Err(Groth16BatchError::InvalidSameVkRandomizers),
+                    "fold case {index}"
+                );
+            }
+        }
+
+        // and the vector the derivation actually produces still passes
+        let target = SameVkTarget::new(*vk.digest(), PodGtElement([7u8; 384]));
+        let derived = derive_same_vk_sum_one_randomizer_scalars_prevalidated(
+            &vk,
+            &proofs,
+            &CONTEXT,
+            target.target(),
+        )
+        .expect("byte derivation");
+        assert_eq!(check_sum_one_randomizers(&derived), Ok(()));
     }
 }

@@ -357,6 +357,18 @@
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
           {
+            "terms": 5,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          },
+          {
+            "terms": 5,
+            "calls": 1
+          },
+          {
             "terms": 1,
             "calls": 1
           },

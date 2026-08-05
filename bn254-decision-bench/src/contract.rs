@@ -81,7 +81,16 @@ fn with_fp12_fold_lincombs(mut trace: OperationTrace, proofs: u32, keys: u32) ->
     // guest's own fp12 fold, where each key holds one proof, so its negation,
     // its column and its running sum are all one term.
     trace.fr_lincomb_calls = if keys == 1 {
-        let mut calls = vec![FrLincombCall::one(1); proofs as usize];
+        // Order matters: the derivation runs before the fold. It contributes the
+        // affine coefficient and the sum-to-one check, and the fold re-checks
+        // the invariant, so three n-term folds precede the per-proof negations.
+        // A single proof needs none of them: the sum short-circuits and the
+        // tail is empty.
+        let mut calls = Vec::new();
+        if proofs > 1 {
+            calls.extend(core::iter::repeat_n(FrLincombCall::one(proofs), 3));
+        }
+        calls.extend(core::iter::repeat_n(FrLincombCall::one(1), proofs as usize));
         calls.push(FrLincombCall::one(proofs));
         calls
     } else {
