@@ -9641,15 +9641,7 @@ mod tests {
     }
 
     fn pairing_check_cost(invoke_context: &InvokeContext, num_pairs: u64) -> u64 {
-        let execution_cost = invoke_context.get_execution_cost();
-        execution_cost
-            .alt_bn128_pairing_check_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_pairing_check_per_pair_cost
-                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
-                    .saturating_mul(num_pairs),
-            )
+        alt_bn128_pairing_cost(invoke_context.get_execution_cost(), num_pairs, 0)
     }
 
     fn plonk_scalar_cost(
@@ -10068,13 +10060,13 @@ mod tests {
         prepare_mockup!(invoke_context, program_id, bpf_loader::id());
 
         for (pairs, expected) in [
-            (1, 26_582),
-            (2, 35_918),
-            (3, 45_254),
-            (4, 54_590),
-            (8, 91_934),
-            (16, 166_622),
-            (18, 185_294),
+            (1, 8_829),
+            (2, 13_017),
+            (3, 17_205),
+            (4, 21_393),
+            (8, 24_979),
+            (16, 45_317),
+            (18, 53_693),
         ] {
             assert_eq!(pairing_check_cost(&invoke_context, pairs), expected);
         }

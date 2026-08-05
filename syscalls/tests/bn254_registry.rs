@@ -353,6 +353,6 @@ fn mixed_five_plus_three_registry_call_attests_ifma_dispatch() {
     );
     assert_eq!(
         research_observer::observed_ifma_mixed_batch8_dispatches(),
-        1
+        u64::from(solana_bn254_batch_syscall::selected_backend_compiled_with_avx512_ifma())
     );
 }
