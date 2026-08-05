@@ -1,0 +1,50 @@
+
+pairing(k<8) = 6105 + 4350k   pairing(k>=8) = 4655 + (k div 8)*22505 + (k mod 8)*5865
+   shape   measured    charged    over
+       1     10,454     10,455    0.0%
+       2     14,795     14,805    0.1%
+       3     19,148     19,155    0.0%
+       4     23,473     23,505    0.1%
+       6     32,205     32,205    0.0%
+       7     36,537     36,555    0.0%
+       8     27,159     27,160    0.0%
+       9     33,025     33,025    0.0%
+      12     50,617     50,620    0.0%
+      16     49,664     49,665    0.0%
+
+msm(n) = 583 + 364 * n
+   shape   measured    charged    over
+       1        929        947    1.9%
+       2      1,311      1,311    0.0%
+       3      1,653      1,675    1.3%
+       4      2,019      2,039    1.0%
+       5      2,387      2,403    0.7%
+       6      2,750      2,767    0.6%
+       7      3,109      3,131    0.7%
+       8      3,470      3,495    0.7%
+       9      3,806      3,859    1.4%
+      10      4,162      4,223    1.5%
+      16      6,295      6,407    1.8%
+      32     12,057     12,231    1.4%
+      36     13,451     13,687    1.8%
+      54     19,850     20,239    2.0%
+
+gt(t) = 3534 + 2148 * t
+   shape   measured    charged    over
+       1      5,663      5,682    0.3%
+       2      7,830      7,830    0.0%
+       3      9,961      9,978    0.2%
+       4     12,084     12,126    0.3%
+
+execution_budget.rs constants
+  alt_bn128_pairing_check_base_cost:      6105
+  alt_bn128_pairing_check_per_pair_cost:  4350
+  alt_bn128_pairing_check_lane_base_cost: 4655
+  alt_bn128_pairing_check_lane_cost:      22505
+  alt_bn128_pairing_check_lane_rem_cost:  5865
+  alt_bn128_g1_msm_base_cost:            583
+  alt_bn128_g1_msm_per_point_cost:       364
+  alt_bn128_gt_multiexp_base_cost:       3534
+  alt_bn128_gt_multiexp_per_target_cost: 2148
+
+worst overcharge: pairing 0.1%, msm 2.0%, gt 0.3%
