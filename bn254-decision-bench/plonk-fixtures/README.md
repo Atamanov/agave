@@ -38,3 +38,19 @@ above the r1cs count.
 
 Proving keys are not kept. They are large, derivable, and nothing verifies
 against them.
+
+## Pack and reseal
+
+The guest admits only an allowlisted key set, so a regeneration must be resealed
+in one commit. The exporter is the only writer of account bytes.
+
+```bash
+cd bn254-decision-bench/sbf/plonk-direct
+cargo run --example export_rows --no-default-features -- \
+    --fixtures-root "$PWD/../../plonk-fixtures/zolana-shapes" --reseal
+```
+
+That prints `EXPORT_EXPECTED_SOURCES`, the three VK digests and the five keyset
+digests. Paste them into `src/lib.rs`, then run the exporter for real with
+`--output` to write `n2.bin`, `n3.bin` and `manifest.json`, and update the
+collector's pinned lengths, digests and semantics.

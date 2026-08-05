@@ -85,8 +85,6 @@ fn main() {
     println!("# BN254 decision table, transaction CU\n");
     println!("Syscall core from the committed runtime schedule, plus the measured");
     println!("guest-side sBPF residual. Core is a tariff and is identical on every host.\n");
-    println!("A cell shown as `N +?` has no residual measurement and is core only, so it");
-    println!("is a lower bound. See CAPTURE-HOST-REQUIREMENTS.md for why.\n");
     print!("| Scenario |");
     for column in ColumnId::ALL {
         print!(" {} |", column.label());

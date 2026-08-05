@@ -30,6 +30,8 @@ use {
 const SAMPLE_COUNT: u64 = 2;
 const INPUT_PDA_SEED: &[u8] = b"plonk-input-v1";
 const REGISTRY_PDA_SEED: &[u8] = b"bn254-b5-vk-registry-v3";
+const REGISTRY_HEADER_BYTES: usize = 80;
+const REGISTRY_ENTRY_BYTES: usize = 32 + 128 + 37_584;
 const GROTH_KEYSET_DOMAIN: &[u8] = b"agave:bn254:b5:keyset:v3";
 const GROTH_REGISTRY_VERSION: u8 = 3;
 
@@ -77,6 +79,10 @@ struct Case {
     tag: u8,
     registry: Option<(Address, usize)>,
     setup_tag: Option<u8>,
+    /// The PLONK guest takes the two registry entry IDs in the hot instruction,
+    /// ordered tau then generator. They exist only after initialization, so the
+    /// setup transaction reads them back out of the account.
+    hot_registry_ids: bool,
 }
 
 fn parse_cli() -> Result<Cli, String> {
@@ -208,7 +214,7 @@ fn groth_registry_material(data: &[u8]) -> Result<([u8; 32], usize), String> {
 fn plonk_metadata(dir: &Path, proof_count: u32) -> Result<PlonkMaterial, String> {
     let metadata_path = dir.join("manifest.json");
     let metadata_bytes = read(&metadata_path)?;
-    if digest(&metadata_bytes) != "7a48e0a7631ae55da0502074b8ae9efad4bf305fad65ce51b63d8e9f26b8b38b"
+    if digest(&metadata_bytes) != "e0029065e7450f1987fab16163584381970cb57af60712a08280cac4c0012fc8"
     {
         return Err("canonical PLONK exporter manifest digest changed".into());
     }
@@ -216,9 +222,11 @@ fn plonk_metadata(dir: &Path, proof_count: u32) -> Result<PlonkMaterial, String>
         .map_err(|error| format!("PLONK exporter manifest JSON: {error}"))?;
     if metadata.schema != "helius.bn254-decision.plonk-direct-test-exceptions.v1"
         || metadata.semantics
-            != "canonical committed Zolana snarkjs mul1/mul2/mul3 test exceptions; not fresh or production proofs"
+            != "committed snarkjs PLONK fixtures shaped like zolana transact: one public \
+signal, Poseidon chain over (nIn, nOut) at 1_1, 2_2, 2_3, distinct keys over one SRS; \
+not production proofs"
         || metadata.source_set_sha256
-            != "a9a1f8411ff1793d3e7679f3ae3158100a930aa91b7c21ffbb91742723b1fd17"
+            != "be0d2d01245e8ef0bac319a60033ce96d64dddb39a6431d9ed4e4e2c7042dd73"
     {
         return Err("PLONK exporter manifest schema changed".into());
     }
@@ -228,12 +236,12 @@ fn plonk_metadata(dir: &Path, proof_count: u32) -> Result<PlonkMaterial, String>
         .ok_or("PLONK exporter omitted requested row")?;
     let (expected_length, expected_sha256) = match proof_count {
         2 => (
-            3_340,
-            "52021a8bc72f6249a298cee84067172ecefefd27c4b3eb9b558336232fcb592f",
+            3_308,
+            "0596581e68c6f23f422ff2932f6d66c8bea7b92d2b21ce937507ee1df9bfb88c",
         ),
         3 => (
-            5_052,
-            "e4d65c42220173b6d12d2c3e85a2bef999ff78357b4038b17cb363b19c1d7cef",
+            4_956,
+            "c2a0a59915ef6de40645737c61f98b5e82856638150d5d073d5909510ec71b9a",
         ),
         _ => return Err("canonical PLONK row proof count changed".into()),
     };
@@ -322,6 +330,7 @@ fn build_case(cli: &Cli, request: &ExecutionRequest) -> Result<Case, String> {
             tag: 0,
             registry: None,
             setup_tag: None,
+            hot_registry_ids: false,
         });
     }
 
@@ -350,6 +359,7 @@ fn build_case(cli: &Cli, request: &ExecutionRequest) -> Result<Case, String> {
             },
             registry: registry_needed.then_some((registry_address, registry_len)),
             setup_tag: registry_needed.then_some(5),
+            hot_registry_ids: false,
         });
     }
 
@@ -379,6 +389,7 @@ fn build_case(cli: &Cli, request: &ExecutionRequest) -> Result<Case, String> {
         },
         registry: registry_needed.then_some((registry_address, registry_len)),
         setup_tag: registry_needed.then_some(5),
+        hot_registry_ids: registry_needed,
     })
 }
 
@@ -392,7 +403,12 @@ fn account(data: Vec<u8>, owner: Address) -> Account {
     }
 }
 
-fn instruction(case: &Case, tag: u8, registry_writable: bool) -> Instruction {
+fn instruction(
+    case: &Case,
+    tag: u8,
+    registry_writable: bool,
+    registry_ids: &[[u8; 32]],
+) -> Instruction {
     let mut accounts = Vec::new();
     if let Some((registry, _)) = case.registry {
         accounts.push(AccountMeta {
@@ -406,10 +422,14 @@ fn instruction(case: &Case, tag: u8, registry_writable: bool) -> Instruction {
         is_signer: false,
         is_writable: false,
     });
+    let mut data = vec![tag];
+    for id in registry_ids {
+        data.extend_from_slice(id);
+    }
     Instruction {
         program_id: case.program_id,
         accounts,
-        data: vec![tag],
+        data,
     }
 }
 
@@ -552,7 +572,9 @@ fn require_b5_dispatch_attestation(snapshot: &ObserverSnapshot) -> Result<(), St
     Ok(())
 }
 
-fn setup_svm(case: &Case) -> Result<LiteSVM, String> {
+/// Returns the SVM plus the registry entry IDs the hot instruction needs, in
+/// the order the guest reads them.
+fn setup_svm(case: &Case) -> Result<(LiteSVM, Vec<[u8; 32]>), String> {
     let mut svm = new_litesvm_with_decision_syscalls();
     let program = read(&case.program_path)?;
     svm.add_program(case.program_id, &program)
@@ -572,6 +594,7 @@ fn setup_svm(case: &Case) -> Result<LiteSVM, String> {
                 case,
                 case.setup_tag.ok_or("registry has no setup tag")?,
                 true,
+                &[],
             ),
         )?;
         let setup = observer_snapshot();
@@ -608,17 +631,39 @@ fn setup_svm(case: &Case) -> Result<LiteSVM, String> {
             eprintln!("GROTH_SEAL n={n} k={k} address={} digest={} vk={} ids={}", hex::encode(address.as_array()), hex::encode(&registry.data[48..80]), hex::encode(vk_digests.concat()), hex::encode(ids.concat()));
         }
     }
-    Ok(svm)
+    let hot_ids = match case.registry {
+        Some((address, _)) if case.hot_registry_ids => {
+            let registry = svm
+                .get_account(&address)
+                .ok_or("initialized registry account disappeared")?;
+            // Entry 1 is tau and entry 0 the generator, and the guest reads them
+            // in that order. Anything else fails its index-prefix check rather
+            // than verifying against the wrong source.
+            [1usize, 0]
+                .iter()
+                .map(|index| {
+                    let start = REGISTRY_HEADER_BYTES + index * REGISTRY_ENTRY_BYTES;
+                    registry
+                        .data
+                        .get(start..start + 32)
+                        .and_then(|id| <[u8; 32]>::try_from(id).ok())
+                        .ok_or("registry account is shorter than its entry table")
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => Vec::new(),
+    };
+    Ok((svm, hot_ids))
 }
 
 fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String> {
     let case = build_case(cli, request)?;
     let program_bytes = read(&case.program_path)?;
-    let mut svm = setup_svm(&case)?;
+    let (mut svm, registry_ids) = setup_svm(&case)?;
     let mut observations = Vec::new();
     for _ in 0..SAMPLE_COUNT {
         reset_observers();
-        let metadata = send(&mut svm, instruction(&case, case.tag, false))?;
+        let metadata = send(&mut svm, instruction(&case, case.tag, false, &registry_ids))?;
         let snapshot = observer_snapshot();
         require_b5_dispatch_attestation(&snapshot)?;
         let observed_trace = trace(&snapshot)?;
@@ -643,7 +688,7 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
     let mut negative_case = case.clone();
     let index = negative_case.fixture_data.len() / 2;
     negative_case.fixture_data[index] ^= 1;
-    let mut negative_svm = setup_svm(&case)?;
+    let (mut negative_svm, negative_ids) = setup_svm(&case)?;
     negative_svm
         .set_account(
             negative_case.fixture_address,
@@ -653,7 +698,7 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
     reset_observers();
     if send(
         &mut negative_svm,
-        instruction(&negative_case, negative_case.tag, false),
+        instruction(&negative_case, negative_case.tag, false, &negative_ids),
     )
     .is_ok()
     {

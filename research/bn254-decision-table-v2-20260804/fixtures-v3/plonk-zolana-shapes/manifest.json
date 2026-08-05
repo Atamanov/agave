@@ -1,0 +1,23 @@
+{
+  "rows": {
+    "n2": {
+      "input_digest": "8b965f9a421605e6c66e435f4aaa7d04434572335084b274aeafd453005baf4b",
+      "length": 3308,
+      "path": "n2.bin",
+      "registry_keyset_digest_v3": "fcd736e31b148aafd734bf3417b5c8dbfc977792f6a690019955241fac844305",
+      "registry_len": 75568,
+      "sha256": "0596581e68c6f23f422ff2932f6d66c8bea7b92d2b21ce937507ee1df9bfb88c"
+    },
+    "n3": {
+      "input_digest": "4c9da2242e416b528b923e76326b1bc5d3e0e614d624384afee630f7346a6bb1",
+      "length": 4956,
+      "path": "n3.bin",
+      "registry_keyset_digest_v3": "fcd736e31b148aafd734bf3417b5c8dbfc977792f6a690019955241fac844305",
+      "registry_len": 75568,
+      "sha256": "c2a0a59915ef6de40645737c61f98b5e82856638150d5d073d5909510ec71b9a"
+    }
+  },
+  "schema": "helius.bn254-decision.plonk-direct-test-exceptions.v1",
+  "semantics": "committed snarkjs PLONK fixtures shaped like zolana transact: one public signal, Poseidon chain over (nIn, nOut) at 1_1, 2_2, 2_3, distinct keys over one SRS; not production proofs",
+  "source_set_sha256": "be0d2d01245e8ef0bac319a60033ce96d64dddb39a6431d9ed4e4e2c7042dd73"
+}

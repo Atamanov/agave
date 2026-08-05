@@ -31,10 +31,10 @@ impl RowId {
             Self::Groth16N2DistinctVk => "2 real Zolana Groth16 proofs — distinct VKs",
             Self::Groth16N3DistinctVk => "3 real Zolana Groth16 proofs — distinct VKs",
             Self::PlonkN2DistinctVkSharedSrs => {
-                "2 PLONK canonical committed test exceptions — distinct VKs, shared SRS"
+                "2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS"
             }
             Self::PlonkN3DistinctVkSharedSrs => {
-                "3 PLONK canonical committed test exceptions — distinct VKs, shared SRS"
+                "3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS"
             }
         }
     }

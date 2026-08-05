@@ -63,7 +63,7 @@ print(json.dumps({
 PY
         cell=$(./target/debug/solana-bn254-decision-collector \
             --workspace-root . --program-dir "$PROGS" \
-            --plonk-fixture-dir "$RESEARCH/fixtures-v3/plonk-test-exceptions" \
+            --plonk-fixture-dir "$RESEARCH/fixtures-v3/plonk-zolana-shapes" \
             --runtime-revision "$REV" < /tmp/cell-req.json 2>/dev/null)
         if [ -n "$cell" ]; then
             cu=$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['non_core_transaction_cu'])" "$cell")
