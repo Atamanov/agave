@@ -65,6 +65,13 @@ use {
     not(feature = "backend-b3-mcl")
 ))]
 pub mod bn254_registry;
+#[cfg(all(
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+pub mod bn254_prepared;
 mod cpi;
 mod logging;
 mod mem_ops;
@@ -563,6 +570,24 @@ pub fn create_program_runtime_environment(
             enable_alt_bn128_batch_syscalls,
             "sol_alt_bn128_trusted_gt_multiexp",
             SyscallAltBn128TrustedGtMultiexp
+        )?;
+        register_feature_gated_function!(
+            result,
+            enable_alt_bn128_batch_syscalls,
+            "sol_alt_bn128_g2_prepare",
+            SyscallAltBn128G2Prepare
+        )?;
+        register_feature_gated_function!(
+            result,
+            enable_alt_bn128_batch_syscalls,
+            "sol_alt_bn128_pairing_check_prepared",
+            SyscallAltBn128PairingCheckPrepared
+        )?;
+        register_feature_gated_function!(
+            result,
+            enable_alt_bn128_batch_syscalls,
+            "sol_alt_bn128_pairing_map_prepared",
+            SyscallAltBn128PairingMapPrepared
         )?;
     }
     register_feature_gated_function!(
@@ -2844,6 +2869,34 @@ fn alt_bn128_pairing_cost(
         )
 }
 
+/// Charges a mixed pairing whose prepared operands are caller-supplied wire
+/// blobs. On top of the registered-pair subgroup credit, a prepared pair
+/// skips all G2 line computation (credited) but pays the blob restore
+/// (charged). Both new constants are UNMEASURED; see `execution_budget.rs`.
+#[cfg(all(
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+fn alt_bn128_pairing_cost_prepared(
+    execution_cost: &SVMTransactionExecutionCost,
+    full_pairs: u64,
+    prepared_pairs: u64,
+) -> u64 {
+    alt_bn128_pairing_cost(execution_cost, full_pairs, prepared_pairs)
+        .saturating_sub(
+            execution_cost
+                .alt_bn128_g2_line_prep_credit_cost
+                .saturating_mul(prepared_pairs),
+        )
+        .saturating_add(
+            execution_cost
+                .alt_bn128_prepared_g2_restore_cost
+                .saturating_mul(prepared_pairs),
+        )
+}
+
 #[derive(Clone, Copy)]
 enum EmptyInput {
     Allow,
@@ -3402,6 +3455,285 @@ declare_builtin_function!(
             let result: &mut PodGtElement = map(result_addr)?;
         );
         *result = target;
+        Ok(SUCCESS)
+    }
+);
+
+#[cfg(all(
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+declare_builtin_function!(
+    /// Fully validate one canonical 128-byte G2 point (coordinates, curve,
+    /// r-order subgroup, no infinity) and write its 16,712-byte prepared wire
+    /// blob to `prepared_out_addr`. The runtime keeps no state: the caller
+    /// stores the blob and vouches for it on later prepared pairing calls.
+    SyscallAltBn128G2Prepare,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        packed_shape: u64,
+        g2_source_addr: u64,
+        prepared_out_addr: u64,
+        _arg4: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use {
+            crate::bn254_prepared::{
+                PREPARED_G2_WIRE_BYTES, g2_prepare_wire, unpack_g2_prepare_shape,
+            },
+            solana_bn254_batch_syscall::PodG2Point,
+        };
+
+        let execution_cost = invoke_context.get_execution_cost();
+        // Full-validation pair price: prepare runs the subgroup check and the
+        // line schedule a full pair would run, once, at setup time.
+        let cost = execution_cost
+            .alt_bn128_g2_prepare_base_cost
+            .saturating_add(execution_cost.alt_bn128_pairing_check_per_pair_cost)
+            .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost);
+        invoke_context.compute_meter.consume_checked(cost)?;
+
+        if !unpack_g2_prepare_shape(packed_shape) {
+            return Ok(1);
+        }
+        let check_aligned = invoke_context.get_check_aligned();
+        let wire = {
+            let memory_mapping = invoke_context.memory_contexts.memory_mapping()?;
+            let source = translate_slice::<u8>(memory_mapping, g2_source_addr, 128, check_aligned)?;
+            let source: [u8; 128] = source.try_into().map_err(|_| SyscallError::InvalidLength)?;
+            match g2_prepare_wire(&PodG2Point(source)) {
+                Ok(wire) => wire,
+                Err(_) => return Ok(1),
+            }
+        };
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        translate_mut!(
+            memory_mapping,
+            check_aligned,
+            let destination: &mut [u8] = map(prepared_out_addr, PREPARED_G2_WIRE_BYTES as u64)?;
+        );
+        destination.copy_from_slice(&wire);
+        Ok(SUCCESS)
+    }
+);
+
+#[cfg(all(
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+declare_builtin_function!(
+    /// Mixed pairing verdict over full pairs and caller-supplied prepared
+    /// wire blobs, compared against the GT identity, or, when `target_addr`
+    /// is nonzero, against the caller's 384-byte canonical target.
+    ///
+    /// Prepared operands skip the G2 subgroup check and line preparation.
+    /// The runtime validates only their encoding; provenance is the calling
+    /// program's own obligation and its own risk.
+    SyscallAltBn128PairingCheckPrepared,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        packed_shape: u64,
+        full_addr: u64,
+        prepared_addr: u64,
+        target_addr: u64,
+        result_addr: u64,
+    ) -> Result<u64, Error> {
+        use {
+            crate::bn254_prepared::{
+                MAX_PREPARED_PAIRS, PAIRING_MAX_PAIRS, PREPARED_G2_WIRE_BYTES,
+                pairing_check_prepared_blobs, unpack_prepared_pairing_shape,
+            },
+            solana_bn254_batch_syscall::{
+                FQ12_BYTES, PodG1G2Pair, PodG1Point, PodG1PreparedG2Pair, PodGtElement,
+                PodPairingResult,
+            },
+        };
+
+        let Some((full_count, prepared_count)) = unpack_prepared_pairing_shape(packed_shape)
+        else {
+            return Ok(1);
+        };
+        let total = usize::from(full_count)
+            .checked_add(usize::from(prepared_count))
+            .ok_or(SyscallError::ArithmeticOverflow)?;
+        if total == 0 || total > PAIRING_MAX_PAIRS || usize::from(prepared_count) > MAX_PREPARED_PAIRS
+        {
+            return Ok(1);
+        }
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = alt_bn128_pairing_cost_prepared(
+            execution_cost,
+            full_count.into(),
+            prepared_count.into(),
+        );
+        invoke_context.compute_meter.consume_checked(cost)?;
+        let check_aligned = invoke_context.get_check_aligned();
+        let verdict = {
+            let memory_mapping = invoke_context.memory_contexts.memory_mapping()?;
+            let full: &[PodG1G2Pair] = if full_count == 0 {
+                &[]
+            } else {
+                translate_slice::<PodG1G2Pair>(
+                    memory_mapping,
+                    full_addr,
+                    full_count.into(),
+                    check_aligned,
+                )?
+            };
+            let records: &[PodG1PreparedG2Pair] = if prepared_count == 0 {
+                &[]
+            } else {
+                translate_slice::<PodG1PreparedG2Pair>(
+                    memory_mapping,
+                    prepared_addr,
+                    prepared_count.into(),
+                    check_aligned,
+                )?
+            };
+            let mut prepared: Vec<(PodG1Point, &[u8])> = Vec::with_capacity(records.len());
+            for record in records {
+                if record.prepared.blob_len() != PREPARED_G2_WIRE_BYTES as u64 {
+                    return Ok(1);
+                }
+                let blob = translate_slice::<u8>(
+                    memory_mapping,
+                    record.prepared.addr(),
+                    PREPARED_G2_WIRE_BYTES as u64,
+                    check_aligned,
+                )?;
+                prepared.push((record.g1, blob));
+            }
+            let target: Option<PodGtElement> = if target_addr == 0 {
+                None
+            } else {
+                let bytes = translate_slice::<u8>(
+                    memory_mapping,
+                    target_addr,
+                    FQ12_BYTES as u64,
+                    check_aligned,
+                )?;
+                Some(PodGtElement(
+                    bytes.try_into().map_err(|_| SyscallError::InvalidLength)?,
+                ))
+            };
+            match pairing_check_prepared_blobs(full, &prepared, target.as_ref()) {
+                Ok(verdict) => verdict,
+                Err(_) => return Ok(1),
+            }
+        };
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        translate_mut!(
+            memory_mapping,
+            check_aligned,
+            let result: &mut PodPairingResult = map(result_addr)?;
+        );
+        *result = PodPairingResult::from_verdict(verdict);
+        Ok(SUCCESS)
+    }
+);
+
+#[cfg(all(
+    any(feature = "backend-b4-helius", feature = "backend-b5-helius-ifma"),
+    not(feature = "backend-b1-arkworks"),
+    not(feature = "backend-b2-arkworks-optimized"),
+    not(feature = "backend-b3-mcl")
+))]
+declare_builtin_function!(
+    /// Mixed pairing product over full pairs and caller-supplied prepared
+    /// wire blobs, mapped to its canonical post-final-exponentiation
+    /// encoding. Validation matches `sol_alt_bn128_pairing_check_prepared`
+    /// with the smaller 18-pair map cap.
+    SyscallAltBn128PairingMapPrepared,
+    fn rust(
+        invoke_context: &mut InvokeContext<'_, '_>,
+        packed_shape: u64,
+        full_addr: u64,
+        prepared_addr: u64,
+        result_addr: u64,
+        _arg5: u64,
+    ) -> Result<u64, Error> {
+        use {
+            crate::bn254_prepared::{
+                MAX_PREPARED_PAIRS, PAIRING_MAP_MAX_PAIRS, PREPARED_G2_WIRE_BYTES,
+                pairing_map_prepared_blobs, unpack_prepared_pairing_shape,
+            },
+            solana_bn254_batch_syscall::{
+                PodG1G2Pair, PodG1Point, PodG1PreparedG2Pair, PodGtElement,
+            },
+        };
+
+        let Some((full_count, prepared_count)) = unpack_prepared_pairing_shape(packed_shape)
+        else {
+            return Ok(1);
+        };
+        let total = usize::from(full_count)
+            .checked_add(usize::from(prepared_count))
+            .ok_or(SyscallError::ArithmeticOverflow)?;
+        if total == 0
+            || total > PAIRING_MAP_MAX_PAIRS
+            || usize::from(prepared_count) > MAX_PREPARED_PAIRS
+        {
+            return Ok(1);
+        }
+        let execution_cost = invoke_context.get_execution_cost();
+        let cost = alt_bn128_pairing_cost_prepared(
+            execution_cost,
+            full_count.into(),
+            prepared_count.into(),
+        );
+        invoke_context.compute_meter.consume_checked(cost)?;
+        let check_aligned = invoke_context.get_check_aligned();
+        let mapped = {
+            let memory_mapping = invoke_context.memory_contexts.memory_mapping()?;
+            let full: &[PodG1G2Pair] = if full_count == 0 {
+                &[]
+            } else {
+                translate_slice::<PodG1G2Pair>(
+                    memory_mapping,
+                    full_addr,
+                    full_count.into(),
+                    check_aligned,
+                )?
+            };
+            let records: &[PodG1PreparedG2Pair] = if prepared_count == 0 {
+                &[]
+            } else {
+                translate_slice::<PodG1PreparedG2Pair>(
+                    memory_mapping,
+                    prepared_addr,
+                    prepared_count.into(),
+                    check_aligned,
+                )?
+            };
+            let mut prepared: Vec<(PodG1Point, &[u8])> = Vec::with_capacity(records.len());
+            for record in records {
+                if record.prepared.blob_len() != PREPARED_G2_WIRE_BYTES as u64 {
+                    return Ok(1);
+                }
+                let blob = translate_slice::<u8>(
+                    memory_mapping,
+                    record.prepared.addr(),
+                    PREPARED_G2_WIRE_BYTES as u64,
+                    check_aligned,
+                )?;
+                prepared.push((record.g1, blob));
+            }
+            match pairing_map_prepared_blobs(full, &prepared) {
+                Ok(mapped) => mapped,
+                Err(_) => return Ok(1),
+            }
+        };
+        let memory_mapping = invoke_context.memory_contexts.memory_mapping_mut()?;
+        translate_mut!(
+            memory_mapping,
+            check_aligned,
+            let result: &mut PodGtElement = map(result_addr)?;
+        );
+        *result = mapped;
         Ok(SUCCESS)
     }
 );

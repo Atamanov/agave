@@ -320,7 +320,7 @@ fn validate_prepared_counts(
 fn validate_prepared_refs(prepared: &[PodG1PreparedG2Pair]) -> Result<(), AltBn128BatchError> {
     if prepared
         .iter()
-        .any(|pair| pair.prepared.len() != PREPARED_G2_WIRE_BYTES as u64)
+        .any(|pair| pair.prepared.blob_len() != PREPARED_G2_WIRE_BYTES as u64)
     {
         return Err(AltBn128BatchError::InvalidPreparedBlob);
     }

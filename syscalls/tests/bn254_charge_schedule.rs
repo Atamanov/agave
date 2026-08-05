@@ -145,6 +145,58 @@ fn a_registered_pair_is_cheaper_than_a_full_pair() {
     }
 }
 
+/// Mirrors `alt_bn128_pairing_cost_prepared`: the registered credit plus the
+/// line-preparation credit, minus nothing, plus the per-blob restore charge.
+fn prepared_pairing_charge(cost: &SVMTransactionExecutionCost, full: u64, prepared: u64) -> u64 {
+    registered_pairing_charge(cost, full, prepared)
+        - cost.alt_bn128_g2_line_prep_credit_cost * prepared
+        + cost.alt_bn128_prepared_g2_restore_cost * prepared
+}
+
+/// A prepared pair skips the subgroup check AND line preparation, so it must
+/// undercut a registered pair, which must undercut a full pair; the combined
+/// credit must never exceed the per-pair price, or a shape could go free.
+#[test]
+fn a_prepared_pair_undercuts_registered_and_never_goes_free() {
+    let cost = SVMTransactionExecutionCost::default();
+    let net_credit = cost.alt_bn128_g2_subgroup_check_cost
+        + cost.alt_bn128_g2_line_prep_credit_cost
+        - cost.alt_bn128_prepared_g2_restore_cost;
+    assert!(net_credit > cost.alt_bn128_g2_subgroup_check_cost);
+    assert!(
+        cost.alt_bn128_g2_subgroup_check_cost + cost.alt_bn128_g2_line_prep_credit_cost
+            < cost.alt_bn128_pairing_check_per_pair_cost
+    );
+    for total in 1..24u64 {
+        for prepared in 1..=total.min(16) {
+            let full = total - prepared;
+            let mixed = prepared_pairing_charge(&cost, full, prepared);
+            assert!(mixed < registered_pairing_charge(&cost, full, prepared));
+            assert!(mixed > cost.alt_bn128_pairing_check_base_cost.saturating_sub(1));
+            assert_eq!(
+                registered_pairing_charge(&cost, full, prepared) - mixed,
+                (cost.alt_bn128_g2_line_prep_credit_cost
+                    - cost.alt_bn128_prepared_g2_restore_cost)
+                    * prepared
+            );
+        }
+    }
+}
+
+/// UNMEASURED. Line preparation is not separable in any committed capture and
+/// no standalone prepare/restore capture exists yet. Values are deliberate
+/// under-credits/over-charges; `helius-bn254/benches/prepared.rs` produces the
+/// curves a re-fit needs. This test exists to fail when someone lands real
+/// numbers, so the placeholders cannot survive unnoticed. Update it in the
+/// same change.
+#[test]
+fn provisional_prepared_operand_schedule() {
+    let cost = SVMTransactionExecutionCost::default();
+    assert_eq!(cost.alt_bn128_g2_line_prep_credit_cost, 900);
+    assert_eq!(cost.alt_bn128_prepared_g2_restore_cost, 300);
+    assert_eq!(cost.alt_bn128_g2_prepare_base_cost, 700);
+}
+
 /// PROVISIONAL. No x86 measurement exists for GT multiexponentiation. These
 /// values are ~5x the only calibration we have (arm64 p50 9.1k / 19.0k / 34.3k
 /// CU at 1 / 2 / 3 targets), held high so the schedule stays safe until an x86

@@ -26,12 +26,23 @@ use {
         },
     },
     solana_pubkey_v4::Pubkey as PubkeyV4,
-    solana_syscalls::bn254_registry::{
-        self as registry, REGISTRY_MAX_G2_ENTRIES, REGISTRY_MAX_GT_ENTRIES,
-        REGISTRY_MAX_REGISTERED_PAIRS, RegistryAccountView, pairing_check_registry_account,
-        prepare_registry_account_bytes, trusted_gt_multiexp_registry_account,
+    solana_syscalls::{
+        bn254_prepared::{
+            self as prepared, MAX_PREPARED_PAIRS, PREPARED_G2_WIRE_BYTES,
+            pairing_check_prepared_blobs, pairing_map_prepared_blobs,
+        },
+        bn254_registry::{
+            self as registry, REGISTRY_MAX_G2_ENTRIES, REGISTRY_MAX_GT_ENTRIES,
+            REGISTRY_MAX_REGISTERED_PAIRS, RegistryAccountView, pairing_check_registry_account,
+            prepare_registry_account_bytes, trusted_gt_multiexp_registry_account,
+        },
     },
     std::sync::OnceLock,
+};
+
+pub use prepared::{
+    PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS, pack_g2_prepare_shape, pack_prepared_pairing_shape,
+    prepared_blob_header,
 };
 
 pub use registry::{
@@ -47,6 +58,9 @@ pub const CURRENT_MSM_PER_POINT_CU: u64 = 3_322;
 pub const CURRENT_PAIRING_BASE_CU: u64 = 17_246;
 pub const CURRENT_PAIRING_PER_PAIR_CU: u64 = 5_741;
 pub const CURRENT_G2_SUBGROUP_CHECK_CU: u64 = 3_595;
+pub const CURRENT_G2_LINE_PREP_CREDIT_CU: u64 = 900;
+pub const CURRENT_PREPARED_G2_RESTORE_CU: u64 = 300;
+pub const CURRENT_G2_PREPARE_BASE_CU: u64 = 700;
 pub const CURRENT_GROUP_OP_G1_ADD_CU: u64 = 334;
 pub const CURRENT_GROUP_OP_G1_MUL_CU: u64 = 3_840;
 pub const CURRENT_GROUP_OP_PAIRING_FIRST_CU: u64 = 36_364;
@@ -140,6 +154,20 @@ pub fn current_registered_pairing_cu(full: u64, registered: u64) -> u64 {
 
 pub fn current_trusted_gt_multiexp_cu(targets: u64) -> u64 {
     CURRENT_PAIRING_BASE_CU.saturating_add(CURRENT_PAIRING_PER_PAIR_CU.saturating_mul(targets))
+}
+
+/// A prepared pair takes the registered credit plus the line-preparation
+/// credit and pays the wire-blob restore.
+pub fn current_prepared_pairing_cu(full: u64, prepared: u64) -> u64 {
+    current_registered_pairing_cu(full, prepared)
+        .saturating_sub(CURRENT_G2_LINE_PREP_CREDIT_CU.saturating_mul(prepared))
+        .saturating_add(CURRENT_PREPARED_G2_RESTORE_CU.saturating_mul(prepared))
+}
+
+pub fn current_g2_prepare_cu() -> u64 {
+    CURRENT_G2_PREPARE_BASE_CU
+        .saturating_add(CURRENT_PAIRING_PER_PAIR_CU)
+        .saturating_add(CURRENT_G2_SUBGROUP_CHECK_CU)
 }
 
 pub fn current_registry_init_cu(g2_entries: u64, gt_entries: u64) -> u64 {
@@ -309,6 +337,15 @@ fn with_decision_syscalls(svm: LiteSVM) -> LiteSVM {
         .with_custom_syscall(
             "sol_alt_bn128_trusted_gt_multiexp",
             SyscallTrustedGtMultiexp::vm,
+        )
+        .with_custom_syscall("sol_alt_bn128_g2_prepare", SyscallG2Prepare::vm)
+        .with_custom_syscall(
+            "sol_alt_bn128_pairing_check_prepared",
+            SyscallPairingCheckPrepared::vm,
+        )
+        .with_custom_syscall(
+            "sol_alt_bn128_pairing_map_prepared",
+            SyscallPairingMapPrepared::vm,
         )
 }
 
@@ -669,6 +706,176 @@ declare_builtin_function!(
         };
         drop(account);
         translate_mut(memory_mapping, result_addr, FQ12_BYTES as u64)?.copy_from_slice(&result.0);
+        Ok(0)
+    }
+);
+
+declare_builtin_function!(
+    SyscallG2Prepare,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        packed_shape: u64,
+        g2_source_addr: u64,
+        prepared_out_addr: u64,
+        _arg4: u64,
+        _arg5: u64,
+        memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        invoke_context.consume_checked(current_g2_prepare_cu())?;
+        if !prepared::unpack_g2_prepare_shape(packed_shape) {
+            return Ok(1);
+        }
+        let source = translate(memory_mapping, g2_source_addr, G2_BYTES as u64)?;
+        let source: [u8; G2_BYTES] = source.try_into()?;
+        let Ok(wire) = prepared::g2_prepare_wire(&solana_bn254_batch_syscall::PodG2Point(source))
+        else {
+            return Ok(1);
+        };
+        translate_mut(memory_mapping, prepared_out_addr, PREPARED_G2_WIRE_BYTES as u64)?
+            .copy_from_slice(&wire);
+        Ok(0)
+    }
+);
+
+type PreparedOperands<'a> = (&'a [PodG1G2Pair], Vec<(PodG1Point, &'a [u8])>);
+
+fn translate_prepared_operands<'a>(
+    memory_mapping: &'a MemoryMapping,
+    full_addr: u64,
+    prepared_addr: u64,
+    full_count: u16,
+    prepared_count: u16,
+) -> Result<PreparedOperands<'a>, Box<dyn std::error::Error>> {
+    let full: &[PodG1G2Pair] = if full_count == 0 {
+        &[]
+    } else {
+        pod_slice(translate(
+            memory_mapping,
+            full_addr,
+            byte_len(u64::from(full_count), PAIR_BYTES)?,
+        )?)?
+    };
+    let records: &[solana_bn254_batch_syscall::PodG1PreparedG2Pair] = if prepared_count == 0 {
+        &[]
+    } else {
+        pod_slice(translate(
+            memory_mapping,
+            prepared_addr,
+            byte_len(
+                u64::from(prepared_count),
+                core::mem::size_of::<solana_bn254_batch_syscall::PodG1PreparedG2Pair>(),
+            )?,
+        )?)?
+    };
+    let mut prepared_pairs = Vec::with_capacity(records.len());
+    for record in records {
+        if record.prepared.blob_len() != PREPARED_G2_WIRE_BYTES as u64 {
+            return Err("prepared blob length mismatch".into());
+        }
+        let blob = translate(
+            memory_mapping,
+            record.prepared.addr(),
+            PREPARED_G2_WIRE_BYTES as u64,
+        )?;
+        prepared_pairs.push((record.g1, blob));
+    }
+    Ok((full, prepared_pairs))
+}
+
+declare_builtin_function!(
+    SyscallPairingCheckPrepared,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        packed_shape: u64,
+        full_addr: u64,
+        prepared_addr: u64,
+        target_addr: u64,
+        result_addr: u64,
+        memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let Some((full_count, prepared_count)) =
+            prepared::unpack_prepared_pairing_shape(packed_shape)
+        else {
+            return Ok(1);
+        };
+        let total = usize::from(full_count)
+            .checked_add(usize::from(prepared_count))
+            .ok_or("pair count overflow")?;
+        if total == 0 || total > PAIRING_MAX_PAIRS || usize::from(prepared_count) > MAX_PREPARED_PAIRS
+        {
+            return Ok(1);
+        }
+        invoke_context.consume_checked(current_prepared_pairing_cu(
+            u64::from(full_count),
+            u64::from(prepared_count),
+        ))?;
+        let Ok((full, prepared_pairs)) = translate_prepared_operands(
+            memory_mapping,
+            full_addr,
+            prepared_addr,
+            full_count,
+            prepared_count,
+        ) else {
+            return Ok(1);
+        };
+        let target = if target_addr == 0 {
+            None
+        } else {
+            let bytes = translate(memory_mapping, target_addr, FQ12_BYTES as u64)?;
+            Some(solana_bn254_batch_syscall::PodGtElement(bytes.try_into()?))
+        };
+        let Ok(verdict) = pairing_check_prepared_blobs(full, &prepared_pairs, target.as_ref())
+        else {
+            return Ok(1);
+        };
+        translate_mut(memory_mapping, result_addr, 32)?
+            .copy_from_slice(&PodPairingResult::from_verdict(verdict).0);
+        Ok(0)
+    }
+);
+
+declare_builtin_function!(
+    SyscallPairingMapPrepared,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        packed_shape: u64,
+        full_addr: u64,
+        prepared_addr: u64,
+        result_addr: u64,
+        _arg5: u64,
+        memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let Some((full_count, prepared_count)) =
+            prepared::unpack_prepared_pairing_shape(packed_shape)
+        else {
+            return Ok(1);
+        };
+        let total = usize::from(full_count)
+            .checked_add(usize::from(prepared_count))
+            .ok_or("pair count overflow")?;
+        if total == 0
+            || total > PAIRING_MAP_MAX_PAIRS
+            || usize::from(prepared_count) > MAX_PREPARED_PAIRS
+        {
+            return Ok(1);
+        }
+        invoke_context.consume_checked(current_prepared_pairing_cu(
+            u64::from(full_count),
+            u64::from(prepared_count),
+        ))?;
+        let Ok((full, prepared_pairs)) = translate_prepared_operands(
+            memory_mapping,
+            full_addr,
+            prepared_addr,
+            full_count,
+            prepared_count,
+        ) else {
+            return Ok(1);
+        };
+        let Ok(mapped) = pairing_map_prepared_blobs(full, &prepared_pairs) else {
+            return Ok(1);
+        };
+        translate_mut(memory_mapping, result_addr, FQ12_BYTES as u64)?.copy_from_slice(&mapped.0);
         Ok(0)
     }
 );

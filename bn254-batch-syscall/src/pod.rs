@@ -208,7 +208,7 @@ impl PodPreparedRef {
         u64::from_le_bytes(self.addr_le)
     }
 
-    pub const fn len(&self) -> u64 {
+    pub const fn blob_len(&self) -> u64 {
         u64::from_le_bytes(self.len_le)
     }
 }
