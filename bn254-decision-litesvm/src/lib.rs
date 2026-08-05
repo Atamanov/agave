@@ -16,8 +16,10 @@ use {
     solana_bn254_batch_syscall::{
         FQ12_BYTES, FR_MAX_ELEMS, G1_BYTES, G2_BYTES, PAIR_BYTES, PodG1G2Pair, PodG1Point,
         PodG1RegisteredG2Pair, PodPairingResult, PodScalar, PodTrustedGtExponent, SCALAR_BYTES,
-        Version, alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
-        alt_bn128_pairing_map, research_observer as backend_observer,
+        PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput, Version,
+        alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check, alt_bn128_pairing_map,
+        alt_bn128_snarkjs_plonk_multi_vk_batch_reduce, research_observer as backend_observer,
+        unpack_snarkjs_plonk_multi_vk_shape,
     },
     solana_program_runtime::{
         invoke_context::InvokeContext,
@@ -81,6 +83,14 @@ pub struct RegisteredPairingObservation {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PlonkMultiVkReduceObservation {
+    pub contexts: u64,
+    pub proofs: u64,
+    pub public_inputs: u64,
+    pub charged_cu: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FrLincombObservation {
     pub terms: u64,
     pub charged_cu: u64,
@@ -111,6 +121,7 @@ pub struct ObserverSnapshot {
     pub registered_pairing_checks: Vec<RegisteredPairingObservation>,
     pub trusted_gt_multiexps: Vec<TrustedGtObservation>,
     pub fr_lincombs: Vec<FrLincombObservation>,
+    pub plonk_multi_vk_reduces: Vec<PlonkMultiVkReduceObservation>,
     /// Setup is separate so hot-path totals can exclude it without inference.
     pub registry_init: RegistryInitObservation,
     pub standalone_subgroup_checks: u64,
@@ -151,6 +162,30 @@ pub fn current_registered_pairing_cu(full: u64, registered: u64) -> u64 {
 
 pub fn current_trusted_gt_multiexp_cu(targets: u64) -> u64 {
     CURRENT_PAIRING_BASE_CU.saturating_add(CURRENT_PAIRING_PER_PAIR_CU.saturating_mul(targets))
+}
+
+/// Charge for the atomic multi-VK snarkjs PLONK reduction, mirroring
+/// `syscalls/src/lib.rs`. The scalar half is the committed schedule; the
+/// transcript half prices the six phased keccaks the runtime replays so the
+/// guest does not have to.
+pub fn current_snarkjs_plonk_multi_vk_reduce_cu(
+    contexts: u64,
+    proofs: u64,
+    public_inputs: u64,
+) -> u64 {
+    const SCALAR_BASE: u64 = 127;
+    const SCALAR_PER_PROOF: u64 = 62;
+    const SCALAR_PER_LAGRANGE: u64 = 6;
+    let scalar = SCALAR_BASE
+        .saturating_add(SCALAR_PER_PROOF.saturating_mul(proofs))
+        .saturating_add(
+            SCALAR_PER_LAGRANGE.saturating_mul(public_inputs.saturating_add(proofs)),
+        );
+    let transcript = 200u64
+        .saturating_add(800u64.saturating_mul(contexts))
+        .saturating_add(1719u64.saturating_mul(proofs))
+        .saturating_add(32u64.saturating_mul(public_inputs));
+    scalar.saturating_add(transcript)
 }
 
 pub fn current_fr_lincomb_cu(terms: u64) -> u64 {
@@ -206,6 +241,12 @@ pub fn current_embedded_hot_core_cu(snapshot: &ObserverSnapshot) -> u64 {
                 .map(|event| event.charged_cu),
         )
         .chain(snapshot.fr_lincombs.iter().map(|event| event.charged_cu))
+        .chain(
+            snapshot
+                .plonk_multi_vk_reduces
+                .iter()
+                .map(|event| event.charged_cu),
+        )
         .chain(
             snapshot
                 .stock_group_ops
@@ -275,6 +316,19 @@ pub fn observer_snapshot() -> ObserverSnapshot {
                 charged_cu: current_trusted_gt_multiexp_cu(targets),
             })
             .collect(),
+        plonk_multi_vk_reduces: backend_observer::observed_snarkjs_plonk_multi_vk_shapes()
+            .into_iter()
+            .map(|(contexts, proofs, public_inputs)| PlonkMultiVkReduceObservation {
+                contexts,
+                proofs,
+                public_inputs,
+                charged_cu: current_snarkjs_plonk_multi_vk_reduce_cu(
+                    contexts,
+                    proofs,
+                    public_inputs,
+                ),
+            })
+            .collect(),
         fr_lincombs: backend_observer::observed_fr_lincomb_term_counts()
             .into_iter()
             .map(|terms| FrLincombObservation {
@@ -332,6 +386,10 @@ fn with_decision_syscalls(svm: LiteSVM) -> LiteSVM {
             SyscallTrustedGtMultiexp::vm,
         )
         .with_custom_syscall("sol_alt_bn128_fr_lincomb", SyscallFrLincomb::vm)
+        .with_custom_syscall(
+            "sol_alt_bn128_snarkjs_plonk_multi_vk_batch_reduce",
+            SyscallSnarkjsPlonkMultiVkBatchReduce::vm,
+        )
 }
 
 fn translate<'a>(
@@ -471,6 +529,65 @@ declare_builtin_function!(
             Ok(result) => {
                 translate_mut(memory_mapping, result_addr, SCALAR_BYTES as u64)?
                     .copy_from_slice(&result.0);
+                Ok(0)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    SyscallSnarkjsPlonkMultiVkBatchReduce,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        shape: u64,
+        contexts_addr: u64,
+        inputs_addr: u64,
+        public_inputs_addr: u64,
+        result_addr: u64,
+        memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let (num_contexts, num_proofs, num_public_inputs) =
+            unpack_snarkjs_plonk_multi_vk_shape(shape);
+        // Charged from the declared shape before any translation, as Agave does.
+        invoke_context.consume_checked(current_snarkjs_plonk_multi_vk_reduce_cu(
+            num_contexts,
+            num_proofs,
+            num_public_inputs,
+        ))?;
+        let contexts: &[PodSnarkjsPlonkMultiVkContext] = pod_slice(translate(
+            memory_mapping,
+            contexts_addr,
+            byte_len(
+                num_contexts,
+                core::mem::size_of::<PodSnarkjsPlonkMultiVkContext>(),
+            )?,
+        )?)?;
+        let inputs: &[PodSnarkjsPlonkMultiVkInput] = pod_slice(translate(
+            memory_mapping,
+            inputs_addr,
+            byte_len(
+                num_proofs,
+                core::mem::size_of::<PodSnarkjsPlonkMultiVkInput>(),
+            )?,
+        )?)?;
+        let publics: &[PodScalar] = pod_slice(translate(
+            memory_mapping,
+            public_inputs_addr,
+            byte_len(num_public_inputs, SCALAR_BYTES)?,
+        )?)?;
+        match alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
+            Version::V0,
+            contexts,
+            inputs,
+            publics,
+        ) {
+            Ok(scalars) => {
+                let bytes = byte_len(scalars.len() as u64, SCALAR_BYTES)?;
+                let out = translate_mut(memory_mapping, result_addr, bytes)?;
+                for (slot, scalar) in out.chunks_exact_mut(SCALAR_BYTES).zip(&scalars) {
+                    slot.copy_from_slice(&scalar.0);
+                }
                 Ok(0)
             }
             Err(_) => Ok(1),
@@ -745,6 +862,11 @@ mod tests {
         assert_eq!(current_trusted_gt_multiexp_cu(2), 28_728);
         assert_eq!(current_registry_init_cu(1, 1), 35_918);
         assert_eq!(current_fr_lincomb_cu(3), 4);
+        // Must equal syscalls/src/lib.rs's charge for the same shape, or the
+        // residual is measured against a price the runtime never charges.
+        // n=2: scalar 127 + 62*2 + 6*(2+2) = 275; transcript 200 + 800*2 + 1719*2 + 32*2 = 5302.
+        assert_eq!(current_snarkjs_plonk_multi_vk_reduce_cu(2, 2, 2), 5_577);
+        assert_eq!(current_snarkjs_plonk_multi_vk_reduce_cu(3, 3, 3), 8_202);
     }
 
     #[test]

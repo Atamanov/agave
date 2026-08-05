@@ -44,8 +44,34 @@ pub use crate::syscalls::{
 pub use crate::{
     backend::alt_bn128_fr_batch_invert, plonk::alt_bn128_plonk_batch_reduce,
     snarkjs_plonk::alt_bn128_snarkjs_plonk_batch_reduce,
-    snarkjs_plonk_multi_vk::alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
 };
+
+/// Recording wrapper over the host reduction, so a call is visible to the
+/// research observer the same way every other batch operation is. On SBF the
+/// runtime records it, so the re-export above is used unchanged.
+#[cfg(not(target_os = "solana"))]
+pub fn alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
+    version: Version,
+    contexts: &[PodSnarkjsPlonkMultiVkContext],
+    inputs: &[PodSnarkjsPlonkMultiVkInput],
+    public_inputs: &[PodScalar],
+) -> Result<Vec<PodScalar>, AltBn128BatchError> {
+    let result = crate::snarkjs_plonk_multi_vk::alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
+        version,
+        contexts,
+        inputs,
+        public_inputs,
+    );
+    #[cfg(feature = "research-observer")]
+    if result.is_ok() {
+        research_observer::record_snarkjs_plonk_multi_vk_reduce(
+            contexts.len(),
+            inputs.len(),
+            public_inputs.len(),
+        );
+    }
+    result
+}
 
 #[cfg(all(
     not(target_os = "solana"),

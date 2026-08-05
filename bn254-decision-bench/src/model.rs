@@ -211,6 +211,17 @@ pub struct FrLincombCall {
     pub calls: u32,
 }
 
+/// One atomic multi-VK snarkjs PLONK reduction. The runtime replays the whole
+/// transcript and returns the MSM coefficients, so the guest does none of it.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlonkMultiVkReduceCall {
+    pub contexts: u32,
+    pub proofs: u32,
+    pub public_inputs: u32,
+    pub calls: u32,
+}
+
 impl FrLincombCall {
     pub const fn one(terms: u32) -> Self {
         Self { terms, calls: 1 }
@@ -251,6 +262,9 @@ pub struct OperationTrace {
     /// Scalar inner products moved off the guest and into the runtime.
     #[serde(default)]
     pub fr_lincomb_calls: Vec<FrLincombCall>,
+    /// The whole PLONK verifier reduction, moved into the runtime.
+    #[serde(default)]
+    pub plonk_multi_vk_reduce_calls: Vec<PlonkMultiVkReduceCall>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

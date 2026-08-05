@@ -68,6 +68,28 @@ pub fn syscall_cu(
             ),
         ));
     }
+    for call in &trace.plonk_multi_vk_reduce_calls {
+        // Same formula the runtime charges: the fitted scalar schedule plus the
+        // transcript keccaks it replays on the guest's behalf.
+        let scalar = cost
+            .alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                cost.alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(u64::from(call.proofs)),
+            )
+            .saturating_add(
+                cost.alt_bn128_plonk_batch_reduce_per_lagrange_cost.saturating_mul(
+                    u64::from(call.public_inputs).saturating_add(u64::from(call.proofs)),
+                ),
+            );
+        let transcript = 200u64
+            .saturating_add(800u64.saturating_mul(u64::from(call.contexts)))
+            .saturating_add(1_719u64.saturating_mul(u64::from(call.proofs)))
+            .saturating_add(32u64.saturating_mul(u64::from(call.public_inputs)));
+        cu = cu.saturating_add(
+            u64::from(call.calls).saturating_mul(scalar.saturating_add(transcript)),
+        );
+    }
     for call in &trace.gt_target_multiexp_calls {
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
             cost.alt_bn128_gt_multiexp_base_cost.saturating_add(

@@ -21,6 +21,8 @@ use {
     },
     solana_bn254_batch_syscall::{
         PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair, PodG2Point, PodScalar,
+        PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput,
+        PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput,
     },
     solana_keccak_hasher::hashv,
 };
@@ -997,6 +999,9 @@ impl PairingContributionSink for ContributionVectors<'_> {
 /// independently derived rho into K, and concatenate their fully expanded
 /// source terms into exactly two MSM calls. No proof-local G1 operation is
 /// performed. All final handlers consume these same two pairs.
+/// Retained as the independent host oracle for [`campaign_replay_witness`].
+/// The measured batch columns reduce through [`reduced_pairs_multi_vk`].
+#[cfg(not(target_os = "solana"))]
 #[inline(never)]
 fn optimized_reduced_pairs(groups: &[Group]) -> Option<Vec<PodG1G2Pair>> {
     use solana_bn254_batch_syscall::{Version, alt_bn128_g1_msm};
@@ -1041,6 +1046,236 @@ fn optimized_reduced_pairs(groups: &[Group]) -> Option<Vec<PodG1G2Pair>> {
         return None;
     }
     drop(contributions);
+    let p = alt_bn128_g1_msm(Version::V0, &p_points, &p_scalars).ok()?;
+    let q = alt_bn128_g1_msm(Version::V0, &q_points, &q_scalars).ok()?;
+    Some(vec![
+        PodG1G2Pair { g1: p, g2: srs[1] },
+        PodG1G2Pair { g1: q, g2: srs[0] },
+    ])
+}
+
+/// Coefficients the runtime multi-VK reducer returns per context, and per
+/// proof of which the first two are the P stream.
+///
+/// The reducer folds the eight verifying-key coefficients and the context
+/// generator once per context, so its Q stream is `9*contexts + 9*proofs`
+/// where the in-guest kernel emits `18*proofs`. Those agree only while every
+/// context carries exactly one proof, which is true of every measured row.
+/// Point a batch with several proofs per key at this path and the MSM shape
+/// changes even though the verdict does not.
+const REDUCER_CONTEXT_TERMS: usize = 9;
+const REDUCER_ROW_TERMS: usize = 11;
+const REDUCER_ROW_P_TERMS: usize = 2;
+
+/// Both reducer records are close to a kilobyte, so every one of these
+/// helpers writes through a reference into heap storage. Returning one by
+/// value, or building the point arrays as literals, materializes it in the
+/// caller's frame and overflows the 4 KiB SBF stack.
+#[inline(never)]
+fn zeroed_contexts(count: usize) -> Vec<PodSnarkjsPlonkMultiVkContext> {
+    vec![
+        PodSnarkjsPlonkMultiVkContext {
+            context_index_be: [0u8; 4],
+            reserved: [0u8; 4],
+            application_context: [0u8; 32],
+            reduction: PodSnarkjsPlonkReductionContext {
+                domain_size_be: [0u8; 8],
+                num_public_inputs_be: [0u8; 4],
+                reserved: [0u8; 4],
+                omega: PodScalar([0u8; 32]),
+                k1: PodScalar([0u8; 32]),
+                k2: PodScalar([0u8; 32]),
+                transcript_vk_points: [PodG1Point([0u8; 64]); 8],
+                x_2: PodG2Point([0u8; 128]),
+            },
+            g2_gen: PodG2Point([0u8; 128]),
+        };
+        count
+    ]
+}
+
+#[inline(never)]
+fn zeroed_inputs(count: usize) -> Vec<PodSnarkjsPlonkMultiVkInput> {
+    vec![
+        PodSnarkjsPlonkMultiVkInput {
+            proof_index_be: [0u8; 4],
+            context_index_be: [0u8; 4],
+            proof: PodSnarkjsPlonkReductionInput {
+                transcript_points: [PodG1Point([0u8; 64]); 9],
+                evaluations: [PodScalar([0u8; 32]); 6],
+            },
+        };
+        count
+    ]
+}
+
+#[inline(never)]
+fn fill_multi_vk_context(
+    slot: &mut PodSnarkjsPlonkMultiVkContext,
+    index: usize,
+    group: &Group,
+) -> Option<()> {
+    let key = &group.vk;
+    slot.context_index_be = u32::try_from(index).ok()?.to_be_bytes();
+    slot.application_context = group.application_context;
+    slot.reduction.domain_size_be = key.domain_size.to_be_bytes();
+    slot.reduction.num_public_inputs_be = key.num_public_inputs.to_be_bytes();
+    slot.reduction.omega = PodScalar(authenticated_omega(key.domain_size)?);
+    slot.reduction.k1 = key.k1;
+    slot.reduction.k2 = key.k2;
+    // Canonical snarkjs transcript order (Qm,Ql,Qr,Qo,Qc,S1,S2,S3); the
+    // returned shared coefficients arrive in this same order.
+    let points = &mut slot.reduction.transcript_vk_points;
+    points[0] = key.q_m;
+    points[1] = key.q_l;
+    points[2] = key.q_r;
+    points[3] = key.q_o;
+    points[4] = key.q_c;
+    points[5] = key.s_sigma[0];
+    points[6] = key.s_sigma[1];
+    points[7] = key.s_sigma[2];
+    slot.reduction.x_2 = key.g2_tau;
+    slot.g2_gen = key.g2_gen;
+    Some(())
+}
+
+#[inline(never)]
+fn fill_multi_vk_input(
+    slot: &mut PodSnarkjsPlonkMultiVkInput,
+    proof_index: usize,
+    context_index: usize,
+    proof: &Proof,
+) -> Option<()> {
+    slot.proof_index_be = u32::try_from(proof_index).ok()?.to_be_bytes();
+    slot.context_index_be = u32::try_from(context_index).ok()?.to_be_bytes();
+    // Canonical snarkjs order (A,B,C,Z,T1,T2,T3,Wxi,Wxiw).
+    let points = &mut slot.proof.transcript_points;
+    points[0] = proof.wire_commitments[0];
+    points[1] = proof.wire_commitments[1];
+    points[2] = proof.wire_commitments[2];
+    points[3] = proof.grand_product;
+    points[4] = proof.quotient[0];
+    points[5] = proof.quotient[1];
+    points[6] = proof.quotient[2];
+    points[7] = proof.opening;
+    points[8] = proof.shifted_opening;
+    let evaluations = &mut slot.proof.evaluations;
+    evaluations[0] = proof.evaluations.a;
+    evaluations[1] = proof.evaluations.b;
+    evaluations[2] = proof.evaluations.c;
+    evaluations[3] = proof.evaluations.s_sigma1;
+    evaluations[4] = proof.evaluations.s_sigma2;
+    evaluations[5] = proof.evaluations.z_omega;
+    Some(())
+}
+
+/// Reduce every proof equation through the runtime multi-VK reducer and
+/// splice the returned coefficients onto the verifier-owned points.
+///
+/// Output is `9*contexts` shared coefficients followed by one eleven-slot row
+/// per proof whose first two slots belong to the P stream, so neither MSM
+/// receives a contiguous slice.
+///
+/// The reducer inverts the Lagrange denominators, while the in-guest kernel
+/// instead scales the whole equation by their product to avoid the inversion.
+/// Both operands therefore differ from [`optimized_reduced_pairs`] by one
+/// nonzero field factor. The pairing equation is homogeneous, so the verdict
+/// is identical while the G1 bytes are not.
+#[inline(never)]
+fn reduced_pairs_multi_vk(groups: &[Group]) -> Option<Vec<PodG1G2Pair>> {
+    use solana_bn254_batch_syscall::{
+        Version, alt_bn128_g1_msm, alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
+    };
+
+    let srs = shared_srs(groups)?;
+    if srs[0].0 != G2_GENERATOR_BE {
+        return None;
+    }
+    // Key authentication, structural validation and strict context ordering
+    // stay in the guest; the reducer re-derives the same seed independently.
+    atomic_batch_digest(groups)?;
+
+    let total: usize = groups.iter().map(|group| group.proofs.len()).sum();
+    let mut contexts = zeroed_contexts(groups.len());
+    let mut inputs = zeroed_inputs(total);
+    let mut publics = Vec::new();
+    let mut proof_index = 0usize;
+    for (index, group) in groups.iter().enumerate() {
+        fill_multi_vk_context(contexts.get_mut(index)?, index, group)?;
+        for proof in &group.proofs {
+            fill_multi_vk_input(inputs.get_mut(proof_index)?, proof_index, index, proof)?;
+            publics.extend_from_slice(&proof.public_inputs);
+            proof_index += 1;
+        }
+    }
+    if proof_index != total {
+        return None;
+    }
+    let coefficients =
+        alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(Version::V0, &contexts, &inputs, &publics)
+            .ok()?;
+
+    let shared_len = REDUCER_CONTEXT_TERMS.checked_mul(groups.len())?;
+    let shared = coefficients.get(..shared_len)?;
+    let rows = coefficients.get(shared_len..)?;
+    if rows.len() != REDUCER_ROW_TERMS.checked_mul(total)? {
+        return None;
+    }
+
+    let q_terms = shared_len.checked_add(
+        total.checked_mul(REDUCER_ROW_TERMS.checked_sub(REDUCER_ROW_P_TERMS)?)?,
+    )?;
+    let p_terms = total.checked_mul(REDUCER_ROW_P_TERMS)?;
+    let mut p_points = Vec::with_capacity(p_terms);
+    let mut p_scalars = Vec::with_capacity(p_terms);
+    let mut q_points = Vec::with_capacity(q_terms);
+    let mut q_scalars = Vec::with_capacity(q_terms);
+
+    for (group, shared_row) in groups
+        .iter()
+        .zip(shared.chunks_exact(REDUCER_CONTEXT_TERMS))
+    {
+        let key = &group.vk;
+        q_points.push(key.q_m);
+        q_points.push(key.q_l);
+        q_points.push(key.q_r);
+        q_points.push(key.q_o);
+        q_points.push(key.q_c);
+        q_points.push(key.s_sigma[0]);
+        q_points.push(key.s_sigma[1]);
+        q_points.push(key.s_sigma[2]);
+        q_points.push(PodG1Point(OptimizedG1::GENERATOR.0));
+        q_scalars.extend_from_slice(shared_row);
+    }
+
+    let mut proof_rows = rows.chunks_exact(REDUCER_ROW_TERMS);
+    for group in groups {
+        for proof in &group.proofs {
+            let row = proof_rows.next()?;
+            p_points.push(proof.opening);
+            p_points.push(proof.shifted_opening);
+            p_scalars.extend_from_slice(row.get(..REDUCER_ROW_P_TERMS)?);
+            q_points.push(proof.grand_product);
+            q_points.push(proof.quotient[0]);
+            q_points.push(proof.quotient[1]);
+            q_points.push(proof.quotient[2]);
+            q_points.push(proof.wire_commitments[0]);
+            q_points.push(proof.wire_commitments[1]);
+            q_points.push(proof.wire_commitments[2]);
+            q_points.push(proof.opening);
+            q_points.push(proof.shifted_opening);
+            q_scalars.extend_from_slice(row.get(REDUCER_ROW_P_TERMS..)?);
+        }
+    }
+    if proof_rows.next().is_some()
+        || p_points.len() != p_terms
+        || q_points.len() != q_terms
+        || p_scalars.len() != p_terms
+        || q_scalars.len() != q_terms
+    {
+        return None;
+    }
+
     let p = alt_bn128_g1_msm(Version::V0, &p_points, &p_scalars).ok()?;
     let q = alt_bn128_g1_msm(Version::V0, &q_points, &q_scalars).ok()?;
     Some(vec![
@@ -1167,7 +1402,7 @@ fn verify_groups_registered_hot(
     groups: &[Group],
     ids: &[[u8; 32]; layout::REGISTRY_SOURCE_COUNT],
 ) -> Option<bool> {
-    let pairs = optimized_reduced_pairs(groups)?;
+    let pairs = reduced_pairs_multi_vk(groups)?;
     let registered = ordered_registered_pairs(&pairs, ids)?;
     registered_pairing_check(&registered)
 }
@@ -1194,7 +1429,7 @@ fn verify_groups_registered(
             return None;
         }
     }
-    let pairs = optimized_reduced_pairs(groups)?;
+    let pairs = reduced_pairs_multi_vk(groups)?;
     if pairs.len() != 2 {
         return None;
     }
@@ -1321,7 +1556,7 @@ pub fn verify_account_current_fp12(data: &[u8]) -> Option<bool> {
 
 fn verify_groups_map(groups: &[Group]) -> Option<bool> {
     authenticated_input_digest(groups)?;
-    let pairs = optimized_reduced_pairs(groups)?;
+    let pairs = reduced_pairs_multi_vk(groups)?;
     Some(pairing_map(&pairs)? == identity_bytes())
 }
 
@@ -1329,7 +1564,7 @@ fn verify_groups_boolean(groups: &[Group]) -> Option<bool> {
     use solana_bn254_batch_syscall::{Version, alt_bn128_pairing_check};
 
     authenticated_input_digest(groups)?;
-    let pairs = optimized_reduced_pairs(groups)?;
+    let pairs = reduced_pairs_multi_vk(groups)?;
     alt_bn128_pairing_check(Version::V0, &pairs).ok()
 }
 
@@ -2751,6 +2986,98 @@ mod exporter_tests {
                 solana_bn254_batch_syscall::research_observer::observed_pairing_check_shapes()
                     .is_empty()
             );
+        }
+    }
+
+    /// Reduce each canonical account and return the runtime coefficients
+    /// beside the seed the in-guest kernel derives for the same account.
+    fn reducer_coefficients(account: &[u8]) -> (Vec<Group>, [u8; 32], Vec<PodScalar>) {
+        use solana_bn254_batch_syscall::{
+            Version, alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
+        };
+
+        let groups = parse_account(account).expect("canonical account");
+        let seed = atomic_batch_digest(&groups).expect("batch digest");
+        let total = groups.iter().map(|group| group.proofs.len()).sum();
+        let mut contexts = zeroed_contexts(groups.len());
+        let mut inputs = zeroed_inputs(total);
+        let mut publics = Vec::new();
+        let mut proof_index = 0usize;
+        for (index, group) in groups.iter().enumerate() {
+            fill_multi_vk_context(&mut contexts[index], index, group).expect("context");
+            for proof in &group.proofs {
+                fill_multi_vk_input(&mut inputs[proof_index], proof_index, index, proof)
+                    .expect("input");
+                publics.extend_from_slice(&proof.public_inputs);
+                proof_index += 1;
+            }
+        }
+        let coefficients =
+            alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(Version::V0, &contexts, &inputs, &publics)
+                .expect("multi-VK reduce");
+        (groups, seed, coefficients)
+    }
+
+    /// Pin the transcript, the outer randomizer and the sign of both streams
+    /// against the in-guest kernel instead of arguing them.
+    ///
+    /// P slot 0 is the bare randomizer and the shared Qc coefficient is its
+    /// negation, so an equal value on one stream and an equal magnitude with
+    /// opposite sign on the other fixes the reducer's seed, its rho
+    /// derivation, the slot order and the relative sign in one comparison.
+    #[test]
+    fn reducer_seed_rho_and_stream_signs_match_the_in_guest_kernel() {
+        use ark_ff::PrimeField;
+
+        let _guard = OBSERVER_LOCK.lock().expect("observer lock");
+        let export = export_canonical_plonk_rows(&sources([0, 1, 2])).unwrap();
+        let field = |scalar: &PodScalar| ark_bn254::Fr::from_be_bytes_mod_order(&scalar.0);
+        for account in [
+            export.n2_combined_account.as_slice(),
+            export.n3_combined_account.as_slice(),
+        ] {
+            let (groups, seed, coefficients) = reducer_coefficients(account);
+            let shared_len = REDUCER_CONTEXT_TERMS * groups.len();
+            let (shared, rows) = coefficients.split_at(shared_len);
+            assert!(groups.iter().all(|group| group.proofs.len() == 1));
+
+            for (index, row) in rows.chunks_exact(REDUCER_ROW_TERMS).enumerate() {
+                let rho = field(&PodScalar(outer_batch_scalar_bytes(&seed, index)));
+                assert_ne!(rho, ark_bn254::Fr::from(0u64));
+                assert_eq!(field(&row[0]), rho, "P slot 0 is rho at proof {index}");
+                // Qc carries the constant one, so with one proof per context
+                // the whole shared slot is the negated randomizer.
+                let qc = &shared[REDUCER_CONTEXT_TERMS * index + 4];
+                assert_eq!(field(qc), -rho, "shared Qc is -rho at context {index}");
+            }
+        }
+    }
+
+    /// The reducer's Q stream is `9*contexts + 9*proofs` against the kernel's
+    /// `18*proofs`. Every measured row holds exactly one proof per context,
+    /// which is the only reason the pinned MSM shape survives the swap. Point
+    /// this path at a same-VK batch and the observed trace changes silently,
+    /// so the equality is asserted together with that precondition.
+    #[test]
+    fn reducer_msm_shape_matches_the_kernel_only_at_one_proof_per_context() {
+        let _guard = OBSERVER_LOCK.lock().expect("observer lock");
+        let export = export_canonical_plonk_rows(&sources([0, 1, 2])).unwrap();
+        for (n, account) in [
+            (2usize, export.n2_combined_account.as_slice()),
+            (3usize, export.n3_combined_account.as_slice()),
+        ] {
+            let groups = parse_account(account).expect("canonical account");
+            let proofs = groups.iter().map(|group| group.proofs.len()).sum::<usize>();
+            assert_eq!((groups.len(), proofs), (n, n));
+
+            let q_terms = REDUCER_CONTEXT_TERMS * groups.len()
+                + (REDUCER_ROW_TERMS - REDUCER_ROW_P_TERMS) * proofs;
+            assert_eq!(q_terms, Q_CONTRIBUTIONS * proofs);
+            assert_eq!(REDUCER_ROW_P_TERMS * proofs, P_CONTRIBUTIONS * proofs);
+
+            // One context holding every proof reduces the Q stream instead.
+            let folded = REDUCER_CONTEXT_TERMS + (REDUCER_ROW_TERMS - REDUCER_ROW_P_TERMS) * proofs;
+            assert_ne!(folded, Q_CONTRIBUTIONS * proofs);
         }
     }
 

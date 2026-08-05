@@ -33,7 +33,21 @@ fn trace(
         stock_g1_additions: 0,
         stock_g1_multiplications: 0,
         fr_lincomb_calls: Vec::new(),
+        plonk_multi_vk_reduce_calls: Vec::new(),
     }
+}
+
+/// The batch columns hand the whole reduction to the runtime. One call per
+/// transaction, one context and one proof per verifying key, one public input
+/// each, which is what every zolana verifying key declares.
+fn with_multi_vk_reduce(mut trace: OperationTrace, n: u32) -> OperationTrace {
+    trace.plonk_multi_vk_reduce_calls = vec![PlonkMultiVkReduceCall {
+        contexts: n,
+        proofs: n,
+        public_inputs: n,
+        calls: 1,
+    }];
+    trace
 }
 
 /// The BSB22 hash-to-field reduction, one three-term inner product per outer
@@ -146,12 +160,17 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
             18u32.saturating_mul(n),
             20u32.saturating_mul(n),
         ),
-        ColumnId::BatchB5 => trace(vec![PairingCall::full(2, 1)], vec![], folded_msm(), vec![]),
-        ColumnId::RegistryB5 => trace(
-            vec![PairingCall::registered(0, 2)],
-            vec![],
-            folded_msm(),
-            vec![],
+        ColumnId::BatchB5 => {
+            with_multi_vk_reduce(trace(vec![PairingCall::full(2, 1)], vec![], folded_msm(), vec![]), n)
+        }
+        ColumnId::RegistryB5 => with_multi_vk_reduce(
+            trace(
+                vec![PairingCall::registered(0, 2)],
+                vec![],
+                folded_msm(),
+                vec![],
+            ),
+            n,
         ),
         ColumnId::RecursionB5 => {
             let outer_msm: &[u32] = match row {
@@ -172,7 +191,9 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
             18u32.saturating_mul(n),
             20u32.saturating_mul(n),
         ),
-        ColumnId::BatchFp12B5 => trace(vec![], vec![PairingCall::full(2, 1)], folded_msm(), vec![]),
+        ColumnId::BatchFp12B5 => {
+            with_multi_vk_reduce(trace(vec![], vec![PairingCall::full(2, 1)], folded_msm(), vec![]), n)
+        }
     }
 }
 
