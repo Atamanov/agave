@@ -3,11 +3,16 @@
 //! A seal is only worth its digest if something recomputes it. Each test here
 //! reads the named file and hashes it; none of them restates a constant.
 //!
+//! Sealed evidence keeps the bytes its exporter produced. A rename applies to
+//! code, never to a sealed artifact. When a rename does reach one, the artifact
+//! is restored, not re-sealed, because re-sealing turns the digest from a claim
+//! about the exported bytes into a claim about whatever is here now.
+//!
 //! Two seals were wrong before this file existed. `fixtures-v3/manifest.sha256`
-//! still described the pre-rename bytes after the repo-wide helios/helius
-//! rename edited the manifest it names. The guest build script kept its own
-//! copy of every fixture digest beside the copy in `recursion-v2/manifest.json`,
-//! and nothing compared the two.
+//! described the exported bytes while the manifest it names had been edited by
+//! the repo-wide rename. The guest build script kept its own copy of every
+//! fixture digest beside the copy in `recursion-v2/manifest.json`, and nothing
+//! compared the two.
 //!
 //! `imported_zolana_manifest_is_the_committed_copy` binds the source digest
 //! recorded in `recursion-v2/manifest.json` to the in-repo copy of the Zolana
@@ -21,10 +26,29 @@ use {
     },
 };
 
-/// The helios/helius rename edited the committed copy of the imported Zolana
-/// manifest after its source digest was recorded. Undoing exactly this
-/// substitution must reproduce the recorded digest.
-const IMPORTED_SPELLING: (&str, &str) = ("helius", "helios");
+/// Directories holding exported evidence. Their bytes are frozen, so they are
+/// the one place the pre-rename spelling is allowed to survive.
+const EVIDENCE_DIRS: [&str; 3] = [
+    "research/bn254-decision-table-v2-20260804/fixtures-v3",
+    "research/bn254-decision-table-v2-20260804/recursion-v2",
+    "bn254-decision-bench/sbf/plonk-recursion/fixtures",
+];
+
+/// Rust sources that must carry the current spelling.
+const CODE_DIRS: [&str; 6] = [
+    "bn254-decision-bench/src",
+    "bn254-decision-bench/tests",
+    "bn254-decision-bench/examples",
+    "bn254-decision-bench/benches",
+    "bn254-decision-bench/sbf",
+    "bn254-decision-collector/src",
+];
+
+/// The spelling the rename replaced.
+const PRE_RENAME: &str = "helios";
+
+/// This file states the rule, so it names the old spelling in prose.
+const RULE_FILE: &str = "bn254-decision-bench/tests/seals.rs";
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -74,8 +98,14 @@ fn text<'a>(value: &'a Value, key: &str) -> &'a str {
 
 fn files_under(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
+    if !root.is_dir() {
+        return found;
+    }
     let mut pending = vec![root.to_path_buf()];
     while let Some(directory) = pending.pop() {
+        if directory.file_name().is_some_and(|name| name == "target") {
+            continue;
+        }
         for entry in std::fs::read_dir(&directory)
             .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
         {
@@ -272,19 +302,11 @@ fn guest_build_script_pins_only_the_recursion_manifest() {
 }
 
 /// The Zolana manifest the recursion fixtures were built from is committed at
-/// `fixtures-v3/manifest.json`. The repo-wide rename edited that copy after the
-/// source digest was recorded, so the recorded digest is reproduced by undoing
-/// exactly that substitution. Any other edit to the copy fails here.
+/// `fixtures-v3/manifest.json`, holding the bytes the exporter produced. Every
+/// record of the source digest must therefore describe that copy directly.
 #[test]
 fn imported_zolana_manifest_is_the_committed_copy() {
-    let committed = read(&research_dir().join("fixtures-v3/manifest.json"));
-    let text_form = String::from_utf8(committed).expect("Zolana manifest is UTF-8");
-    let (current, imported) = IMPORTED_SPELLING;
-    assert!(
-        !text_form.contains(imported),
-        "the committed copy still spells {imported}, so the rename is not the only difference"
-    );
-    let as_imported = sha256(text_form.replace(current, imported).as_bytes());
+    let as_imported = sha256_of(&research_dir().join("fixtures-v3/manifest.json"));
 
     let manifest = recursion_manifest();
     assert_eq!(
@@ -303,6 +325,90 @@ fn imported_zolana_manifest_is_the_committed_copy() {
             text(&row, "row_id")
         );
     }
+}
+
+/// The PLONK recursion fixtures have no manifest, so its build script holds the
+/// only seal over them. Nothing outside an SBF build reads it, and a workspace
+/// `cargo test` never runs one, so every digest it pins is checked here against
+/// the tree it names.
+#[test]
+fn plonk_guest_build_script_pins_real_artifacts() {
+    let guest = repo_root().join("bn254-decision-bench/sbf/plonk-recursion");
+    let source = String::from_utf8(read(&guest.join("build.rs"))).expect("build script is UTF-8");
+    let pinned = sha256_digests_in(&source);
+    assert!(
+        !pinned.is_empty(),
+        "the PLONK guest build script pins nothing"
+    );
+
+    let present: BTreeSet<String> = files_under(&guest.join("fixtures"))
+        .iter()
+        .map(|file| sha256_of(file))
+        .collect();
+    let missing: Vec<&String> = pinned.difference(&present).collect();
+    assert!(
+        missing.is_empty(),
+        "these pinned digests match no file under {}: {missing:#?}",
+        guest.join("fixtures").display()
+    );
+}
+
+/// Code carries the current spelling. The pre-rename spelling is allowed only
+/// where a source file quotes a token that exported evidence really contains,
+/// such as a sealed schema string a build script asserts against.
+///
+/// This is the other direction of the rule the seals enforce: a rename must not
+/// reach sealed bytes, and it must not be undone in code either.
+#[test]
+fn the_pre_rename_spelling_survives_only_where_it_quotes_sealed_evidence() {
+    let evidence = evidence_tokens();
+    assert!(
+        evidence.iter().any(|token| token.contains(PRE_RENAME)),
+        "no exported evidence carries the pre-rename spelling, so this test proves nothing"
+    );
+
+    let rule_file = repo_root().join(RULE_FILE);
+    let mut offenders = Vec::new();
+    for directory in CODE_DIRS {
+        for file in files_under(&repo_root().join(directory)) {
+            if file == rule_file || file.extension().is_none_or(|kind| kind != "rs") {
+                continue;
+            }
+            let source = String::from_utf8(read(&file)).expect("Rust source is UTF-8");
+            offenders.extend(
+                tokens(&source)
+                    .into_iter()
+                    .filter(|token| token.contains(PRE_RENAME) && !evidence.contains(token))
+                    .map(|token| format!("{}: {token}", file.display())),
+            );
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these name the pre-rename spelling without quoting sealed evidence: {offenders:#?}"
+    );
+}
+
+/// Maximal runs of characters that can spell an identifier, a path, or a schema.
+fn tokens(text: &str) -> BTreeSet<String> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every token appearing in exported evidence. Binary artifacts carry no text
+/// and are skipped.
+fn evidence_tokens() -> BTreeSet<String> {
+    let mut all = BTreeSet::new();
+    for directory in EVIDENCE_DIRS {
+        for file in files_under(&repo_root().join(directory)) {
+            if let Ok(text) = String::from_utf8(read(&file)) {
+                all.extend(tokens(&text));
+            }
+        }
+    }
+    all
 }
 
 /// Every maximal run of exactly 64 lowercase hex characters in `source`.

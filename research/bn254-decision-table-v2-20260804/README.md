@@ -53,9 +53,14 @@ Only Batching + Fp12 performs one folded map and folded MSMs.
 committed digest from the bytes it names. Run it after any edit under this
 directory.
 
+**A rename never edits a sealed artifact.** Rename code only. If a rename does
+reach a sealed file, restore the file; do not re-seal it. A recomputed digest
+stops describing the bytes the exporter produced and starts describing whatever
+is in the tree, which is how provenance is lost. The old spelling inside these
+artifacts is the exported evidence, not a leftover. Four separate seals have
+been corrupted this way already.
+
 `recursion-v2/manifest.json` records the Zolana manifest it was built from at an
 absolute path that resolves on no current machine. Read `fixtures-v3/manifest.json`
-instead; it is that manifest, committed. The recorded digest describes the copy
-before the helios/helius rename edited it, and the seals test proves the rename
-is the whole difference. The recorded path stays because the manifest is frozen
-by its own digest.
+instead; it is that manifest, committed, byte for byte. The recorded path stays
+because the manifest is frozen by its own digest.
