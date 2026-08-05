@@ -68,6 +68,61 @@ const REGISTRY_V3_PDA_SEED: &[u8] = b"bn254-b5-vk-registry-v3";
 const REGISTRY_V3_KEYSET_DOMAIN: &[u8] = b"agave:bn254:b5:keyset:v3";
 const FP12_APPLICATION_CONTEXT: [u8; 32] = *b"bn254-decision-bench-fp12-v3!!!!";
 
+/// Consumer the pinned registry addresses below are derived under. A guest
+/// loaded at any other program id must reject: the pinned address would not be
+/// a program-derived address of the running program.
+#[cfg(any(target_os = "solana", test))]
+const REGISTRY_V3_CONSUMER: [u8; 32] = [41u8; 32];
+
+/// `(keyset digest, registry PDA)` for every keyset the grid runs, standing in
+/// for what a real consumer emits at codegen time. The address is
+/// `find_program_address([REGISTRY_V3_PDA_SEED, digest], REGISTRY_V3_CONSUMER)`
+/// and `pinned_registry_addresses_derive` re-runs that derivation. Lookup is
+/// keyed by the digest the guest recomputes from the fixture, so a fixture
+/// cannot present another keyset's registry account.
+#[cfg(any(target_os = "solana", test))]
+const REGISTRY_V3_PINNED: [([u8; 32], [u8; 32]); 3] = [
+    // n=5 k=1
+    (
+        [
+            0x1f, 0xd5, 0xbf, 0x4d, 0x5d, 0x7b, 0x82, 0xe1, 0x81, 0xc2, 0xa0, 0xcb, 0x2e, 0x87,
+            0x2b, 0x8e, 0x1f, 0xcd, 0x8b, 0x4a, 0x30, 0xfc, 0xcc, 0x78, 0xeb, 0xca, 0xa2, 0xbd,
+            0x6c, 0xa3, 0x47, 0x14,
+        ],
+        [
+            0xc6, 0x0e, 0x1d, 0x88, 0x05, 0x3b, 0x4f, 0x42, 0x97, 0x65, 0xa9, 0xe6, 0xb2, 0x67,
+            0x6e, 0x7f, 0xe1, 0x20, 0x13, 0x59, 0x5f, 0x62, 0xf7, 0x9d, 0xf2, 0x89, 0xb4, 0x42,
+            0x7c, 0x38, 0x47, 0xbd,
+        ],
+    ),
+    // n=2 k=2
+    (
+        [
+            0x33, 0x3b, 0x0e, 0x26, 0x32, 0x8a, 0x95, 0x9b, 0x2f, 0x41, 0x64, 0x0c, 0xed, 0x8f,
+            0x0a, 0x7b, 0xfe, 0x2b, 0x31, 0x20, 0xd7, 0xd1, 0x53, 0xd7, 0x58, 0xd3, 0x8d, 0x27,
+            0x34, 0xcb, 0xf6, 0x57,
+        ],
+        [
+            0x9b, 0x27, 0xd4, 0xcf, 0xe7, 0xb8, 0xe3, 0x29, 0xfb, 0x5f, 0x13, 0x84, 0xdd, 0x31,
+            0xdf, 0x09, 0xff, 0x46, 0x20, 0x23, 0x50, 0x92, 0xed, 0xcf, 0x16, 0x8b, 0x05, 0xcd,
+            0xd4, 0xfe, 0x0a, 0x45,
+        ],
+    ),
+    // n=3 k=3
+    (
+        [
+            0xc5, 0xab, 0xf0, 0x55, 0xd1, 0x98, 0x8e, 0x11, 0x3b, 0xbd, 0x06, 0x33, 0xb4, 0xa5,
+            0x4b, 0x22, 0x20, 0x2a, 0xe7, 0x10, 0xe2, 0xe7, 0x85, 0x20, 0x2a, 0x48, 0x49, 0xa3,
+            0xab, 0x5a, 0x74, 0x45,
+        ],
+        [
+            0x20, 0xdc, 0xf1, 0x92, 0xd9, 0x17, 0xd0, 0xd2, 0x54, 0xdf, 0xfa, 0xc5, 0x02, 0x8e,
+            0xcc, 0x87, 0xbd, 0x53, 0xcf, 0x3a, 0xff, 0x61, 0x4e, 0x11, 0x74, 0x27, 0x29, 0x9c,
+            0x04, 0xb6, 0x17, 0x96,
+        ],
+    ),
+];
+
 const VK_BYTES: usize = 64 + 128 + 128 + 128 + 64 + 64;
 const PROOF_BYTES: usize = 64 + 64 + 128 + 64;
 struct VkView<'a> {
@@ -372,6 +427,17 @@ fn registry_keyset_digest_v3(f: &Fixture<'_>) -> [u8; 32] {
         &sources,
     ])
     .to_bytes()
+}
+
+/// Pinned registry address for a recomputed keyset digest. An unknown digest
+/// has no pinned address and the caller must reject; deriving one here would
+/// re-introduce the per-bump hashing this guest exists to keep out of the
+/// measurement.
+#[cfg(any(target_os = "solana", test))]
+fn pinned_registry_address(digest: &[u8; 32]) -> Option<&'static [u8; 32]> {
+    REGISTRY_V3_PINNED
+        .iter()
+        .find_map(|(pinned, address)| (pinned == digest).then_some(address))
 }
 
 fn registry_header_matches(
@@ -679,9 +745,12 @@ mod entrypoint {
                 .map_err(|_| ProgramError::AccountBorrowFailed)?;
             let parsed = super::parse(&fixture_data).ok_or(ProgramError::InvalidAccountData)?;
             let digest = super::registry_keyset_digest_v3(&parsed);
-            let (expected, _) =
-                Address::find_program_address(&[super::REGISTRY_V3_PDA_SEED, &digest], _program_id);
-            if registry.address() != &expected || !registry.owned_by(_program_id) {
+            if _program_id.as_array() != &super::REGISTRY_V3_CONSUMER {
+                return Err(ProgramError::IncorrectProgramId);
+            }
+            let expected =
+                super::pinned_registry_address(&digest).ok_or(ProgramError::InvalidSeeds)?;
+            if registry.address().as_array() != expected || !registry.owned_by(_program_id) {
                 return Err(ProgramError::InvalidAccountOwner);
             }
             let expected_len =
@@ -742,6 +811,50 @@ mod entrypoint {
             Some(false) => Err(ProgramError::Custom(1)),
             None => Err(ProgramError::InvalidAccountData),
         }
+    }
+}
+
+#[cfg(all(test, not(target_os = "solana")))]
+mod registry_pin_tests {
+    use super::*;
+    use solana_address::Address;
+
+    #[test]
+    fn pinned_registry_addresses_derive() {
+        for (digest, address) in REGISTRY_V3_PINNED {
+            let (derived, _) = Address::find_program_address(
+                &[REGISTRY_V3_PDA_SEED, &digest],
+                &Address::new_from_array(REGISTRY_V3_CONSUMER),
+            );
+            assert_eq!(
+                derived.to_bytes(),
+                address,
+                "pinned address is not the PDA of its digest"
+            );
+        }
+    }
+
+    #[test]
+    fn pinned_digests_are_distinct() {
+        for (index, (digest, _)) in REGISTRY_V3_PINNED.iter().enumerate() {
+            assert!(
+                pinned_registry_address(digest).is_some(),
+                "entry {index} is not reachable by lookup"
+            );
+            assert_eq!(
+                REGISTRY_V3_PINNED
+                    .iter()
+                    .filter(|(other, _)| other == digest)
+                    .count(),
+                1,
+                "entry {index} shares its digest with another row"
+            );
+        }
+    }
+
+    #[test]
+    fn unpinned_digest_has_no_address() {
+        assert!(pinned_registry_address(&[0u8; 32]).is_none());
     }
 }
 

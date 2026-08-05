@@ -787,3 +787,37 @@ fn every_committed_campaign_document_passes_its_own_screen() {
         screen(&raw, name).unwrap_or_else(|e| panic!("{name} is unreadable by the campaign: {e}"));
     }
 }
+
+/// The structural gate must be able to fire, and must be able to stay quiet.
+/// A detector that cannot do both is decoration.
+#[test]
+fn structural_gate_fires_on_a_wrapper_dominated_cell() {
+    use solana_bn254_decision_bench::{CostSplit, MIN_SYSCALL_SHARE_PER_MILLE};
+
+    let dominated = CostSplit { syscall: 30_531, sbpf: 294_386 };
+    assert!(dominated.syscall_share_per_mille() < MIN_SYSCALL_SHARE_PER_MILLE);
+    assert_eq!(dominated.syscall_share_per_mille(), 93);
+
+    let healthy = CostSplit { syscall: 368_060, sbpf: 3_899 };
+    assert!(healthy.syscall_share_per_mille() >= MIN_SYSCALL_SHARE_PER_MILLE);
+
+    // A cell with no work at all must not read as a breach by dividing by zero.
+    assert_eq!(CostSplit { syscall: 0, sbpf: 0 }.syscall_share_per_mille(), 0);
+}
+
+/// Every published cell's syscall CU must come from the shared pricing
+/// function, so the transaction table and the structure table cannot disagree
+/// about what a column costs.
+#[test]
+fn both_tables_price_a_cell_identically() {
+    use solana_bn254_decision_bench::{cost_split, syscall_cu};
+    use solana_program_runtime::execution_budget::SVMTransactionExecutionCost;
+
+    let cost = SVMTransactionExecutionCost::default();
+    for row in RowId::ALL {
+        for column in ColumnId::ALL {
+            let direct = syscall_cu(&cost, column, &expected_trace(row, column));
+            assert_eq!(cost_split(&cost, row, column, 0).syscall, direct, "{row:?}/{column:?}");
+        }
+    }
+}

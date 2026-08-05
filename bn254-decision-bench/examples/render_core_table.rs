@@ -8,7 +8,7 @@
 
 use {
     solana_bn254_decision_bench::{
-        ColumnId, OperationTrace, RowId, expected_trace, stock_group_op_pairing_cu,
+        ColumnId, RowId, expected_trace, syscall_cu,
     },
     solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
     std::{collections::BTreeMap, path::PathBuf},
@@ -51,30 +51,6 @@ fn key(row: RowId, column: ColumnId) -> String {
     format!("{}/{}", snake(&r), snake(&c))
 }
 
-fn core_cu(cost: &SVMTransactionExecutionCost, column: ColumnId, trace: &OperationTrace) -> u64 {
-    let stock = matches!(column, ColumnId::Current | ColumnId::CurrentFp12);
-    let mut cu = 0u64;
-    for call in trace.pairing_checks.iter().chain(&trace.pairing_maps) {
-        let each = if stock {
-            stock_group_op_pairing_cu(call.pairs.into())
-        } else {
-            cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into())
-        };
-        cu += u64::from(call.calls) * each;
-    }
-    for call in &trace.msm_calls {
-        cu += u64::from(call.calls)
-            * (cost.alt_bn128_g1_msm_base_cost
-                + cost.alt_bn128_g1_msm_per_point_cost * u64::from(call.points));
-    }
-    for call in &trace.gt_target_multiexp_calls {
-        cu += u64::from(call.calls)
-            * (cost.alt_bn128_gt_multiexp_base_cost
-                + cost.alt_bn128_gt_multiexp_per_target_cost * u64::from(call.targets));
-    }
-    cu
-}
-
 fn main() {
     let cost = SVMTransactionExecutionCost::default();
     let residual = residuals();
@@ -89,7 +65,7 @@ fn main() {
     for row in RowId::ALL {
         print!("| {} |", row.label());
         for column in ColumnId::ALL {
-            let core = core_cu(&cost, column, &expected_trace(row, column));
+            let core = syscall_cu(&cost, column, &expected_trace(row, column));
             match residual.get(&key(row, column)) {
                 Some(r) => print!(" {} |", core + r),
                 None => print!(" {core} +? |"),

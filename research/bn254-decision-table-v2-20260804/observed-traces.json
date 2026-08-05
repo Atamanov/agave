@@ -1,0 +1,1260 @@
+{
+  "schema": "helius.bn254-decision-table-v3.residual-cu-contract.v1",
+  "contract_id": "local-residual-20260805",
+  "cells": [
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "current",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 4,
+            "full_pairs": 4,
+            "registered_pairs": 0,
+            "calls": 5
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 5,
+        "g2_subgroup_checks": 20
+      },
+      "non_core_transaction_cu": 3899,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "2b3e52462d79f273e6ec77b73c426def26cc9d84526dc4f8c6300e44ae24d7b2"
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "batch_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 8,
+            "full_pairs": 8,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 5,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 8
+      },
+      "non_core_transaction_cu": 68774,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "b5adb4579702c571ce5b4c3fd120994181f46566acd608afac9fc87465e8a0df"
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "registry_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 8,
+            "full_pairs": 5,
+            "registered_pairs": 3,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 5,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 5
+      },
+      "non_core_transaction_cu": 71805,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "1b56ea5076907bc3dd7e983efa6c115593a24b85e548aadda76021c1cfb5fd5e"
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "recursion_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 9,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 150498,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "437eae95f463c55caf5c39f36b4e7af5d085befc8681d5c4953440e4807c7dcd",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "91c58513ab7a44b6b85e4ba57b6341086050984800ee5faf0b622016ba2676ea"
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "current_fp12",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 3,
+            "full_pairs": 3,
+            "registered_pairs": 0,
+            "calls": 5
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 5,
+        "g2_subgroup_checks": 15
+      },
+      "non_core_transaction_cu": 31725,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "e6f942ccc59086ba3cc23957a107b720b46c1e20dda2706293ba594bde190835"
+    },
+    {
+      "row_id": "groth16_n5_same_vk",
+      "column_id": "batch_fp12_b5",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 7,
+            "full_pairs": 7,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 5,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 7
+      },
+      "non_core_transaction_cu": 74915,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "57f4aada310c98b8ca368859b6f6b229b40676b17296d307fedbf1c8a701941f"
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "current",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 4,
+            "full_pairs": 4,
+            "registered_pairs": 0,
+            "calls": 2
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 2,
+        "g2_subgroup_checks": 8
+      },
+      "non_core_transaction_cu": 1999,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "83388618ea5504861131bd0fcbca4460aac04917fdf0a9baf86cbb4a6f4a88bf"
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "batch_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 8,
+            "full_pairs": 8,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 8
+      },
+      "non_core_transaction_cu": 37966,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "f0ba876d3da5c695deb252d88f6cc16d18ab2d55f519648e0bc64bd75be9c3bb"
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "registry_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 8,
+            "full_pairs": 2,
+            "registered_pairs": 6,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      },
+      "non_core_transaction_cu": 41846,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "27d15c51cf18e2c89b5fb06a5e95f451f71da5a4962f6109db718d645ac21eaa"
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "recursion_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 6,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 127170,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "437eae95f463c55caf5c39f36b4e7af5d085befc8681d5c4953440e4807c7dcd",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "e11e2febc9b0bec37ca6bfae23a36e10e851673f5b531e1d03ff87ca292320d9"
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "current_fp12",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 3,
+            "full_pairs": 3,
+            "registered_pairs": 0,
+            "calls": 2
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 2,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 17110,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "67c1b600af4d0a825b18f5d217a221c9b47d1af92e3952d083aaa68ee9f7f69a"
+    },
+    {
+      "row_id": "groth16_n2_distinct_vk",
+      "column_id": "batch_fp12_b5",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [
+          {
+            "targets": 2,
+            "nontrivial_exponents": 1,
+            "calls": 1
+          }
+        ],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 38565,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "017c83cdd7e12b71b3d59eb3116fa9a030f053516b53d63161ad5ed2acc6258d"
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "current",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 4,
+            "full_pairs": 4,
+            "registered_pairs": 0,
+            "calls": 3
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 3,
+        "g2_subgroup_checks": 12
+      },
+      "non_core_transaction_cu": 2703,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "53a25da83eb8ef989727466cdf2c2da8006f036526d4c5f4e5bbdaf12c65f5cd"
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "batch_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 12,
+            "full_pairs": 12,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 12
+      },
+      "non_core_transaction_cu": 56244,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "a692ca764670e79d28a651f7ff98fdbfa6bb493467d4eaaa018c91844957c024"
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "registry_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 12,
+            "full_pairs": 3,
+            "registered_pairs": 9,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 3
+      },
+      "non_core_transaction_cu": 63978,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "00b2e83b8e91919aefcb83dc06ed3ca047df2e265f3e4121e51bdc7fc81e9676"
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "recursion_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 7,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 134996,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "437eae95f463c55caf5c39f36b4e7af5d085befc8681d5c4953440e4807c7dcd",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "dae5d78227d5d7f2e2718d3ed75131fb34ac45905bb3a6cfdf21b4169301a484"
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "current_fp12",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 3,
+            "full_pairs": 3,
+            "registered_pairs": 0,
+            "calls": 3
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 3,
+        "g2_subgroup_checks": 9
+      },
+      "non_core_transaction_cu": 27210,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "b855ffeda7f9b9dd0b181690b8927d44c95a63f82ed9f003204d847087427f6a"
+    },
+    {
+      "row_id": "groth16_n3_distinct_vk",
+      "column_id": "batch_fp12_b5",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 9,
+            "full_pairs": 9,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 2,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [
+          {
+            "targets": 3,
+            "nontrivial_exponents": 2,
+            "calls": 1
+          }
+        ],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 9
+      },
+      "non_core_transaction_cu": 59689,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "dd51bded4a2671d5e30a63757a4f4013d021294b035137d40f7e419a4991b7d5",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "0f99eaf815dd0a38ee318b27566a1d57aff001ddefc7b15f2bdc8c80f8abb640"
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "current",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 2
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 2,
+        "g2_subgroup_checks": 4
+      },
+      "non_core_transaction_cu": 284353,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "345fac1ef7862c3a4a872379852e15b40e85750ed5962d25884d6605c762e838"
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "batch_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 4,
+            "calls": 1
+          },
+          {
+            "points": 36,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      },
+      "non_core_transaction_cu": 294386,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "12bc27ce929118c55ec02a5ef64a91da26fba6e8437c80695b27b743ce6e570a"
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "registry_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 0,
+            "registered_pairs": 2,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 4,
+            "calls": 1
+          },
+          {
+            "points": 36,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 0
+      },
+      "non_core_transaction_cu": 297675,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "143d41f0e65b1109f41b401e4aed5340a2c21ec1e54b58d7d4f541b4b197c060"
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "recursion_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 7,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 134997,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "22e49c96b324c97e7a2f6749aa26118a9433d36f9c18f6bb716620cbb2000956",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "02eb2e7495307c3c8fafa7712809b7c58f51184bbce309a04414a7b3f402c848"
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "current_fp12",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 2
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 2,
+        "g2_subgroup_checks": 4
+      },
+      "non_core_transaction_cu": 284601,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "03647bd83fdd62dcb16964ec08dd3a9922e78547053ccfecce941d851cd2696e"
+    },
+    {
+      "row_id": "plonk_n2_distinct_vk_shared_srs",
+      "column_id": "batch_fp12_b5",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 4,
+            "calls": 1
+          },
+          {
+            "points": 36,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      },
+      "non_core_transaction_cu": 294449,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "11e2d106bc726cbf55b34151f8e6fcfc3796cf803b3ce6162b7409ce7c38aab1"
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "current",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 3
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 3,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 422882,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "7e75ba344266162fa433a55d8da5ad7487977b8245e6b9a621debe8e5806e188"
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "batch_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 6,
+            "calls": 1
+          },
+          {
+            "points": 54,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      },
+      "non_core_transaction_cu": 437384,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "c04b88db38430324df3fdcf01e1b8712e70cbbecc07bb2a41ed583e2dc33e553"
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "registry_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 2,
+            "full_pairs": 0,
+            "registered_pairs": 2,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 6,
+            "calls": 1
+          },
+          {
+            "points": 54,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 0
+      },
+      "non_core_transaction_cu": 440700,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "e3f8d9ea30132066d84ace817c1fb4ba98f953dae8fc8912b755cae92e047910"
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "recursion_b5",
+      "observed_trace": {
+        "pairing_checks": [
+          {
+            "pairs": 6,
+            "full_pairs": 6,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "pairing_maps": [],
+        "msm_calls": [
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 10,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          },
+          {
+            "points": 1,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 158176,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "22e49c96b324c97e7a2f6749aa26118a9433d36f9c18f6bb716620cbb2000956",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "9efab6583f5c710dadac091efe78d7df6d9572e22c30bea010b3e7028ccf522c"
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "current_fp12",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 3
+          }
+        ],
+        "msm_calls": [],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 3,
+        "g2_subgroup_checks": 6
+      },
+      "non_core_transaction_cu": 423241,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "dffcaf99261048caaa079c4137bd94c40675e59f89022de032c57b2576312cc1"
+    },
+    {
+      "row_id": "plonk_n3_distinct_vk_shared_srs",
+      "column_id": "batch_fp12_b5",
+      "observed_trace": {
+        "pairing_checks": [],
+        "pairing_maps": [
+          {
+            "pairs": 2,
+            "full_pairs": 2,
+            "registered_pairs": 0,
+            "calls": 1
+          }
+        ],
+        "msm_calls": [
+          {
+            "points": 6,
+            "calls": 1
+          },
+          {
+            "points": 54,
+            "calls": 1
+          }
+        ],
+        "gt_target_multiexp_calls": [],
+        "final_exponentiations": 1,
+        "g2_subgroup_checks": 2
+      },
+      "non_core_transaction_cu": 437447,
+      "source": "observed_in_tree_host_non_core",
+      "sample_count": 2,
+      "program_sha256": "153a23701457b40c646c4a0d398e50970891eeaf7ec5449150109e7edb08d72e",
+      "runtime_revision": "cc1f597de4dfb42af740be51307707516295a8e8",
+      "transaction_log_sha256": "2a273fcee388b3d03a924920003646288d0f591f80664ee75613546c02247425"
+    }
+  ]
+}

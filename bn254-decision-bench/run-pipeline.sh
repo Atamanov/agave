@@ -32,4 +32,4 @@ cargo test -q -p solana-syscalls --test bn254_charge_schedule
 if grep -q '^|.*+?' "$RESEARCH/TRANSACTION-TABLE.md"; then
     echo "WARNING: unmeasured cells remain in TRANSACTION-TABLE.md" >&2
 fi
-echo "wrote $RESEARCH/TRANSACTION-TABLE.md and $RESEARCH/OPERATIONS-TABLE.md"
+echo "wrote TRANSACTION-TABLE.md, OPERATIONS-TABLE.md and STRUCTURE-TABLE.md in $RESEARCH"
