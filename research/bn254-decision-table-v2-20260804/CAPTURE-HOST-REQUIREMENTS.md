@@ -77,3 +77,24 @@ instruction`, so rebuild the four guests (`groth16`, `groth-recursion`,
 
 `run_campaign` with `ExecutorConfig::Command { argv }` already drives this
 per cell, so the 30-cell sweep needs the campaign spec, not a new driver.
+
+## The PLONK residual is blocked on a lost artifact
+
+18 of 30 residuals are measured: every Groth16 cell, plus both PLONK recursion
+cells. The other 12 PLONK cells cannot be measured on this machine.
+
+The collector reads `<plonk-fixture-dir>/manifest.json` and rejects anything
+whose digest is not
+`7a48e0a7631ae55da0502074b8ae9efad4bf305fad65ce51b63d8e9f26b8b38b`. That file
+exists nowhere under `_OLD`, searched by content digest. Only the proof
+directories (`mul1`, `mul2`, `mul3`) were preserved; the exporter manifest that
+seals them was left in a session scratchpad and is gone.
+
+The seal is doing its job. Reconstructing a `manifest.json` to satisfy the
+digest is impossible, and writing a new one with a new digest would assert a
+provenance no longer held. Either recover the original from the canonical
+snarkjs exporter run, or regenerate the PLONK fixture set and re-seal it as a
+new set with its own recorded provenance.
+
+Until then the PLONK rows carry syscall core only, and must be labelled that
+way rather than presented beside complete Groth16 rows.
