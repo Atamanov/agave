@@ -57,7 +57,7 @@ the worst overcharge to 0.1%.
 ```
 pairing(k<8)  = base      + per_pair * k
 pairing(k>=8) = lane_base + lane * (k / 8) + lane_rem * (k % 8)   // integer division
-pairing       -= subgroup * registered_pairs
+pairing       -= credit * registered_pairs                        // credit by the same regime
 msm(n)        = msm_base + msm_per_point * n
 gt(t)         = gt_base + gt_per_target * t
 ```
@@ -80,6 +80,8 @@ gt(t)         = gt_base + gt_per_target * t
 | `alt_bn128_plonk_batch_reduce_base_cost` | 127 |
 | `alt_bn128_plonk_batch_reduce_per_proof_cost` | 62 |
 | `alt_bn128_plonk_batch_reduce_per_lagrange_cost` | 6 |
+| `alt_bn128_registered_pair_scalar_credit_cost` | 2,819 |
+| `alt_bn128_registered_pair_lane_credit_cost` | 1,142 |
 
 Worst overcharge: pairing 0.1%, MSM 2.0%, GT 0.3%, PLONK reduce 7.2%. The two
 scalar-field curves overcharge by up to 75.7% and 19.3%, set by integer CU
@@ -106,35 +108,34 @@ Measured, it is `3,534 + 2,148t`: the placeholder charged about 11x too much,
 roughly 82k and 100k CU of phantom charge on the fold-all cells of the two
 multi-key Groth16 rows.
 
-## Not derived: the registered-pair credit
+## The registered-pair credit
 
-`alt_bn128_g2_subgroup_check_cost` is the only constant here that this capture
-does not produce, and it is now known to be wrong in the unsafe direction.
+Measured, on the same host and under the same rule, by a registered-versus-full
+differential at a fixed pair count. Requested from and built by the vk-registry
+session; captured here as `prepared-run-1` and `prepared-run-2`.
 
-The capture's standalone G2 subgroup group times arkworks, not the IFMA kernel
-the pairing tariff prices, so it cannot be credited. The committed 1,612 came
-from splitting an older per-pair term on a B1 proportion, which is not a
-measurement of anything B5 does.
+| shape | measured | charged | over |
+|---|---:|---:|---:|
+| 3 total, 3 registered | 10,696 | 10,698 | 0.0% |
+| 8 total, 8 registered | 18,020 | 18,024 | 0.0% |
+| 3 total, 2 registered | 13,154 | 13,517 | 2.8% |
+| 4 total, 3 registered | 14,766 | 15,048 | 1.9% |
+| 8 total, 6 registered | 20,166 | 20,308 | 0.7% |
+| 8 total, 3 registered | 23,426 | 23,734 | 1.3% |
+| 16 total, 8 registered | 39,646 | 40,529 | 2.2% |
 
-A full-versus-prepared differential on the same host bounds it. Per prepared
-pair, at 33 ns per CU:
+The credit splits on the same lane boundary as the price, for the same reason: a
+registered pair still occupies a lane, so past a full lane it saves only its
+preparation. Below one lane it saves 2,819 CU, at or above one lane 1,142.
 
-| shape | saving per prepared pair |
-|---|---:|
-| 3 total, 2 prepared | 2,270 |
-| 4 total, 3 prepared | 2,317 |
-| 3 total, 3 prepared | 2,387 |
-| 8 total, 3 prepared | 552 |
-| 8 total, 6 prepared | 899 |
-| 8 total, 8 prepared | 983 |
-| 16 total, 8 prepared | 792 |
+The previous 1,612 was not a measurement. It came from splitting an older
+per-pair term on a B1 proportion, and it was wrong in both directions: it
+undercharged every lane-filling shape by about 40 percent per registered pair,
+and threw away 43 percent of the real saving below one lane. Two charge sites
+also added it on top of an all-in per-pair term, double-charging a subgroup
+check the price already carried.
 
-A prepared pair skips strictly more work than a registered one, because it skips
-line preparation as well as the subgroup check. So the registered saving is at
-most 552 CU in the worst shape, and the committed 1,612 overcredits by roughly
-3x wherever a lane is full. The reason is the kernel: a prepared pair still
-occupies a lane, so it saves preparation, not lane time.
-
-`unmeasured_g2_subgroup_credit` pins the value so it cannot be forgotten. It
-needs a registered-versus-full differential on the pairing syscall itself, which
-no bench covers yet.
+An earlier one-run reading of the prepared differential put the worst lane
+saving at 552 CU. Two processes put it at 1,091 on the same shape. The
+difference is process noise, which is exactly what the two-run selection rule
+exists to absorb, and the single-run figure should not be quoted.

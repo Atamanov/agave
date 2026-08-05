@@ -222,10 +222,14 @@ pub struct SVMTransactionExecutionCost {
     /// because it runs against a kernel already holding lane state, so the two
     /// regimes cannot share one per-pair term without overcharging by a quarter.
     pub alt_bn128_pairing_check_lane_rem_cost: u64,
-    /// Compute units for one alt_bn128 G2 subgroup membership check, priced
-    /// separately so the surcharge stays auditable and reusable by any future
-    /// G2-input syscall.
-    pub alt_bn128_g2_subgroup_check_cost: u64,
+    /// Compute units credited per registered pair in a sub-lane pairing check.
+    /// A registered pair skips the G2 subgroup check and its line preparation,
+    /// which the pairing prices carry for every pair.
+    pub alt_bn128_registered_pair_scalar_credit_cost: u64,
+    /// The same credit once at least one lane is full, where it is under half
+    /// as large. A registered pair still occupies a lane, so it saves
+    /// preparation, not lane time.
+    pub alt_bn128_registered_pair_lane_credit_cost: u64,
     /// Base compute units for an alt_bn128 scalar-field inner product.
     pub alt_bn128_fr_lincomb_base_cost: u64,
     /// Per-term compute units for an alt_bn128 scalar-field inner product.
@@ -315,11 +319,8 @@ impl Default for SVMTransactionExecutionCost {
             alt_bn128_pairing_check_lane_base_cost: 4_655,
             alt_bn128_pairing_check_lane_cost: 22_505,
             alt_bn128_pairing_check_lane_rem_cost: 5_865,
-            // Not from this capture. The only measurement is arkworks standalone,
-            // which is not the code the pairing tariff prices, and crediting it
-            // would undercharge. Held at the prior value until a full-versus-
-            // registered differential at a fixed pair count replaces it.
-            alt_bn128_g2_subgroup_check_cost: 1_612,
+            alt_bn128_registered_pair_scalar_credit_cost: 2_819,
+            alt_bn128_registered_pair_lane_credit_cost: 1_142,
             alt_bn128_fr_lincomb_base_cost: 1,
             alt_bn128_fr_lincomb_per_term_cost: 1,
             alt_bn128_fr_batch_invert_base_cost: 14,
@@ -359,29 +360,33 @@ impl SVMTransactionExecutionCost {
         let pairs = full_pairs.saturating_add(registered_pairs);
         let lanes = pairs.saturating_div(ALT_BN128_PAIRING_LANE_WIDTH);
         let remainder = pairs.saturating_sub(lanes.saturating_mul(ALT_BN128_PAIRING_LANE_WIDTH));
-        let core = if lanes == 0 {
-            self.alt_bn128_pairing_check_base_cost.saturating_add(
-                self.alt_bn128_pairing_check_per_pair_cost
-                    .saturating_mul(remainder),
+        let (core, credit) = if lanes == 0 {
+            (
+                self.alt_bn128_pairing_check_base_cost.saturating_add(
+                    self.alt_bn128_pairing_check_per_pair_cost
+                        .saturating_mul(remainder),
+                ),
+                self.alt_bn128_registered_pair_scalar_credit_cost,
             )
         } else {
-            self.alt_bn128_pairing_check_lane_base_cost
-                .saturating_add(
-                    self.alt_bn128_pairing_check_lane_cost
-                        .saturating_mul(lanes),
-                )
-                .saturating_add(
-                    self.alt_bn128_pairing_check_lane_rem_cost
-                        .saturating_mul(remainder),
-                )
+            (
+                self.alt_bn128_pairing_check_lane_base_cost
+                    .saturating_add(
+                        self.alt_bn128_pairing_check_lane_cost
+                            .saturating_mul(lanes),
+                    )
+                    .saturating_add(
+                        self.alt_bn128_pairing_check_lane_rem_cost
+                            .saturating_mul(remainder),
+                    ),
+                self.alt_bn128_registered_pair_lane_credit_cost,
+            )
         };
         // Every price above was fitted to calls whose every pair carried its
         // subgroup check. A registered pair is therefore a credit against that
-        // price, not the absence of a separate charge.
-        core.saturating_sub(
-            self.alt_bn128_g2_subgroup_check_cost
-                .saturating_mul(registered_pairs),
-        )
+        // price, not the absence of a separate charge, and the credit follows
+        // the same regime split as the price.
+        core.saturating_sub(credit.saturating_mul(registered_pairs))
     }
 
     /// Returns cost of the Poseidon hash function for the given number of

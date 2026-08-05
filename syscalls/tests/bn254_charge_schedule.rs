@@ -58,6 +58,18 @@ const MEASURED_FR_BATCH_INVERT: &[(u64, u64)] = &[
     (2048, 3_446),
 ];
 
+/// Registered-versus-full at a fixed pair count, same host and same selection
+/// rule. `(full, registered, measured)`.
+const MEASURED_REGISTERED: &[(u64, u64, u64)] = &[
+    (1, 2, 13_154),
+    (1, 3, 14_766),
+    (0, 3, 10_696),
+    (5, 3, 23_426),
+    (2, 6, 20_166),
+    (0, 8, 18_020),
+    (8, 8, 39_646),
+];
+
 /// Public inputs held at one, which is what every zolana verifying key declares.
 const MEASURED_PLONK_REDUCE: &[(u64, u64)] = &[
     (1, 195),
@@ -173,38 +185,55 @@ fn plonk_reduce_schedule_brackets_every_measured_proof_count() {
     });
 }
 
+#[test]
+fn registered_pairing_schedule_brackets_every_measured_split() {
+    let cost = SVMTransactionExecutionCost::default();
+    for &(full, registered, measured) in MEASURED_REGISTERED {
+        let charged = cost.alt_bn128_pairing_cost(full, registered);
+        assert!(
+            charged >= measured,
+            "{full}+{registered}: charged {charged} is below the measured {measured}"
+        );
+        assert!(
+            charged * 1_000 <= measured * 1_070,
+            "{full}+{registered}: charged {charged} exceeds the measured {measured}              by more than 7%"
+        );
+    }
+}
+
 /// Registering a verifying key is worth paying for only if verifying against it
-/// is cheaper than verifying with full pairs. The saving is the subgroup check
-/// the registry authenticated once, and it must scale with registered pairs.
+/// is cheaper than verifying with full pairs, and the saving must scale with
+/// registered pairs at a fixed total.
 #[test]
 fn a_registered_pair_is_cheaper_than_a_full_pair() {
     let cost = SVMTransactionExecutionCost::default();
     for total in 1..24u64 {
         let full_only = cost.alt_bn128_pairing_cost(total, 0);
+        let credit = if total < 8 {
+            cost.alt_bn128_registered_pair_scalar_credit_cost
+        } else {
+            cost.alt_bn128_registered_pair_lane_credit_cost
+        };
         for registered in 1..=total {
             let mixed = cost.alt_bn128_pairing_cost(total - registered, registered);
             assert!(
                 mixed < full_only,
                 "{total} pairs with {registered} registered: {mixed} is not below {full_only}"
             );
-            assert_eq!(
-                full_only - mixed,
-                cost.alt_bn128_g2_subgroup_check_cost * registered
-            );
+            assert_eq!(full_only - mixed, credit * registered);
         }
     }
 }
 
-/// UNMEASURED against the kernel this schedule prices. The capture times
-/// arkworks' subgroup check standalone, which is not the code a pairing runs, so
-/// crediting that number would undercharge every registered pair. The value is
-/// held at the prior schedule's until a full-versus-registered differential at a
-/// fixed pair count lands.
-///
-/// This test exists to fail when that differential lands. Delete it in the same
-/// change.
+/// A registered pair saves over twice as much below one lane as above it, for
+/// the same reason the price itself splits: past a full lane the pair still
+/// occupies lane time and only its preparation is skipped. One credit would
+/// either overcredit the lane shapes or throw away half the sub-lane saving.
 #[test]
-fn unmeasured_g2_subgroup_credit() {
+fn the_two_registered_credits_are_priced_apart() {
     let cost = SVMTransactionExecutionCost::default();
-    assert_eq!(cost.alt_bn128_g2_subgroup_check_cost, 1_612);
+    assert!(
+        cost.alt_bn128_registered_pair_scalar_credit_cost
+            > 2 * cost.alt_bn128_registered_pair_lane_credit_cost
+    );
 }

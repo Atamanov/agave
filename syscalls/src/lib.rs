@@ -3079,7 +3079,6 @@ declare_builtin_function!(
         // over every later verify against the registry.
         let g2_cost = execution_cost
             .alt_bn128_pairing_check_per_pair_cost
-            .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
             .saturating_mul(shape.g2_count.into());
         let gt_cost = execution_cost.alt_bn128_pairing_cost(shape.gt_count.into(), 0);
         invoke_context
@@ -9265,15 +9264,9 @@ mod tests {
     }
 
     fn pairing_check_cost(invoke_context: &InvokeContext, num_pairs: u64) -> u64 {
-        let execution_cost = invoke_context.get_execution_cost();
-        execution_cost
-            .alt_bn128_pairing_check_base_cost
-            .saturating_add(
-                execution_cost
-                    .alt_bn128_pairing_check_per_pair_cost
-                    .saturating_add(execution_cost.alt_bn128_g2_subgroup_check_cost)
-                    .saturating_mul(num_pairs),
-            )
+        invoke_context
+            .get_execution_cost()
+            .alt_bn128_pairing_cost(num_pairs, 0)
     }
 
     fn plonk_scalar_cost(

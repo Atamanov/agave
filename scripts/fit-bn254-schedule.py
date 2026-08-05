@@ -28,6 +28,7 @@ GROUPS = {
     "invert": "BN254 Fr batch invert",
     "plonk": "BN254 PLONK batch scalar reduce",
     "final_exp": "BN254 final exponentiation",
+    "registered": "pairing_registered",
 }
 
 
@@ -59,6 +60,38 @@ def scalar_cu(root: pathlib.Path, group: str) -> int:
         for estimates in (root / run / group).glob("*/new/estimates.json"):
             worst = max(worst, _upper(estimates))
     return math.ceil(worst / NS_PER_CU)
+
+
+def split_cu(root: pathlib.Path, group: str, prefix: str) -> dict[tuple[int, int], int]:
+    """Named `full{f}_{prefix}{r}` shapes, under the same selection rule."""
+    worst: dict[tuple[int, int], float] = {}
+    for run in ("prepared-run-1", "prepared-run-2"):
+        base = root / run / group
+        if not base.is_dir():
+            continue
+        for estimates in base.glob("*/new/estimates.json"):
+            name = estimates.parent.parent.name
+            if not name.startswith("full") or prefix not in name:
+                continue
+            full, rest = name[4:].split("_", 1)
+            key = (int(full), int(rest[len(prefix) :]))
+            worst[key] = max(worst.get(key, 0.0), _upper(estimates))
+    return {k: math.ceil(v / NS_PER_CU) for k, v in sorted(worst.items())}
+
+
+def fit_credit(points: dict[tuple[int, int], int], charge) -> tuple[int, int]:
+    """Largest per-registered-pair credit that still covers every split.
+
+    Split by lane regime, because a registered pair still occupies a lane: past
+    a full lane it saves only its preparation, under half what it saves below
+    one. The bound is against the charged full-pair price, not the measured one,
+    so the invariant the whole schedule holds to still holds here.
+    """
+    bounds = {False: [], True: []}
+    for (full, registered), cu in points.items():
+        total = full + registered
+        bounds[total >= LANE].append((charge(total) - cu) // registered)
+    return max(min(bounds[False], default=0), 0), max(min(bounds[True], default=0), 0)
 
 
 def fit_linear(points: dict[int, int]) -> tuple[int, int]:
@@ -192,10 +225,23 @@ def main() -> None:
         lambda n: pl_base + pl_slope * n,
     )
 
+    registered = split_cu(args.capture, GROUPS["registered"], "registered")
+    scalar_credit, lane_credit = fit_credit(registered, pairing_charge)
+    print(
+        f"\nregistered credit: {scalar_credit} CU below one lane, "
+        f"{lane_credit} CU at lanes >= 1"
+    )
+    print(f"  {'shape':>10} {'measured':>10} {'charged':>10} {'over':>7}")
+    for (full, reg), cu in registered.items():
+        total = full + reg
+        credit = lane_credit if total >= LANE else scalar_credit
+        charged = pairing_charge(total) - credit * reg
+        if charged < cu:
+            sys.exit(f"FIT ERROR: registered {full}+{reg} charges {charged} below {cu}")
+        print(f"  {full:>5}+{reg:<4} {cu:>10,} {charged:>10,} {(charged / cu - 1) * 100:>6.1f}%")
+
     # Reference only. Both time arkworks, not the IFMA kernel the pairing tariff
-    # is fitted to, so neither may be charged or credited on its own. The
-    # registered-pair credit has to come from a full-versus-registered
-    # differential at a fixed pair count.
+    # is fitted to, so neither may be charged or credited on its own.
     subgroup = scalar_cu(args.capture, GROUPS["subgroup"])
     final_exp = scalar_cu(args.capture, GROUPS["final_exp"])
     print(
@@ -220,6 +266,8 @@ def main() -> None:
     print(f"  alt_bn128_plonk_batch_reduce_base_cost: {pl_base}")
     print(f"  alt_bn128_plonk_batch_reduce_per_proof_cost: {pl_proof}")
     print(f"  alt_bn128_plonk_batch_reduce_per_lagrange_cost: {pl_lagrange}")
+    print(f"  alt_bn128_registered_pair_scalar_credit_cost: {scalar_credit}")
+    print(f"  alt_bn128_registered_pair_lane_credit_cost:   {lane_credit}")
     print(
         f"\nworst overcharge: pairing {worst_pairing * 100:.1f}%, "
         f"msm {worst_msm * 100:.1f}%, gt {worst_gt * 100:.1f}%"
