@@ -1,0 +1,3 @@
+# Program binaries copied from the zolana worktrees. They are 2.3 MB, rebuildable
+# by run.sh, and belong to those sessions rather than this campaign.
+artifacts/*.so

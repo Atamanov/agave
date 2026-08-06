@@ -1,0 +1,31 @@
+[package]
+name = "zolana-cu-split-registry"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "registered_transact"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+litesvm = { version = "0.15", features = ["register-tracing"] }
+solana-pubkey = { version = "4.2", features = ["curve25519"] }
+solana-signer = "3.0"
+zolana-cu-split-core = { path = "../core" }
+
+# Same fork the harness shim delegates to, so the shape encoding is the one
+# actually charged. Requires that branch checked out at
+# .worktrees/bn254-prepared-stateless in this repository.
+solana-bn254-batch-syscall = { path = "../../.worktrees/bn254-prepared-stateless/bn254-batch-syscall", features = ["agave-unstable-api"] }
+
+# Read-only path dependencies into a worktree owned by another session.
+# Nothing here writes into it; CARGO_TARGET_DIR must point outside both trees.
+vk-registry-test = { path = "../../../zolana/.worktrees/vk-registry/program-tests/vk-registry" }
+zolana-client = { path = "../../../zolana/.worktrees/vk-registry/sdk-libs/client" }
+zolana-interface = { path = "../../../zolana/.worktrees/vk-registry/program-libs/interface", features = ["solana"] }
+zolana-program-test = { path = "../../../zolana/.worktrees/vk-registry/sdk-libs/program-test" }
+zolana-test-utils = { path = "../../../zolana/.worktrees/vk-registry/program-tests/test-utils" }
