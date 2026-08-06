@@ -75,6 +75,48 @@ fn a_pairing_term_reports_calls_and_width_separately() {
     );
 }
 
+/// A charged family must appear in the operations that explain the charge.
+///
+/// Decompression and the stock G1 ops were each priced in every cell and shown
+/// in none, the second of them worth 248,436 CU on one baseline cell. Checking
+/// the two by name would leave the next omission to be found by an auditor, so
+/// this walks the families instead.
+#[test]
+fn every_charged_family_appears_in_the_operations_table() {
+    use solana_bn254_decision_bench::{ColumnId, RowId, expected_trace, syscall_families};
+
+    let table = std::fs::read_to_string(research_dir().join("OPERATIONS-TABLE.md"))
+        .expect("OPERATIONS-TABLE.md must be committed");
+    let cost = solana_program_runtime::execution_budget::SVMTransactionExecutionCost::default();
+
+    for row in RowId::ALL {
+        let line = table
+            .lines()
+            .find(|line| line.starts_with(&format!("| {} |", row.label())))
+            .unwrap_or_else(|| panic!("{} has no row", row.label()));
+        for (index, column) in ColumnId::ALL.into_iter().enumerate() {
+            let cell = line.split('|').nth(index.saturating_add(2)).expect("cell");
+            let families = syscall_families(&cost, column, &expected_trace(row, column));
+            for (charge, token) in [
+                (families.decompress, "DEC("),
+                (families.stock_g1, "G1"),
+                (families.msm, "MSM("),
+                (families.gt, "GT("),
+                (families.reduce, "RED("),
+                (families.lincomb, "LC("),
+                (families.hash, "H("),
+            ] {
+                assert!(
+                    charge == 0 || cell.contains(token),
+                    "{}/{} charges {charge} CU of {token} and does not show it",
+                    row.label(),
+                    column.label(),
+                );
+            }
+        }
+    }
+}
+
 /// Poseidon is imported from a measurement of another program, so it must stay
 /// outside the cells and outside the syscall share. Both would price work no
 /// guest here runs.

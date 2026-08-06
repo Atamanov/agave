@@ -79,6 +79,15 @@ fn notation(column: ColumnId, trace: &OperationTrace) -> String {
     if trace.g2_subgroup_checks > 0 {
         parts.push(format!("{}SC", trace.g2_subgroup_checks));
     }
+    // Priced in every cell that carries them, and the largest single term in
+    // the PLONK baseline. An operation the table charges must be an operation
+    // the table shows.
+    if trace.stock_g1_additions > 0 {
+        parts.push(format!("{}G1add", trace.stock_g1_additions));
+    }
+    if trace.stock_g1_multiplications > 0 {
+        parts.push(format!("{}G1mul", trace.stock_g1_multiplications));
+    }
     if trace.final_exponentiations > 0 {
         let n = trace.final_exponentiations;
         parts.push(if n == 1 { "FE".to_owned() } else { format!("{n}FE") });
@@ -125,7 +134,9 @@ fn main() {
         "DEC(nG1+mG2) wire point decompression, paid by every column because a \
          deployment of any of them receives the same compressed proof \u{b7} \
          c\u{d7}pML reads as c pairing calls of p live Miller pairs each, never as \
-         the product \u{b7} pML prepared pair (lines cached, subgroup paid at \
+         the product \u{b7} nG1add and nG1mul stock group ops, which the unbatched \
+         path uses to build its public-input commitment \u{b7} \
+         pML prepared pair (lines cached, subgroup paid at \
          registration) \u{b7} SC G2 subgroup check \u{b7} FE final exponentiation \u{b7} \
          kMSM(np) k MSM syscalls over n points \u{b7} GT(t) target multiexp \u{b7} RED(c/p) PLONK multi-VK reduction over c contexts and p proofs \u{b7} kLC(nt) k scalar inner products over n terms \u{b7} kH(ns) k hash syscalls over n slices \u{b7} CMP FP12 \
          identity compare.\n"
