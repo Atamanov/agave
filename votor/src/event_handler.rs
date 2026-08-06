@@ -2194,6 +2194,174 @@ mod tests {
         ));
     }
 
+    /// AGL-abd83a81: Control — Finalized(first slot of window) records parent_ready for
+    /// that first slot, so a joining validator can Notarize it.
+    ///
+    /// Window [8,9,10,11]: Finalized(8) alone → parent_ready(8) → Block(8) emits Notarize.
+    #[test]
+    fn test_agl_abd83a81_finalized_first_slot_parent_ready_control() {
+        let mut test_context = setup();
+        let root_bank = test_context
+            .bank_forks
+            .read()
+            .unwrap()
+            .sharable_banks()
+            .root();
+
+        // Parent of the window-start block must have a block_id for add_missing_parent_ready.
+        let bank7 = test_context.create_block_only(7, root_bank);
+        let block_id_7 = bank7.block_id().unwrap();
+        let bank8 = test_context.create_block_only(8, bank7);
+        let block_id_8 = bank8.block_id().unwrap();
+
+        let parent_of_8 = Block {
+            slot: 7,
+            block_id: block_id_7,
+        };
+
+        test_context.send_finalized_event(
+            Block {
+                slot: 8,
+                block_id: block_id_8,
+            },
+            true,
+        );
+
+        assert_eq!(
+            test_context
+                .voting_context
+                .vote_history
+                .highest_parent_ready_slot(),
+            Some(8)
+        );
+        assert!(
+            test_context
+                .voting_context
+                .vote_history
+                .is_parent_ready(8, &parent_of_8),
+            "control: Finalized(8) must record parent_ready for window-start slot 8"
+        );
+
+        // Joiner replays the block after seeing finalization → should Notarize.
+        test_context.send_block_event(8, bank8);
+        test_context.check_for_vote(&Vote::new_notarization_vote(Block {
+            slot: 8,
+            block_id: block_id_8,
+        }));
+    }
+
+    /// AGL-abd83a81: Bug — Finalized(intrawindow) then Finalized(first slot) leaves the
+    /// joiner without parent_ready for the window start, so primary Notarize never fires.
+    ///
+    /// Root cause: add_missing_parent_ready / handle_parent_ready_event emit parent_ready
+    /// for the finalized slot (9), setting highest_parent_ready_slot=9. Later Finalized(8)
+    /// is skipped by `highest >= first_slot_of_window`, so parent_ready(8) is never added.
+    /// try_notar(8) needs is_parent_ready(8); try_notar(9) needs voted_notar(8). Both fail.
+    #[test]
+    fn test_agl_abd83a81_finalized_intrawindow_then_first_blocks_recovery() {
+        let mut test_context = setup();
+        let root_bank = test_context
+            .bank_forks
+            .read()
+            .unwrap()
+            .sharable_banks()
+            .root();
+
+        let bank7 = test_context.create_block_only(7, root_bank);
+        let block_id_7 = bank7.block_id().unwrap();
+        let bank8 = test_context.create_block_only(8, bank7);
+        let block_id_8 = bank8.block_id().unwrap();
+        let bank9 = test_context.create_block_only(9, bank8.clone());
+        let block_id_9 = bank9.block_id().unwrap();
+
+        let parent_of_8 = Block {
+            slot: 7,
+            block_id: block_id_7,
+        };
+        let parent_of_9 = Block {
+            slot: 8,
+            block_id: block_id_8,
+        };
+
+        // Join/restart order: intrawindow finalization arrives before window-start.
+        test_context.send_finalized_event(
+            Block {
+                slot: 9,
+                block_id: block_id_9,
+            },
+            true,
+        );
+
+        assert_eq!(
+            test_context
+                .voting_context
+                .vote_history
+                .highest_parent_ready_slot(),
+            Some(9),
+            "Finalized(9) records parent_ready for slot 9 (not window-start 8)"
+        );
+        assert!(
+            test_context
+                .voting_context
+                .vote_history
+                .is_parent_ready(9, &parent_of_9)
+        );
+        assert!(
+            !test_context
+                .voting_context
+                .vote_history
+                .is_parent_ready(8, &parent_of_8),
+            "BUG: parent_ready was NOT recorded for window-start slot 8"
+        );
+
+        // Later Finalized(8) should recover parent_ready(8) for standstill joining,
+        // but the guard highest_parent_ready_slot() >= first_slot_of_window (9 >= 8)
+        // returns None.
+        test_context.send_finalized_event(
+            Block {
+                slot: 8,
+                block_id: block_id_8,
+            },
+            true,
+        );
+
+        assert_eq!(
+            test_context
+                .voting_context
+                .vote_history
+                .highest_parent_ready_slot(),
+            Some(9)
+        );
+        assert!(
+            !test_context
+                .voting_context
+                .vote_history
+                .is_parent_ready(8, &parent_of_8),
+            "BUG: Finalized(8) after Finalized(9) did not record parent_ready(8)"
+        );
+
+        // Replay does not produce Notarize for slot 8 or 9.
+        test_context.send_block_event(8, bank8);
+        test_context.send_block_event(9, bank9);
+        assert!(
+            test_context
+                .voting_context
+                .vote_history
+                .voted_notar(8)
+                .is_none(),
+            "BUG: joiner cannot Notarize window-start slot 8 (missing parent_ready)"
+        );
+        assert!(
+            test_context
+                .voting_context
+                .vote_history
+                .voted_notar(9)
+                .is_none(),
+            "BUG: joiner cannot Notarize intrawindow slot 9 (missing voted_notar(8))"
+        );
+        test_context.check_no_own_vote();
+    }
+
     #[test]
     fn test_received_standstill() {
         let mut test_context = setup();
@@ -2438,5 +2606,212 @@ mod tests {
             false,
         );
         assert!(test_context.local_context.standstill_slot.is_none());
+    }
+
+    /// AGL-0xc1: DoS — Slow-loris leader via FirstShred prevents TimeoutCrashedLeader Skip.
+    ///
+    /// A malicious leader sends exactly 1 shred for a slot quickly, which triggers
+    /// `FirstShred(slot)` and inserts `slot` into `received_shred`. When the
+    /// `TimeoutCrashedLeader(slot)` timer fires (at DELTA_TIMEOUT after ParentReady),
+    /// the handler checks `received_shred.contains(&slot)` and returns early *without*
+    /// voting Skip for the window. The validator is stuck: it cannot skip the slot,
+    /// and the leader can trickle the remaining shreds arbitrarily slowly, delaying
+    /// the block beyond DELTA_TIMEOUT.
+    ///
+    /// This test demonstrates:
+    /// 1. Control: TimeoutCrashedLeader(4) without FirstShred → Skip votes for 4–7
+    /// 2. Attack:  FirstShred(4) then TimeoutCrashedLeader(4) → NO Skip votes (stuck)
+    /// 3. The validator's received_shred contains 4, blocking the Skip path
+    /// 4. No votes are cast for slots 4–7, so the block is delayed beyond DELTA_TIMEOUT
+    #[test]
+    fn test_agl_0xc1_slow_loris_first_shred_blocks_skip() {
+        // ── Control: no shred received, TimeoutCrashedLeader votes Skip ──
+        let mut test_context = setup();
+
+        // TimeoutCrashedLeader for slot 4 → should vote skip 4, 5, 6, 7
+        test_context.send_timeout_crashed_leader_event(4);
+
+        // Assert Skip votes are emitted for the entire window [4, 7]
+        test_context.check_for_vote(&Vote::new_skip_vote(4));
+        test_context.check_for_vote(&Vote::new_skip_vote(5));
+        test_context.check_for_vote(&Vote::new_skip_vote(6));
+        test_context.check_for_vote(&Vote::new_skip_vote(7));
+
+        // In the control case, the validator has voted and is NOT stuck
+        assert!(
+            test_context.voting_context.vote_history.voted(4),
+            "control: validator voted for slot 4"
+        );
+        assert!(
+            test_context.voting_context.vote_history.skipped(4),
+            "control: validator voted skip for slot 4"
+        );
+        assert!(
+            !test_context.local_context.received_shred.contains(&4),
+            "control: no shred received for slot 4"
+        );
+        assert!(test_context.bls_ops.is_empty());
+
+        // ── Attack: malicious leader sends 1 shred, then trickles the rest ──
+        let mut test_context = setup();
+
+        // Step 1: Malicious leader sends a single shred for slot 4.
+        // This triggers FirstShred(4), inserting slot 4 into received_shred.
+        test_context.send_first_shred_event(4);
+
+        // Verify received_shred now contains slot 4
+        assert!(
+            test_context.local_context.received_shred.contains(&4),
+            "attack: received_shred must contain slot 4 after FirstShred"
+        );
+
+        // Step 2: DELTA_TIMEOUT (400ms) elapses — TimeoutCrashedLeader(4) fires.
+        // Because received_shred contains 4, the handler returns early WITHOUT
+        // calling try_skip_window, so NO Skip vote is emitted.
+        test_context.send_timeout_crashed_leader_event(4);
+
+        // Step 3: No Skip vote is emitted for any slot in the window [4, 7].
+        // The validator is stuck — it cannot skip the crashed/slow leader's window.
+        assert!(
+            !test_context.voting_context.vote_history.voted(4),
+            "BUG: validator did NOT vote for slot 4 — stuck waiting for rest of block"
+        );
+        assert!(
+            !test_context.voting_context.vote_history.skipped(4),
+            "BUG: no Skip vote for slot 4 — received_shred blocked TimeoutCrashedLeader"
+        );
+        assert!(
+            !test_context.voting_context.vote_history.voted(5),
+            "BUG: validator did NOT vote for slot 5 — entire window blocked"
+        );
+        assert!(
+            !test_context.voting_context.vote_history.skipped(5),
+            "BUG: no Skip vote for slot 5"
+        );
+        assert!(
+            !test_context.voting_context.vote_history.voted(6),
+            "BUG: validator did NOT vote for slot 6 — entire window blocked"
+        );
+        assert!(
+            !test_context.voting_context.vote_history.skipped(6),
+            "BUG: no Skip vote for slot 6"
+        );
+        assert!(
+            !test_context.voting_context.vote_history.voted(7),
+            "BUG: validator did NOT vote for slot 7 — entire window blocked"
+        );
+        assert!(
+            !test_context.voting_context.vote_history.skipped(7),
+            "BUG: no Skip vote for slot 7"
+        );
+
+        // No BLS ops (votes) generated at all
+        assert!(
+            test_context.bls_ops.is_empty(),
+            "BUG: no BLS ops generated — validator is stuck with no votes"
+        );
+        test_context.check_no_own_vote();
+        test_context.check_no_vote_or_commitment();
+
+        // Step 4: The block is delayed beyond DELTA_TIMEOUT.
+        // The validator cannot progress past this window because:
+        // - It cannot Skip (TimeoutCrashedLeader is blocked by received_shred)
+        // - It cannot Notarize (it never received the full block, only 1 shred)
+        // - The leader can keep trickling shreds, keeping received_shred populated
+        //   and preventing any timeout-based recovery.
+        //
+        // DELTA_TIMEOUT = 400ms, but the block can be delayed indefinitely.
+        // The validator's only hope is the Timeout(s) event (not TimeoutCrashedLeader),
+        // but that also checks voted() — and since no Skip was cast, the validator
+        // remains blocked until the full block arrives.
+        //
+        // This is a slow-loris DoS: minimal effort (1 shred) blocks an entire
+        // leader window, preventing consensus progress for that window.
+        assert!(
+            test_context.local_context.received_shred.contains(&4),
+            "attack: received_shred still contains slot 4 — validator stuck"
+        );
+    }
+
+    /// DoS: A full repair channel causes `blocking_send` to block indefinitely.
+    /// Since the event handler processes events sequentially, a blocked
+    /// `blocking_send` call (via `request_repair`) stalls the entire event
+    /// loop — no timeouts, votes, or other events can be processed.
+    #[test]
+    fn test_dos_repair_channel_blocking_stalls_event_handler() {
+        // 1. Create a repair channel with bounded(100), matching production capacity.
+        let (repair_sender, repair_receiver) = bounded(100);
+
+        // 2. Fill it with 100 RepairEvent::FetchBlock — channel is now full.
+        for slot in 0..100u64 {
+            let event = RepairEvent::FetchBlock {
+                block: Block {
+                    slot,
+                    block_id: Hash::new_unique(),
+                },
+            };
+            repair_sender.try_send(event).unwrap();
+        }
+        assert_eq!(repair_receiver.len(), 100);
+
+        // 3. Show that the next blocking_send call BLOCKS.
+        // Spawn a thread simulating the event handler calling `request_repair`
+        // (which internally calls `blocking_send`).
+        let my_pubkey = Pubkey::new_unique();
+        let sender_clone = repair_sender.clone();
+        let (done_sender, done_receiver) = bounded::<Result<(), &str>>(1);
+
+        let handle = thread::spawn(move || {
+            // This simulates the event handler processing an event that triggers
+            // a repair request. blocking_send will block because the channel is full.
+            let result = blocking_send(
+                &my_pubkey,
+                &sender_clone,
+                RepairEvent::FetchBlock {
+                    block: Block {
+                        slot: 100,
+                        block_id: Hash::new_unique(),
+                    },
+                },
+                "repair_event_sender",
+            );
+            let _ = done_sender.send(result);
+        });
+
+        // Wait 500ms and verify the thread is still blocked — the send hasn't completed.
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(
+            done_receiver.try_recv().is_err(),
+            "blocking_send should have blocked on full channel, but it completed"
+        );
+        assert!(
+            !handle.is_finished(),
+            "event handler thread should still be blocked on repair send —              no other events (timeouts, votes) can be processed while blocked"
+        );
+
+        // 4. Demonstrate that while blocked, the event handler can't process other events.
+        // The event handler processes events one at a time in a sequential loop.
+        // If it's stuck in blocking_send for the repair channel, it cannot receive
+        // or process ANY other event. We verify this by showing the thread is
+        // completely stuck — it hasn't progressed past the blocking_send call.
+
+        // Now drain one item from the channel to unblock the sender.
+        let _drained = repair_receiver.try_recv().unwrap();
+
+        // The blocking_send should now complete.
+        let result = done_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("blocking_send should complete after draining one item");
+        assert!(result.is_ok(), "blocking_send should succeed after draining");
+        handle.join().unwrap();
+
+        // Verify the new event (slot 100) is now in the channel.
+        assert_eq!(repair_receiver.len(), 100);
+        let last = repair_receiver.try_iter().last().unwrap();
+        assert_eq!(last.slot(), 100);
+
+        // Cleanup: drain remaining items.
+        drop(repair_sender);
+        drop(repair_receiver);
     }
 }

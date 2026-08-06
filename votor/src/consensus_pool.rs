@@ -2119,4 +2119,185 @@ mod tests {
         let cert_type = CertificateType::Skip(slot);
         assert!(ctx.generated_cert_types.has_cert(&cert_type));
     }
+
+    // =====================================================================
+    // POC: Accumulator stake double-counting → permanent liveness denial
+    //
+    // When the same validator appears in BOTH Skip and SkipFallback
+    // accumulators for the same slot, try_build_base3_cert double-counts
+    // their stake in the threshold check (primary.stake + fallback.stake).
+    // encode_base3 catches the rank overlap and fails, but the error is
+    // silently swallowed in add_pool_msg. The accumulators are never cleaned,
+    // so every future vote for this slot triggers the same encoding failure.
+    // The slot can NEVER produce a Skip certificate.
+    // =====================================================================
+
+    #[test]
+    fn test_skip_doublecount_permanent_liveness_denial() {
+        let mut ctx = TestContext::new();
+        let bank = ctx.bank_forks.read().unwrap().root_bank();
+        let slot: Slot = 5;
+
+        // Step 1: Validator 0 votes SkipFallback(5).
+        let aggregate = new_vote_aggregate(
+            &bank,
+            &ctx.validators,
+            ctx.pool.cluster_info.my_shred_version(),
+            &Vote::new_skip_fallback_vote(slot),
+            0,
+        );
+        let result = ctx
+            .pool
+            .add_pool_vote(&bank, PoolVote::External(aggregate), &mut vec![]);
+        assert!(result.is_ok(), "SkipFallback from v0 should succeed");
+        assert!(!ctx.pool.skip_certified(slot));
+
+        // Step 2: Validator 0 ALSO votes Skip(5) — overlapping rank 0.
+        // In production this can happen via the own-vote path: SafeToSkip
+        // fires, try_skip_window votes Skip, then SkipFallback is voted.
+        // BLS sigverify blocks this for external votes, but own votes bypass it.
+        let aggregate = new_vote_aggregate(
+            &bank,
+            &ctx.validators,
+            ctx.pool.cluster_info.my_shred_version(),
+            &Vote::new_skip_vote(slot),
+            0,
+        );
+        let result = ctx
+            .pool
+            .add_pool_vote(&bank, PoolVote::External(aggregate), &mut vec![]);
+        assert!(result.is_ok(), "Skip from v0 should succeed (10% < 60%)");
+        assert!(!ctx.pool.skip_certified(slot));
+
+        // Step 3: Validators 1-5 vote Skip(5). Combined stake reaches 60%
+        // due to double-counting validator 0's stake. encode_base3 fails.
+        for rank in 1..6 {
+            let aggregate = new_vote_aggregate(
+                &bank,
+                &ctx.validators,
+                ctx.pool.cluster_info.my_shred_version(),
+                &Vote::new_skip_vote(slot),
+                rank,
+            );
+            let _ = ctx
+                .pool
+                .add_pool_vote(&bank, PoolVote::External(aggregate), &mut vec![]);
+        }
+
+        // LIVENESS BUG: Skip cert cannot be produced
+        assert!(
+            !ctx.pool.skip_certified(slot),
+            "BUG: Skip cert blocked by permanently corrupted accumulators"
+        );
+
+        // Step 4: ALL remaining validators vote Skip(5) — still stuck
+        for rank in 6..10 {
+            let aggregate = new_vote_aggregate(
+                &bank,
+                &ctx.validators,
+                ctx.pool.cluster_info.my_shred_version(),
+                &Vote::new_skip_vote(slot),
+                rank,
+            );
+            let _ = ctx
+                .pool
+                .add_pool_vote(&bank, PoolVote::External(aggregate), &mut vec![]);
+        }
+        assert!(
+            !ctx.pool.skip_certified(slot),
+            "LIVENESS BUG: Even with ALL validators voting Skip, cert cannot be produced"
+        );
+    }
+
+    // =====================================================================
+    // POC: NotarizeFallback cert from fallback-only votes
+    //
+    // A NotarizeFallback cert can be constructed from ONLY NotarizeFallback
+    // votes (no Notarize votes needed). try_build_base3_cert with primary=None
+    // or empty primary produces a valid cert. This cert triggers
+    // BlockNotarFallback and parent_ready events.
+    // =====================================================================
+
+    #[test]
+    fn test_notarize_fallback_from_fallback_only() {
+        let mut ctx = TestContext::new();
+        let bank = ctx.bank_forks.read().unwrap().root_bank();
+        let slot: Slot = 5;
+        let block = Block { slot, block_id: Hash::new_unique() };
+
+        // 7 validators (70% stake) vote NotarizeFallback — no Notarize votes
+        for rank in 0..7 {
+            let aggregate = new_vote_aggregate(
+                &bank,
+                &ctx.validators,
+                ctx.pool.cluster_info.my_shred_version(),
+                &Vote::new_notarization_fallback_vote(block),
+                rank,
+            );
+            let _ = ctx
+                .pool
+                .add_pool_vote(&bank, PoolVote::External(aggregate), &mut vec![]);
+        }
+
+        // NotarizeFallback cert exists — built from fallback-only votes
+        assert!(
+            ctx.pool
+                .completed_certificates
+                .contains_key(&CertificateType::NotarizeFallback(block)),
+            "NotarizeFallback cert should be produced from fallback-only votes"
+        );
+    }
+
+    // =====================================================================
+    // POC: add_aggregate silently double-counts stake for overlapping ranks
+    //
+    // Unlike add_own_vote_message which checks for duplicates, add_aggregate
+    // blindly ORs ranks and ADDS stake. If the same aggregate is fed twice
+    // (e.g. through a bug in the sigverify or replay), stake is inflated
+    // while the bitmap stays correct, potentially producing a cert that
+    // passes the threshold with inflated stake.
+    // =====================================================================
+
+    #[test]
+    fn test_add_aggregate_silently_doublecounts_stake() {
+        use crate::aggregate_accumulator::{AggregateAccumulator, AggregateAccumulatorError};
+
+        let ctx = TestContext::new();
+        let bank = ctx.bank_forks.read().unwrap().root_bank();
+        let slot: Slot = 5;
+        let total_stake = bank
+            .epoch_stakes_from_slot(slot)
+            .unwrap()
+            .bls_pubkey_to_rank_map()
+            .total_stake();
+
+        // Create a single-validator aggregate for Skip(5)
+        let aggregate = new_vote_aggregate(
+            &bank,
+            &ctx.validators,
+            ctx.pool.cluster_info.my_shred_version(),
+            &Vote::new_skip_vote(slot),
+            0,
+        );
+
+        let mut acc = AggregateAccumulator::new(10);
+
+        // Add the SAME aggregate twice — add_aggregate doesn't check duplicates!
+        acc.add_aggregate(&aggregate).unwrap();
+        let stake_after_first = acc.stake();
+        acc.add_aggregate(&aggregate).unwrap();
+        let stake_after_second = acc.stake();
+
+        // BUG: stake is doubled even though ranks bitmap is unchanged
+        assert_eq!(
+            stake_after_second,
+            stake_after_first.saturating_add(aggregate.stake().get()),
+            "BUG: add_aggregate double-counts stake for the same ranks"
+        );
+
+        // The signature is also double-aggregated (corrupted), but the pool
+        // trusts its own locally-produced certs without re-verification.
+        // If enough stake is accumulated this way, a cert with wrong signature
+        // would be inserted into completed_certificates and processed locally.
+    }
 }

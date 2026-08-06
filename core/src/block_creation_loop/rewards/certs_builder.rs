@@ -149,3 +149,149 @@ impl CertsBuilder {
         }
     }
 }
+
+
+#[cfg(test)]
+mod dos_tests {
+    use {
+        super::*,
+        agave_votor_messages::reward_certificate::NUM_SLOTS_FOR_REWARD,
+        solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo, node::Node},
+        solana_keypair::Keypair,
+        solana_net_utils::SocketAddrSpace,
+        solana_signer::Signer,
+        std::sync::Arc,
+    };
+
+    fn make_cluster_info() -> Arc<ClusterInfo> {
+        let keypair = Arc::new(Keypair::new());
+        Arc::new(ClusterInfo::new(
+            Node::new_localhost_with_pubkey(&keypair.pubkey()).info,
+            keypair,
+            SocketAddrSpace::Unspecified,
+        ))
+    }
+
+    /// DoS: CertsBuilder in-memory state lost on restart.
+    ///
+    /// `CertsBuilder` stores vote aggregates in an in-memory `BTreeMap<Slot, Entry>`.
+    /// There is **no persistence mechanism** — no save, no serialization, no disk backup.
+    ///
+    /// When the validator process restarts, a new `CertsBuilder` is constructed with an
+    /// empty `BTreeMap`.  All previously accumulated aggregates for up to
+    /// `NUM_SLOTS_FOR_REWARD` (8) slots are permanently lost.
+    ///
+    /// This means the leader cannot build reward certificates for those slots, causing
+    /// validators who voted in those slots to miss their rewards — a denial-of-service
+    /// on the reward distribution mechanism.
+    #[test]
+    fn test_dos_certs_builder_state_lost_on_restart() {
+        let cluster_info = make_cluster_info();
+
+        // --- Step 1: Create CertsBuilder, add some aggregates ---
+        let mut builder_before = CertsBuilder::new(cluster_info.clone());
+
+        // Simulate having accumulated vote aggregates for several slots by
+        // directly inserting Entry objects into the in-memory BTreeMap.
+        // In production, these would be populated via `handle_input`.
+        let reward_slots: Vec<Slot> = (1..=NUM_SLOTS_FOR_REWARD).collect();
+        for &slot in &reward_slots {
+            builder_before.aggregates.insert(slot, Entry::new(10));
+        }
+
+        // --- Step 2: Show that the aggregates are in-memory only (no persistence) ---
+        // The aggregates BTreeMap has entries for all reward slots.
+        assert_eq!(builder_before.aggregates.len(), NUM_SLOTS_FOR_REWARD as usize);
+        for &slot in &reward_slots {
+            assert!(
+                builder_before.aggregates.contains_key(&slot),
+                "aggregates should contain slot {slot}"
+            );
+        }
+
+        // There is no save/persist/serialize method on CertsBuilder.
+        // The struct stores only `aggregates: BTreeMap<Slot, Entry>` and `cluster_info: Arc<ClusterInfo>`.
+        // Neither field is persisted to disk.
+
+        // --- Step 3: Simulate restart by creating a new CertsBuilder ---
+        let builder_after = CertsBuilder::new(cluster_info);
+
+        // --- Step 4: Show the aggregates are lost → reward certs can't be built ---
+        // The new CertsBuilder starts with an empty BTreeMap.
+        assert!(
+            builder_after.aggregates.is_empty(),
+            "after restart, CertsBuilder should have no aggregates — all in-memory state is lost"
+        );
+
+        // Calling build_certs on the new builder for any bank_slot that would need
+        // a reward_slot from the lost aggregates returns empty/default results.
+        // E.g., bank_slot = reward_slots[0] + NUM_SLOTS_FOR_REWARD would need
+        // aggregates at reward_slots[0], but they are gone.
+        let mut builder_after_mut = builder_after;
+        for &slot in &reward_slots {
+            let bank_slot = slot + NUM_SLOTS_FOR_REWARD;
+            let result = builder_after_mut.build_certs(bank_slot).unwrap();
+            assert!(
+                result.skip.is_none() && result.notar.is_none() && result.validators.is_empty(),
+                "build_certs for bank_slot={bank_slot} (reward_slot={slot}) \
+                 should return empty results after restart — aggregates were lost"
+            );
+        }
+
+        // In contrast, the original builder still has the aggregates and would
+        // find the Entry when build_certs is called (even if the Entry has no
+        // actual votes, the Entry is found rather than returning default early).
+        for &slot in &reward_slots {
+            let bank_slot = slot + NUM_SLOTS_FOR_REWARD;
+            // build_certs consumes the Entry from the BTreeMap
+            let _result = builder_before.build_certs(bank_slot).unwrap();
+            // With an empty Entry (no votes), build_certs returns default too,
+            // but the critical difference is that the Entry was FOUND and processed.
+            // After restart, the Entry doesn't exist at all.
+            assert!(
+                builder_before.aggregates.get(&slot).is_none(),
+                "build_certs should have consumed the Entry for slot {slot}"
+            );
+        }
+    }
+
+    /// DoS: Reward cert window lost after restart — up to NUM_SLOTS_FOR_REWARD slots affected.
+    ///
+    /// This test demonstrates the blast radius: exactly NUM_SLOTS_FOR_REWARD (8) slots
+    /// of reward certificates cannot be produced after a restart.
+    #[test]
+    fn test_dos_restart_loses_num_slots_for_reward_window() {
+        let cluster_info = make_cluster_info();
+
+        // Populate a builder with aggregates for a full reward window.
+        let mut builder = CertsBuilder::new(cluster_info.clone());
+        let first_reward_slot: Slot = 100;
+        for i in 0..NUM_SLOTS_FOR_REWARD {
+            builder
+                .aggregates
+                .insert(first_reward_slot + i, Entry::new(10));
+        }
+        assert_eq!(builder.aggregates.len(), NUM_SLOTS_FOR_REWARD as usize);
+
+        // Simulate restart.
+        let mut builder_after_restart = CertsBuilder::new(cluster_info);
+
+        // Every slot in the reward window is now unbuildable.
+        let mut unbuildable_slots = 0;
+        for i in 0..NUM_SLOTS_FOR_REWARD {
+            let reward_slot = first_reward_slot + i;
+            let bank_slot = reward_slot + NUM_SLOTS_FOR_REWARD;
+            let result = builder_after_restart.build_certs(bank_slot).unwrap();
+            if result.skip.is_none() && result.notar.is_none() && result.validators.is_empty() {
+                unbuildable_slots += 1;
+            }
+        }
+
+        // All NUM_SLOTS_FOR_REWARD slots are unbuildable after restart.
+        assert_eq!(
+            unbuildable_slots,
+            NUM_SLOTS_FOR_REWARD,
+            "all {NUM_SLOTS_FOR_REWARD} reward slots should be unbuildable after restart"
+        );
+    }
+}

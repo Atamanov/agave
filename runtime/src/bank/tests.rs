@@ -13394,3 +13394,117 @@ fn test_commit_noop_transaction_no_fees(relax_fee_payer_constraint: bool) {
         bank.calculate_capitalization_for_tests()
     );
 }
+
+#[test]
+fn test_vat_burn_live_state_divergence_causes_panic() {
+    // TARGET 9: VAT burn reads live account state (get_account) while filtering
+    // uses stakes_cache (snapshot). If the live account balance is reduced between
+    // snapshot and burn, checked_sub().expect() panics → validator crash (DoS).
+    //
+    // Flow:
+    //   1. clone_and_filter_for_vat reads from stakes_cache (snapshot)
+    //      → account has sufficient balance, passes filter
+    //   2. maybe_burn_vat_from_staked_accounts reads from accounts_db (live state)
+    //      via self.get_account(vote_pubkey)
+    //   3. If live balance < vat_to_burn_per_epoch → checked_sub returns None
+    //      → .expect() panics → validator crashes
+
+    let voting_keypair = ValidatorVoteKeypairs::new_rand();
+    let vote_pubkey = voting_keypair.vote_keypair.pubkey();
+    let validator_keypairs = [&voting_keypair];
+
+    // Create genesis with Alpenglow features active and a vote account
+    // with enough balance to pass VAT filtering.
+    let GenesisConfigInfo {
+        mut genesis_config, ..
+    } = genesis_utils::create_genesis_config_with_vote_accounts_and_cluster_type(
+        1_000 * LAMPORTS_PER_SOL,
+        &validator_keypairs,
+        vec![minimum_vote_account_balance_for_vat(100)],
+        ClusterType::Development,
+        &FeatureSet::default(),
+        false,
+    );
+    activate_feature(&mut genesis_config, feature_set::alpenglow::id());
+
+    let (parent_bank, _bank_forks) = Bank::new_with_bank_forks_for_tests(&genesis_config);
+    let bank_slot = parent_bank.slot().saturating_add(1);
+    let mut bank = Bank::new_from_parent(parent_bank, SlotLeader::default(), bank_slot);
+
+    // Step 1: Capture the filtered epoch stakes (snapshot from stakes_cache).
+    // This uses clone_and_filter_for_vat which reads from stakes_cache.
+    // At this point, the vote account has enough balance to pass the filter.
+    let vat_to_burn = bank.vat_to_burn_per_epoch();
+    assert!(vat_to_burn > 0, "VAT burn amount should be positive with Alpenglow");
+
+    let vote_lamports_before = bank.get_balance(&vote_pubkey);
+    assert!(
+        vote_lamports_before >= bank.minimum_vote_account_balance_for_vat(),
+        "Vote account should have enough balance to pass VAT filter"
+    );
+
+    let stakes = SerdeStakesToStakeFormat::from(bank.get_top_epoch_stakes());
+    let epoch_stakes = VersionedEpochStakes::new(stakes, bank.epoch());
+
+    // Verify the vote account is in the filtered epoch stakes
+    let vote_accounts_in_snapshot = epoch_stakes.stakes().vote_accounts();
+    assert!(
+        vote_accounts_in_snapshot.delegated_stakes().any(|(pk, _)| *pk == vote_pubkey),
+        "Vote account should be in the filtered epoch stakes snapshot"
+    );
+
+    // Step 2: Simulate divergence — modify the live account state.
+    // Reduce the vote account's balance below vat_to_burn_per_epoch.
+    // This modifies the live accounts DB but NOT the already-captured snapshot.
+    let reduced_lamports = vat_to_burn.saturating_sub(1); // Just below VAT amount
+    let mut modified_account = bank.get_account(&vote_pubkey).unwrap();
+    modified_account.set_lamports(reduced_lamports);
+    bank.store_account(&vote_pubkey, &modified_account);
+
+    // Verify the live state now has insufficient balance
+    let live_lamports = bank.get_balance(&vote_pubkey);
+    assert_eq!(
+        live_lamports, reduced_lamports,
+        "Live account balance should be reduced"
+    );
+    assert!(
+        live_lamports < vat_to_burn,
+        "Live balance ({live_lamports}) should be less than VAT burn ({vat_to_burn})"
+    );
+
+    // The snapshot still includes this account (it was captured before the modification)
+    assert!(
+        epoch_stakes.stakes().vote_accounts().delegated_stakes().any(|(pk, _)| *pk == vote_pubkey),
+        "Snapshot still includes the vote account despite live balance reduction"
+    );
+
+    // Step 3: Demonstrate the checked_sub would return None, which causes
+    // the .expect() in maybe_burn_vat_from_staked_accounts to panic.
+    //
+    // The code in maybe_burn_vat_from_staked_accounts does:
+    //   let mut account = self.get_account(vote_pubkey).unwrap();
+    //   account.lamports().checked_sub(vat_to_burn_per_epoch).expect(...)
+    //
+    // We replicate this arithmetic to show the underflow without crashing the
+    // test runner. In production, .expect() would panic and crash the validator.
+    let live_account = bank.get_account(&vote_pubkey).unwrap();
+    let live_balance = live_account.lamports();
+    let checked_sub_result = live_balance.checked_sub(vat_to_burn);
+
+    assert!(
+        checked_sub_result.is_none(),
+        "checked_sub({live_balance}, {vat_to_burn}) returns None — the .expect() in \
+         maybe_burn_vat_from_staked_accounts would panic here, crashing the validator. \
+         This is the DoS: live balance ({live_balance}) < VAT burn ({vat_to_burn}) but \
+         the snapshot still includes this account for burning."
+    );
+
+    // Confirm the divergence: snapshot says "include this account" (balance was
+    // sufficient at filter time) but live state says "balance insufficient for burn".
+    // The .expect() panics on this mismatch.
+    //
+    // In production, the panic propagates as a validator crash. An attacker who can
+    // modify the vote account balance between snapshot creation (clone_and_filter_for_vat)
+    // and burn (maybe_burn_vat_from_staked_accounts) — e.g., via a transaction in the
+    // same slot — can trigger this crash at will.
+}

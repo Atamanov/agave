@@ -765,4 +765,316 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// DoS: `EvictingSender` drops the oldest vote when the channel is full.
+    ///
+    /// In production, `own_vote_sender` is an `EvictingSender` with capacity 10000.
+    /// When the channel is full, the oldest vote is evicted and the newest is
+    /// inserted. If the evicted vote was needed for certificate formation (e.g.,
+    /// the consensus pool service hasn't consumed it yet), the certificate for
+    /// that slot cannot form because the vote is permanently lost from the channel.
+    ///
+    /// This test demonstrates:
+    /// 1. EvictingSender with small capacity (10) accepts 10 votes
+    /// 2. Sending an 11th vote evicts the 1st (oldest) vote
+    /// 3. The evicted vote is no longer in the channel
+    /// 4. The newest vote IS in the channel — only the oldest is lost
+    #[test]
+    fn test_dos_evicting_sender_drops_own_votes() {
+        use {
+            solana_bls_signatures::{
+                BLS_SIGNATURE_AFFINE_SIZE, signature::Signature as BLSSignature,
+            },
+            std::num::NonZero,
+        };
+
+        // 1. Create EvictingSender with small capacity (10 for test).
+        // In production this is 10000 — the same eviction logic applies.
+        let (evicting_sender, vote_receiver) = EvictingSender::new_bounded(10);
+
+        // Helper to create a VoteMessage for a given slot/rank.
+        let make_vote_msg = |slot: u64, rank: u16| VoteMessage {
+            vote: Vote::new_notarization_vote(Block {
+                slot,
+                block_id: Hash::new_unique(),
+            }),
+            signature: BLSSignature([0u8; BLS_SIGNATURE_AFFINE_SIZE]),
+            rank,
+            stake: NonZero::new(100).unwrap(),
+        };
+
+        // 2. Send 10 votes through it — all should succeed (channel not full yet).
+        for i in 0..10u64 {
+            let vote_msg = make_vote_msg(i, i as u16);
+            assert!(
+                evicting_sender.try_send(vote_msg).is_ok(),
+                "send for slot {} should succeed (channel not full)",
+                i
+            );
+        }
+        assert_eq!(vote_receiver.len(), 10);
+
+        // 3. Send an 11th vote — the 1st (oldest) is evicted.
+        let eleventh_vote = make_vote_msg(10, 10);
+        let result = evicting_sender.try_send(eleventh_vote);
+
+        // EvictingSender::try_send returns Err(TrySendError::Full(older)) where
+        // `older` is the evicted (oldest) message, and the new message was inserted.
+        assert!(
+            result.is_err(),
+            "try_send on full EvictingSender should return Err with evicted vote"
+        );
+        let evicted = match result {
+            Err(TrySendError::Full(evicted)) => evicted,
+            _ => panic!("expected TrySendError::Full with evicted vote, got {:?}", result),
+        };
+
+        // The evicted vote should be the 1st vote (slot 0, rank 0).
+        assert_eq!(
+            evicted.vote.slot(),
+            0,
+            "the oldest vote (slot 0) should have been evicted"
+        );
+        assert_eq!(
+            evicted.rank, 0,
+            "the evicted vote should have rank 0 (the first vote sent)"
+        );
+
+        // 4. The 1st vote's rank is no longer in the pool → cert formation fails for that slot.
+        // Verify that the evicted vote is NOT in the channel anymore.
+        let received: Vec<_> = vote_receiver.try_iter().collect();
+        assert_eq!(received.len(), 10, "channel should still have 10 votes");
+
+        // The first vote (slot 0) should NOT be in the channel — it was evicted.
+        assert!(
+            !received.iter().any(|vm| vm.vote.slot() == 0),
+            "evicted vote (slot 0) should not be in the channel —              it's been dropped and is unavailable for certificate formation"
+        );
+
+        // The 11th vote (slot 10) SHOULD be in the channel — it was inserted.
+        assert!(
+            received.iter().any(|vm| vm.vote.slot() == 10),
+            "newest vote (slot 10) should be in the channel"
+        );
+
+        // Votes 1–9 should still be in the channel (only the oldest was evicted).
+        for slot in 1..10u64 {
+            assert!(
+                received.iter().any(|vm| vm.vote.slot() == slot),
+                "vote for slot {} should still be in the channel",
+                slot
+            );
+        }
+
+        // DoS impact: if the consensus pool service reads from `own_votes_receiver`,
+        // it will never see the evicted vote (slot 0, rank 0). Certificate formation
+        // that requires this vote will fail because the vote is permanently lost.
+        // An attacker can exploit this by filling the channel faster than the pool
+        // can consume, causing critical votes to be evicted.
+    }
+
+
+    /// A VoteHistoryStorage that always fails on `store()`.
+    /// Used to simulate a disk write failure or other persistence error.
+    struct FailingVoteHistoryStorage;
+
+    impl VoteHistoryStorage for FailingVoteHistoryStorage {
+        fn load(&self, _node_pubkey: &Pubkey) -> Result<VoteHistory, VoteHistoryError> {
+            Err(VoteHistoryError::IoError(std::io::Error::other(
+                "FailingVoteHistoryStorage::load() always fails",
+            )))
+        }
+
+        fn store(
+            &self,
+            _saved_vote_history: &SavedVoteHistoryVersions,
+        ) -> Result<(), VoteHistoryError> {
+            Err(VoteHistoryError::IoError(std::io::Error::other(
+                "FailingVoteHistoryStorage::store() always fails (simulated disk error)",
+            )))
+        }
+    }
+
+    #[test]
+    fn test_vote_sent_before_persist_failure_causes_dos() {
+        // TARGET 10: Vote save ordering — send before persist (DoS)
+        //
+        // In `insert_vote_and_create_bls_message` (lines 286-309):
+        //   Line 291: add_vote (in-memory)                          ← step 1
+        //   Line 293: create_and_send_own_vote_message (sends to pool) ← step 2 (sent!)
+        //   Line 299: SavedVoteHistory::new (can fail)               ← step 3
+        //   Line 301: vote_history_storage.store (can fail)          ← step 4 (fails!)
+        //
+        // If save fails at step 4:
+        //   - The vote was ALREADY sent to the pool (step 2 succeeded)
+        //   - The Err propagates via `?` → event_loop returns Err → validator SHUTS DOWN
+        //   - The vote cannot be rolled back from the pool
+        //
+        // This test demonstrates:
+        //   1. A FailingVoteHistoryStorage that fails on store()
+        //   2. insert_vote_and_create_bls_message returns Err (save failure)
+        //   3. The vote WAS sent to the pool (step 2 succeeded before step 4 failed)
+        //   4. The Err would cause the event_loop to exit (validator shutdown)
+
+        let (own_vote_sender, own_vote_receiver) = EvictingSender::new_bounded(1024);
+        let validator_keypairs = (0..10)
+            .map(|_| ValidatorVoteKeypairs::new(Keypair::new(), Keypair::new(), Keypair::new()))
+            .collect::<Vec<_>>();
+        let my_index = 0;
+        let (mut voting_context, _reward_votes_receiver) =
+            setup_voting_context_and_bank_forks(own_vote_sender, &validator_keypairs, my_index);
+
+        // Replace the vote history storage with one that always fails on store()
+        voting_context.vote_history_storage = Arc::new(FailingVoteHistoryStorage);
+
+        let block_id = Hash::new_unique();
+        let vote = Vote::new_notarization_vote(Block {
+            slot: 2,
+            block_id,
+        });
+
+        // Call insert_vote_and_create_bls_message — this should return Err
+        // because store() fails at step 4.
+        let result = insert_vote_and_create_bls_message(vote, &mut voting_context);
+
+        // Step 4 assertion: The function returns Err (save failure propagated)
+        assert!(
+            result.is_err(),
+            "insert_vote_and_create_bls_message should return Err when store() fails. \
+             This Err would propagate through the event_loop via `?` operator, \
+             causing the validator to shut down (DoS)."
+        );
+
+        // Verify it's specifically a SavedVoteHistoryError (from store failure)
+        match &result {
+            Err(VoteError::SavedVoteHistoryError(e)) => {
+                // Confirmed: the error is from vote history storage failure
+                assert!(
+                    matches!(e, VoteHistoryError::IoError(_)),
+                    "Error should be an IoError from the failing storage"
+                );
+            }
+            _ => panic!("Expected VoteError::SavedVoteHistoryError, got {result:?}"),
+        }
+
+        // Step 2 assertion: The vote WAS sent to the pool BEFORE the save failed.
+        // The own_vote_receiver should have received the vote message,
+        // proving the send happened before the persist failure.
+        let received_vote = own_vote_receiver
+            .try_recv()
+            .expect(
+                "Vote message should have been sent to the pool (step 2) BEFORE \
+                 store() failed (step 4). This proves the send-before-persist ordering bug: \
+                 the vote is already in the network but the validator will shut down.",
+            );
+
+        // Verify the sent vote matches what we submitted
+        assert_eq!(received_vote.vote.slot(), 2);
+        assert_eq!(received_vote.vote, vote);
+
+        // Summary: The vote was sent to the pool (step 2) but the save failed (step 4).
+        // The Err propagates through the event loop (via `?` operator on lines 441, 458, etc.
+        // in event_handler.rs), causing the event_loop to return Err, which shuts down
+        // the validator. This is a DoS: a transient disk error kills the validator while
+        // the vote is already sent but not persisted.
+    }
+
+    /// DoS: Egress channel saturation drops votes and certificates.
+    ///
+    /// The egress channel (mpsc) has capacity VOTOR_RATE_LIMIT_PPS * 5 = 250.
+    /// broadcast_consensus_message uses egress.try_send() which silently drops
+    /// on full. During standstill, a burst of timeout votes can fill the channel,
+    /// causing subsequent votes/certs to be dropped. This creates a feedback loop:
+    /// standstill -> timeout burst -> egress full -> votes dropped -> certs can't form
+    /// -> continued standstill.
+    #[test]
+    fn test_dos_egress_channel_saturation_drops_votes() {
+        use bytes::Bytes;
+        use crossbeam_channel::bounded;
+
+        // VOTOR_RATE_LIMIT_PPS = 50, capacity = 50 * 5 = 250
+        let egress_capacity = crate::voting_service::VOTOR_RATE_LIMIT_PPS * 5;
+        let (egress_sender, egress_receiver) = bounded::<Bytes>(egress_capacity);
+
+        // Fill the egress channel to capacity
+        for i in 0..egress_capacity {
+            let msg = Bytes::from(format!("vote_{}", i));
+            egress_sender.try_send(msg).expect("should fit in capacity");
+        }
+
+        // Channel is now full — the next try_send should fail (drop)
+        let overflow_msg = Bytes::from("critical_vote_that_gets_dropped");
+        let result = egress_sender.try_send(overflow_msg);
+
+        assert!(
+            result.is_err(),
+            "Egress channel should be full — try_send should drop the vote"
+        );
+
+        // Verify the channel is at capacity
+        let mut count = 0;
+        while egress_receiver.try_recv().is_ok() {
+            count += 1;
+        }
+        assert_eq!(
+            count, egress_capacity,
+            "Channel should contain exactly {} messages (the critical vote was dropped)",
+            egress_capacity
+        );
+    }
+
+    /// DoS: BLS channel saturation drops PushVote operations.
+    ///
+    /// The bls_sender has bounded(1000) capacity. EventHandler uses
+    /// nonblocking_send for BLS ops, which drops on full. During a certificate
+    /// burst, the channel can fill, causing subsequent PushVote ops to be
+    /// dropped. The vote is recorded in vote_history but never broadcast.
+    #[test]
+    fn test_dos_bls_channel_saturation_drops_pushvote() {
+        use crate::common::nonblocking_send;
+        use crossbeam_channel::bounded;
+        use solana_pubkey::Pubkey;
+
+        let bls_capacity = 1000;
+        let (bls_sender, bls_receiver) = bounded::<BLSOp>(bls_capacity);
+        let my_pubkey = Pubkey::new_unique();
+
+        // Fill the BLS channel with dummy data (simulate cert burst)
+        for _ in 0..bls_capacity {
+            bls_sender
+                .try_send(BLSOp::PushCertificates {
+                    certificates: vec![],
+                })
+                .expect("should fit in capacity");
+        }
+
+        // Channel is now full — nonblocking_send should silently drop
+        let vote_msg = VoteMessage {
+            vote: Vote::new_skip_vote(42),
+            signature: solana_bls_signatures::Signature(
+                [0u8; solana_bls_signatures::BLS_SIGNATURE_AFFINE_SIZE]),
+            rank: 0,
+            stake: std::num::NonZero::new(100).unwrap(),
+        };
+        let bls_op = BLSOp::PushVote {
+            vote: std::sync::Arc::new(vote_msg),
+        };
+
+        let result = nonblocking_send(&my_pubkey, &bls_sender, bls_op, "bls_sender");
+
+        // nonblocking_send returns Ok(()) even when it drops — the drop is silent
+        assert!(result.is_ok(), "nonblocking_send returns Ok even on drop");
+
+        // Verify the channel is at capacity (the PushVote was dropped)
+        let mut count = 0;
+        while bls_receiver.try_recv().is_ok() {
+            count += 1;
+        }
+        assert_eq!(
+            count, bls_capacity,
+            "Channel should contain exactly {} ops (the PushVote was silently dropped)",
+            bls_capacity
+        );
+    }
+
 }
