@@ -16,8 +16,8 @@ fn notation(column: ColumnId, trace: &OperationTrace) -> String {
     let mut prepared = 0u32;
     let mut lane_wide = false;
     for call in trace.pairing_checks.iter().chain(&trace.pairing_maps) {
-        live += call.full_pairs * call.calls;
-        prepared += call.registered_pairs * call.calls;
+        live = live.saturating_add(call.full_pairs.saturating_mul(call.calls));
+        prepared = prepared.saturating_add(call.registered_pairs.saturating_mul(call.calls));
         lane_wide |= call.pairs >= 8;
     }
     let mark = if lane_wide { "\u{2078}" } else { "" };
@@ -35,7 +35,7 @@ fn notation(column: ColumnId, trace: &OperationTrace) -> String {
         parts.push(if n == 1 { "FE".to_owned() } else { format!("{n}FE") });
     }
     let calls: u32 = trace.msm_calls.iter().map(|c| c.calls).sum();
-    let points: u32 = trace.msm_calls.iter().map(|c| c.points * c.calls).sum();
+    let points: u32 = trace.msm_calls.iter().map(|c| c.points.saturating_mul(c.calls)).sum();
     if calls > 0 {
         parts.push(format!("{calls}MSM({points}p)"));
     }

@@ -259,7 +259,7 @@ fn with_fp12_fold_lincombs(mut trace: OperationTrace, proofs: u32, keys: u32) ->
         calls.push(FrLincombCall::one(proofs));
         calls
     } else {
-        vec![FrLincombCall::one(1); 3 * proofs as usize]
+        vec![FrLincombCall::one(1); (proofs as usize).saturating_mul(3)]
     };
     trace
 }

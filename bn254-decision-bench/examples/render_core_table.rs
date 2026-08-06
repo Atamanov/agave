@@ -67,7 +67,7 @@ fn main() {
         for column in ColumnId::ALL {
             let core = syscall_cu(&cost, column, &expected_trace(row, column));
             match residual.get(&key(row, column)) {
-                Some(r) => print!(" {} |", core + r),
+                Some(r) => print!(" {} |", core.saturating_add(*r)),
                 None => print!(" {core} +? |"),
             }
         }
