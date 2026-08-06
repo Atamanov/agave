@@ -92,30 +92,67 @@ fn notation(column: ColumnId, trace: &OperationTrace) -> String {
         let n = trace.final_exponentiations;
         parts.push(if n == 1 { "FE".to_owned() } else { format!("{n}FE") });
     }
-    let calls: u32 = trace.msm_calls.iter().map(|c| c.calls).sum();
-    let points: u32 = trace.msm_calls.iter().map(|c| c.points.saturating_mul(c.calls)).sum();
-    if calls > 0 {
-        parts.push(format!("{calls}MSM({points}p)"));
+    // MSM charges its base once per call, so call widths cannot be summed into
+    // one figure. Eight calls totalling thirteen points cost 9,396 CU where one
+    // call of thirteen points costs 5,315.
+    let mut widths: Vec<u32> = Vec::new();
+    for call in &trace.msm_calls {
+        for _ in 0..call.calls {
+            widths.push(call.points);
+        }
+    }
+    if !widths.is_empty() {
+        widths.sort_unstable();
+        let mut runs: Vec<String> = Vec::new();
+        let mut index = 0;
+        while index < widths.len() {
+            let width = widths[index];
+            let count = widths[index..].iter().take_while(|w| **w == width).count();
+            runs.push(if count == 1 {
+                format!("MSM({width}p)")
+            } else {
+                format!("{count}\u{d7}MSM({width}p)")
+            });
+            index = index.saturating_add(count);
+        }
+        parts.push(runs.join("+"));
     }
     for call in &trace.gt_target_multiexp_calls {
         parts.push(format!("GT({}t)", call.targets));
     }
     for call in &trace.plonk_multi_vk_reduce_calls {
-        parts.push(format!("RED({}c/{}p)", call.contexts, call.proofs));
+        // Public inputs drive both the Lagrange term and the transcript term,
+        // so a reader cannot reproduce the charge without them.
+        let shape = format!("RED({}c/{}p/{}i)", call.contexts, call.proofs, call.public_inputs);
+        parts.push(if call.calls == 1 { shape } else { format!("{}\u{d7}{shape}", call.calls) });
     }
-    let lincombs: u32 = trace.fr_lincomb_calls.iter().map(|c| c.calls).sum();
-    let terms: u32 = trace
-        .fr_lincomb_calls
-        .iter()
-        .map(|c| c.terms.saturating_mul(c.calls))
-        .sum();
-    if lincombs > 0 {
-        parts.push(format!("{lincombs}LC({terms}t)"));
+    let mut lincombs: Vec<u32> = Vec::new();
+    for call in &trace.fr_lincomb_calls {
+        for _ in 0..call.calls {
+            lincombs.push(call.terms);
+        }
+    }
+    if !lincombs.is_empty() {
+        lincombs.sort_unstable();
+        let mut runs: Vec<String> = Vec::new();
+        let mut index = 0;
+        while index < lincombs.len() {
+            let terms = lincombs[index];
+            let count = lincombs[index..].iter().take_while(|t| **t == terms).count();
+            runs.push(if count == 1 {
+                format!("LC({terms}t)")
+            } else {
+                format!("{count}\u{d7}LC({terms}t)")
+            });
+            index = index.saturating_add(count);
+        }
+        parts.push(runs.join("+"));
     }
     if trace.hash_syscalls.calls > 0 {
+        // The byte term is the largest part of the hash charge and was invisible.
         parts.push(format!(
-            "{}H({}s)",
-            trace.hash_syscalls.calls, trace.hash_syscalls.slices
+            "{}H({}s,{}b)",
+            trace.hash_syscalls.calls, trace.hash_syscalls.slices, trace.hash_syscalls.byte_cu
         ));
     }
     if matches!(column, ColumnId::CurrentFp12 | ColumnId::BatchFp12B5) {
@@ -138,7 +175,8 @@ fn main() {
          path uses to build its public-input commitment \u{b7} \
          pML prepared pair (lines cached, subgroup paid at \
          registration) \u{b7} SC G2 subgroup check \u{b7} FE final exponentiation \u{b7} \
-         kMSM(np) k MSM syscalls over n points \u{b7} GT(t) target multiexp \u{b7} RED(c/p) PLONK multi-VK reduction over c contexts and p proofs \u{b7} kLC(nt) k scalar inner products over n terms \u{b7} kH(ns) k hash syscalls over n slices \u{b7} CMP FP12 \
+         c\u{d7}MSM(np) c MSM calls of n points each, listed by width because the \
+         base is charged per call \u{b7} GT(t) target multiexp \u{b7} RED(c/p/i) PLONK multi-VK reduction over c contexts, p proofs and i public inputs \u{b7} c\u{d7}LC(nt) c inner products of n terms each \u{b7} kH(ns,mb) k hash syscalls over n slices carrying m CU of byte charge \u{b7} nFE n final exponentiations \u{b7} CMP FP12 \
          identity compare.\n"
     );
     println!(
