@@ -12,18 +12,49 @@ use {
     solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
 };
 
+/// Syscall CU for one cell, split by the syscall that charges it.
+///
+/// The split exists so a reader can see which family carries a cell's share.
+/// A share that rests on one family is a different claim from one spread
+/// across the pairing and MSM work the column is named after.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SyscallFamilies {
+    pub pairing: u64,
+    pub msm: u64,
+    pub stock_g1: u64,
+    pub lincomb: u64,
+    pub hash: u64,
+    pub reduce: u64,
+    pub gt: u64,
+}
+
+impl SyscallFamilies {
+    pub fn total(&self) -> u64 {
+        [self.pairing, self.msm, self.stock_g1, self.lincomb, self.hash, self.reduce, self.gt]
+            .into_iter()
+            .fold(0u64, u64::saturating_add)
+    }
+}
+
 /// Syscall CU for one cell: the charge a validator meters, and nothing else.
 pub fn syscall_cu(
     cost: &SVMTransactionExecutionCost,
     column: ColumnId,
     trace: &OperationTrace,
 ) -> u64 {
-    // Current keeps the stock precompile; every other column reaches the batch
-    // syscalls and is priced by the fitted schedule.
+    syscall_families(cost, column, trace).total()
+}
+
+pub fn syscall_families(
+    cost: &SVMTransactionExecutionCost,
+    column: ColumnId,
+    trace: &OperationTrace,
+) -> SyscallFamilies {
     // Current keeps the stock precompile; every other column reaches the batch
     // syscalls. Current + Fp12 is a third case: it stays per-proof independent
     // but its finalizer is `pairing_map`, which has no stock equivalent.
     let stock = matches!(column, ColumnId::Current | ColumnId::CurrentFp12);
+    let mut families = SyscallFamilies::default();
     let mut cu = 0u64;
     for call in &trace.pairing_checks {
         let each = if stock {
@@ -41,6 +72,9 @@ pub fn syscall_cu(
         };
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(each));
     }
+    families.pairing = cu;
+
+    cu = 0;
     for call in &trace.msm_calls {
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
             cost.alt_bn128_g1_msm_base_cost.saturating_add(
@@ -49,17 +83,20 @@ pub fn syscall_cu(
             ),
         ));
     }
+    families.msm = cu;
+
     // The unbatched path forms its public-input commitment with stock G1
     // operations rather than an MSM syscall. They are metered, and the residual
     // subtracts them, so omitting them here understates the baseline.
-    cu = cu.saturating_add(
-        cost.alt_bn128_g1_addition_cost
-            .saturating_mul(u64::from(trace.stock_g1_additions)),
-    );
-    cu = cu.saturating_add(
-        cost.alt_bn128_g1_multiplication_cost
-            .saturating_mul(u64::from(trace.stock_g1_multiplications)),
-    );
+    families.stock_g1 = cost
+        .alt_bn128_g1_addition_cost
+        .saturating_mul(u64::from(trace.stock_g1_additions))
+        .saturating_add(
+            cost.alt_bn128_g1_multiplication_cost
+                .saturating_mul(u64::from(trace.stock_g1_multiplications)),
+        );
+
+    cu = 0;
     for call in &trace.fr_lincomb_calls {
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
             cost.alt_bn128_fr_lincomb_base_cost.saturating_add(
@@ -68,11 +105,15 @@ pub fn syscall_cu(
             ),
         ));
     }
-    cu = cu.saturating_add(crate::hash_syscall_cu(
+    families.lincomb = cu;
+
+    families.hash = crate::hash_syscall_cu(
         u64::from(trace.hash_syscalls.calls),
         u64::from(trace.hash_syscalls.slices),
         u64::from(trace.hash_syscalls.byte_cu),
-    ));
+    );
+
+    cu = 0;
     for call in &trace.plonk_multi_vk_reduce_calls {
         // Same formula the runtime charges: the fitted scalar schedule plus the
         // transcript keccaks it replays on the guest's behalf.
@@ -95,6 +136,9 @@ pub fn syscall_cu(
             u64::from(call.calls).saturating_mul(scalar.saturating_add(transcript)),
         );
     }
+    families.reduce = cu;
+
+    cu = 0;
     for call in &trace.gt_target_multiexp_calls {
         cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
             cost.alt_bn128_gt_multiexp_base_cost.saturating_add(
@@ -103,7 +147,9 @@ pub fn syscall_cu(
             ),
         ));
     }
-    cu
+    families.gt = cu;
+
+    families
 }
 
 /// How a cell's transaction CU divides between the syscall and the guest.

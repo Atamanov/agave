@@ -8,18 +8,26 @@
 
 use {
     solana_bn254_decision_bench::{
-        ColumnId, MIN_SYSCALL_SHARE_PER_MILLE, RowId, SYSCALL_BEARING_COLUMNS, cost_split,
+        ColumnId, CostSplit, MIN_SYSCALL_SHARE_PER_MILLE, RowId, SYSCALL_BEARING_COLUMNS,
+        cost_split, expected_trace, syscall_families,
     },
     solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
     std::{collections::BTreeMap, path::PathBuf},
 };
 
+/// A missing or unparsable residual file must abort. Rendering `?` cells at exit
+/// zero once let a table advertise a share it had not measured.
 fn residuals() -> BTreeMap<String, u64> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("workspace root")
-        .join("research/bn254-decision-table-v2-20260804/residuals.json");
-    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let path = std::env::var_os("BN254_RESIDUALS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("workspace root")
+                .join("research/bn254-decision-table-v2-20260804/residuals.json")
+        });
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{} must exist, run the pipeline first: {error}", path.display()));
     let mut out = BTreeMap::new();
     for line in text.lines() {
         let line = line.trim().trim_end_matches(',');
@@ -61,28 +69,35 @@ fn main() {
     }
     println!("\n|---|{}", "---:|".repeat(ColumnId::ALL.len()));
 
+    let mut without_hash = Vec::new();
+
     for row in RowId::ALL {
         print!("| {} |", row.label());
         for column in ColumnId::ALL {
-            match residual.get(&key(row, column)) {
-                Some(r) => {
-                    let split = cost_split(&cost, row, column, *r);
-                    let share = split.syscall_share_per_mille();
-                    if SYSCALL_BEARING_COLUMNS.contains(&column)
-                        && share < MIN_SYSCALL_SHARE_PER_MILLE
-                    {
-                        breaches.push((row, column, share));
-                    }
-                    print!(
-                        " {} / {} = {}.{}% |",
-                        split.syscall,
-                        split.sbpf,
-                        share / 10,
-                        share % 10
-                    );
-                }
-                None => print!(" ? |"),
+            let name = key(row, column);
+            let r = residual
+                .get(&name)
+                .unwrap_or_else(|| panic!("{name} has no measured residual"));
+            let split = cost_split(&cost, row, column, *r);
+            let share = split.syscall_share_per_mille();
+            if SYSCALL_BEARING_COLUMNS.contains(&column) && share < MIN_SYSCALL_SHARE_PER_MILLE {
+                breaches.push((row, column, share));
             }
+            let hash = syscall_families(&cost, column, &expected_trace(row, column)).hash;
+            if SYSCALL_BEARING_COLUMNS.contains(&column) {
+                without_hash.push((
+                    row,
+                    column,
+                    hash,
+                    share,
+                    CostSplit {
+                        syscall: split.syscall.saturating_sub(hash),
+                        sbpf: split.sbpf.saturating_add(hash),
+                    }
+                    .syscall_share_per_mille(),
+                ));
+            }
+            print!(" {} / {} = {}.{}% |", split.syscall, split.sbpf, share / 10, share % 10);
         }
         println!();
     }
@@ -93,6 +108,34 @@ fn main() {
         MIN_SYSCALL_SHARE_PER_MILLE / 10,
         MIN_SYSCALL_SHARE_PER_MILLE % 10
     );
+    println!("\n## What the hash syscalls contribute\n");
+    println!("`sol_keccak256` and `sol_sha256` are metered syscall charges, so they");
+    println!("belong in the numerator. They are also the one family that moved from");
+    println!("the residual without any program changing, so the share is given both");
+    println!("ways. The second number is what the cell reads if the hash charge is");
+    println!("returned to the guest side.\n");
+    println!("| Scenario | Column | Hash CU | Share | Share with hash as sBPF |");
+    println!("|---|---|---:|---:|---:|");
+    let mut floor = 1_000u64;
+    for (row, column, hash, share, bare) in &without_hash {
+        println!(
+            "| {} | {} | {} | {}.{}% | {}.{}% |",
+            row.label(),
+            column.label(),
+            hash,
+            share / 10,
+            share % 10,
+            bare / 10,
+            bare % 10
+        );
+        floor = floor.min(*bare);
+    }
+    println!(
+        "\nThe lowest syscall-bearing share is {}.{}% once the hash charge is returned to the guest side.",
+        floor / 10,
+        floor % 10
+    );
+
     if breaches.is_empty() {
         println!("\nNo breach.");
     } else {

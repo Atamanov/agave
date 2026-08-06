@@ -42,3 +42,23 @@ fn transaction_table_matches_the_committed_markdown() {
 fn operations_table_matches_the_committed_markdown() {
     assert_matches_committed("render_ops_table", "OPERATIONS-TABLE.md");
 }
+
+/// The file carrying the syscall-share claim was the one table with no golden
+/// test, so a hand-edited share passed the suite.
+#[test]
+fn structure_table_matches_the_committed_markdown() {
+    assert_matches_committed("render_structure_table", "STRUCTURE-TABLE.md");
+}
+
+/// Without measurements the renderer must abort. It used to emit a table of
+/// `?` cells and exit zero, which reads as a rendered table.
+#[test]
+fn the_structure_renderer_refuses_to_render_without_residuals() {
+    let out = Command::new(env!("CARGO"))
+        .args(["run", "-q", "-p", "solana-bn254-decision-bench", "--example", "render_structure_table"])
+        .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().expect("workspace root"))
+        .env("BN254_RESIDUALS", research_dir().join("residuals.json.absent"))
+        .output()
+        .expect("renderer runs");
+    assert!(!out.status.success(), "renderer must fail with no residuals.json");
+}

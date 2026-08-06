@@ -13,7 +13,8 @@ pub use {
     },
     model::*,
     pricing::{
-        CostSplit, MIN_SYSCALL_SHARE_PER_MILLE, SYSCALL_BEARING_COLUMNS, cost_split, syscall_cu,
+        CostSplit, MIN_SYSCALL_SHARE_PER_MILLE, SYSCALL_BEARING_COLUMNS, SyscallFamilies,
+        cost_split, syscall_cu, syscall_families,
     },
     report::render_report,
     runner::{Cli, OutputPaths, TransactionExecutor, run_campaign, run_cli},

@@ -16,4 +16,32 @@ Each cell is `syscall CU / sBPF CU = syscall share`.
 
 A syscall-bearing column below 25.0% is reported as a structural breach.
 
+## What the hash syscalls contribute
+
+`sol_keccak256` and `sol_sha256` are metered syscall charges, so they
+belong in the numerator. They are also the one family that moved from
+the residual without any program changing, so the share is given both
+ways. The second number is what the cell reads if the hash charge is
+returned to the guest side.
+
+| Scenario | Column | Hash CU | Share | Share with hash as sBPF |
+|---|---|---:|---:|---:|
+| 5 real Zolana Groth16 proofs — same VK | Batching syscalls (B5) | 1859 | 84.7% | 80.6% |
+| 5 real Zolana Groth16 proofs — same VK | Batching + VK registry (B5) | 1859 | 82.3% | 77.9% |
+| 5 real Zolana Groth16 proofs — same VK | Batching + Fp12 (B5) | 2123 | 84.9% | 80.8% |
+| 2 real Zolana Groth16 proofs — distinct VKs | Batching syscalls (B5) | 1473 | 87.0% | 83.5% |
+| 2 real Zolana Groth16 proofs — distinct VKs | Batching + VK registry (B5) | 1473 | 82.5% | 78.4% |
+| 2 real Zolana Groth16 proofs — distinct VKs | Batching + Fp12 (B5) | 1473 | 86.1% | 83.1% |
+| 3 real Zolana Groth16 proofs — distinct VKs | Batching syscalls (B5) | 2147 | 89.3% | 86.4% |
+| 3 real Zolana Groth16 proofs — distinct VKs | Batching + VK registry (B5) | 2147 | 85.8% | 82.4% |
+| 3 real Zolana Groth16 proofs — distinct VKs | Batching + Fp12 (B5) | 2147 | 85.5% | 82.1% |
+| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching syscalls (B5) | 1171 | 84.3% | 81.7% |
+| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + VK registry (B5) | 1171 | 80.9% | 77.9% |
+| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + Fp12 (B5) | 1171 | 84.2% | 81.6% |
+| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching syscalls (B5) | 1694 | 83.7% | 80.8% |
+| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + VK registry (B5) | 1694 | 81.0% | 77.7% |
+| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + Fp12 (B5) | 1694 | 83.6% | 80.7% |
+
+The lowest syscall-bearing share is 77.7% once the hash charge is returned to the guest side.
+
 No breach.
