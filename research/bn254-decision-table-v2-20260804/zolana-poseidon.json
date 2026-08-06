@@ -1,0 +1,15 @@
+{
+  "source": "zolana-cu-b5, LiteSVM over the unmodified shielded-pool program built from dev/zolana/.worktrees/groth16-recursion",
+  "arity": 2,
+  "arity_evidence": "read from r4 at every call site, not assumed",
+  "cu_per_call": 786,
+  "cu_formula": "poseidon_cost_coefficient_a * arity^2 + poseidon_cost_coefficient_c",
+  "partition_note": "Per-frame attribution is inclusive over nested calls, so frames overlap and do not sum to the total. Only the two-way split below is a partition.",
+  "unsupported_above_legs": 3,
+  "unsupported_reason": "AggregateCircuitId::is_supported rejects batch above 3 on every rail, and no verifying key beyond b3 is compiled into the program.",
+  "measured": [
+    { "legs": 1, "calls": 58, "cu": 45588, "statement_compression_calls": 23, "state_machine_calls": 35 },
+    { "legs": 2, "calls": 119, "cu": 93534, "statement_compression_calls": 46, "state_machine_calls": 73 },
+    { "legs": 3, "calls": 181, "cu": 142266, "statement_compression_calls": 69, "state_machine_calls": 112 }
+  ]
+}

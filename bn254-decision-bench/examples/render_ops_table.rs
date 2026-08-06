@@ -7,11 +7,41 @@
 
 use {
     solana_bn254_decision_bench::{ColumnId, OperationTrace, RowId, expected_trace},
-    solana_program_runtime::execution_budget::ALT_BN128_PAIRING_LANE_WIDTH,
+    solana_program_runtime::execution_budget::{
+        ALT_BN128_PAIRING_LANE_WIDTH, SVMTransactionExecutionCost,
+    },
 };
 
 /// Narrowed once so the notation cannot claim a lane the tariff does not charge.
 const LANE_WIDTH: u32 = ALT_BN128_PAIRING_LANE_WIDTH as u32;
+
+#[derive(serde::Deserialize)]
+struct PoseidonMeasurement {
+    arity: u64,
+    unsupported_above_legs: u32,
+    unsupported_reason: String,
+    #[serde(rename = "measured")]
+    rows: Vec<PoseidonRow>,
+}
+
+#[derive(serde::Deserialize)]
+struct PoseidonRow {
+    legs: u32,
+    calls: u64,
+    cu: u64,
+    statement_compression_calls: u64,
+    state_machine_calls: u64,
+}
+
+fn poseidon_measurement() -> PoseidonMeasurement {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .join("research/bn254-decision-table-v2-20260804/zolana-poseidon.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{} must be committed: {error}", path.display()));
+    serde_json::from_str(&text).expect("poseidon measurement parses")
+}
 
 /// ML live Miller pair · pML prepared pair · SC G2 subgroup check ·
 /// FE final exponentiation · kMSM(np) k MSM syscalls over n points · CMP FP12
@@ -113,4 +143,64 @@ fn main() {
         }
         println!();
     }
+
+    render_poseidon();
+}
+
+/// Poseidon sits beside verification rather than inside it.
+///
+/// None of the thirty cells above executes a Poseidon call, so these counts are
+/// imported from a measurement of the real zolana program and are reported on
+/// their own. Folding them into a cell would price work the guest never ran,
+/// and folding them into the syscall share would lift every column by the same
+/// borrowed constant.
+fn render_poseidon() {
+    let measured = poseidon_measurement();
+    let cost = SVMTransactionExecutionCost::default();
+    let arity = measured.arity;
+    let per_call = cost.poseidon_cost(arity).expect("arity is in range");
+
+    println!("\n## Poseidon, the application work beside verification\n");
+    println!(
+        "Measured on the unmodified zolana shielded pool, every call at arity {arity} \
+         and so {per_call} CU. No cell above runs one."
+    );
+    println!(
+        "\nThe split is a partition. Statement compression folds the public statement \
+         into the single field element the verifier consumes, so it holds for any \
+         column keeping that convention and moves if the convention does. The rest is \
+         tree, nullifier and hash-chain work that no choice of pairing kernel touches.\n"
+    );
+    println!("| Legs | Calls | CU | Statement compression | State machine |");
+    println!("|---:|---:|---:|---:|---:|");
+    for row in &measured.rows {
+        assert_eq!(
+            row.statement_compression_calls.saturating_add(row.state_machine_calls),
+            row.calls,
+            "the two-way split must partition the measured calls"
+        );
+        assert_eq!(
+            row.cu,
+            row.calls.saturating_mul(per_call),
+            "measured CU must be the runtime charge"
+        );
+        println!(
+            "| {} | {} | {} | {} calls, {} CU | {} calls, {} CU |",
+            row.legs,
+            row.calls,
+            row.cu,
+            row.statement_compression_calls,
+            row.statement_compression_calls.saturating_mul(per_call),
+            row.state_machine_calls,
+            row.state_machine_calls.saturating_mul(per_call),
+        );
+    }
+    println!(
+        "\nAggregation stops at {} legs. {}\n",
+        measured.unsupported_above_legs, measured.unsupported_reason
+    );
+    println!(
+        "Per-leg growth is not constant, so no row is extrapolated. The tree append \
+         costs what the leaf index makes it cost, not what the leg count does."
+    );
 }

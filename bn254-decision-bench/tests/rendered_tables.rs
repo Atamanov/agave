@@ -75,6 +75,35 @@ fn a_pairing_term_reports_calls_and_width_separately() {
     );
 }
 
+/// Poseidon is imported from a measurement of another program, so it must stay
+/// outside the cells and outside the syscall share. Both would price work no
+/// guest here runs.
+#[test]
+fn poseidon_is_reported_beside_the_cells_and_never_inside_them() {
+    let ops = std::fs::read_to_string(research_dir().join("OPERATIONS-TABLE.md"))
+        .expect("OPERATIONS-TABLE.md must be committed");
+    let (cells, poseidon) = ops
+        .split_once("## Poseidon")
+        .expect("the operations table must carry the Poseidon section");
+
+    assert!(
+        !cells.contains("PO"),
+        "no cell runs a Poseidon call, so no cell may carry one"
+    );
+    assert!(poseidon.contains("45588"), "the one-leg measurement must be published");
+    assert!(
+        poseidon.contains("Aggregation stops at 3 legs"),
+        "a reader must learn that four and five legs do not exist"
+    );
+
+    let structure = std::fs::read_to_string(research_dir().join("STRUCTURE-TABLE.md"))
+        .expect("STRUCTURE-TABLE.md must be committed");
+    assert!(
+        !structure.to_lowercase().contains("poseidon"),
+        "borrowed work must not move the syscall share"
+    );
+}
+
 /// The file carrying the syscall-share claim was the one table with no golden
 /// test, so a hand-edited share passed the suite.
 #[test]
