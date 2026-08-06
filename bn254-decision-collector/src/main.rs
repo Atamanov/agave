@@ -10,8 +10,9 @@ use {
         ResidualCell, RowId,
     },
     solana_bn254_decision_litesvm::{
-        DEFAULT_HASH_BYTE_COST, GroupOpKind, ObserverSnapshot, current_embedded_hot_core_cu,
-        new_litesvm_charging_hash_bytes, observer_snapshot, registry_account_len, reset_observers,
+        CompressionObservation, DEFAULT_HASH_BYTE_COST, GroupOpKind, ObserverSnapshot,
+        current_compression_cu, current_embedded_hot_core_cu, new_litesvm_charging_hash_bytes,
+        observer_snapshot, registry_account_len, reset_observers,
     },
     solana_compute_budget_interface_v3::ComputeBudgetInstruction,
     solana_instruction_v3::{Instruction, account_meta::AccountMeta},
@@ -468,6 +469,31 @@ fn append_pairing(calls: &mut Vec<PairingCall>, full: u32, registered: u32) {
     });
 }
 
+/// A zero decompression count is never a valid observation.
+///
+/// Every guest rebuilds the compressed wire form before it decompresses, so the
+/// two directions balance, and no proof reaches the chain without a G1 point.
+/// Zero therefore means the observer missed the syscall, not that the guest
+/// skipped it. Left unchecked it publishes a cell whose modelled charge is
+/// 14,706 CU per proof short and moves that CU into the residual in silence.
+fn require_observed_compression(observed: &CompressionObservation) -> Result<(), String> {
+    if observed.g1_compressions != observed.g1_decompressions
+        || observed.g2_compressions != observed.g2_decompressions
+    {
+        return Err(format!(
+            "compression round trip is unbalanced: G1 {}/{}, G2 {}/{}",
+            observed.g1_compressions,
+            observed.g1_decompressions,
+            observed.g2_compressions,
+            observed.g2_decompressions
+        ));
+    }
+    if observed.g1_decompressions == 0 {
+        return Err("no G1 decompression observed in a hot transaction".into());
+    }
+    Ok(())
+}
+
 fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
     snapshot.stock_group_ops.require_valid_count(1)?;
     if snapshot.registry_init.g2_entries != 0
@@ -477,6 +503,7 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
     {
         return Err("hot transaction contains setup/probe-only observer events".into());
     }
+    require_observed_compression(&snapshot.compression)?;
     let mut pairing_checks = Vec::new();
     for event in &snapshot.pairing_checks {
         append_pairing(&mut pairing_checks, event.pairs as u32, 0);
@@ -555,6 +582,10 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
             .map_err(|_| "hash syscall byte CU overflow")?,
     };
     Ok(OperationTrace {
+        g1_decompressions: u32::try_from(snapshot.compression.g1_decompressions)
+            .map_err(|_| "G1 decompression count overflow")?,
+        g2_decompressions: u32::try_from(snapshot.compression.g2_decompressions)
+            .map_err(|_| "G2 decompression count overflow")?,
         hash_syscalls,
         plonk_multi_vk_reduce_calls,
         fr_lincomb_calls,
@@ -663,7 +694,8 @@ fn setup_svm_charging_hash_bytes(
             let vk_base = 2 + n;
             let mut vk_digests = Vec::with_capacity(k);
             for key in 0..k {
-                let vk = &case.fixture_data[vk_base + key * 576..vk_base + (key + 1) * 576];
+                let vk_start = vk_base.saturating_add(key.saturating_mul(576));
+                let vk = &case.fixture_data[vk_start..vk_start.saturating_add(576)];
                 vk_digests.push(solana_keccak_hasher::hashv(&[
                     &[0],
                     &vk[..64],
@@ -677,8 +709,10 @@ fn setup_svm_charging_hash_bytes(
             }
             let ids: Vec<[u8; 32]> = (0..3 * k)
                 .map(|index| {
-                    let start = 80 + index * 37_744;
-                    registry.data[start..start + 32].try_into().unwrap()
+                    let start = 80usize.saturating_add(index.saturating_mul(37_744));
+                    registry.data[start..start.saturating_add(32)]
+                        .try_into()
+                        .unwrap()
                 })
                 .collect();
             eprintln!("GROTH_SEAL n={n} k={k} address={} digest={} vk={} ids={}", hex::encode(address.as_array()), hex::encode(&registry.data[48..80]), hex::encode(vk_digests.concat()), hex::encode(ids.concat()));
@@ -695,10 +729,11 @@ fn setup_svm_charging_hash_bytes(
             [1usize, 0]
                 .iter()
                 .map(|index| {
-                    let start = REGISTRY_HEADER_BYTES + index * REGISTRY_ENTRY_BYTES;
+                    let start = REGISTRY_HEADER_BYTES
+                        .saturating_add(index.saturating_mul(REGISTRY_ENTRY_BYTES));
                     registry
                         .data
-                        .get(start..start + 32)
+                        .get(start..start.saturating_add(32))
                         .and_then(|id| <[u8; 32]>::try_from(id).ok())
                         .ok_or("registry account is shorter than its entry table")
                 })
@@ -748,12 +783,17 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
     let hash_byte_cu = measure_hash_byte_cu(&case)?;
     let (mut svm, registry_ids) = setup_svm(&case)?;
     let mut observations = Vec::new();
+    let mut compression_artifact = 0u64;
     for _ in 0..SAMPLE_COUNT {
         reset_observers();
         let metadata = send(&mut svm, instruction(&case, case.tag, false, &registry_ids))?;
         let mut snapshot = observer_snapshot();
         snapshot.hash_syscalls.byte_cu = hash_byte_cu;
         require_b5_dispatch_attestation(&snapshot)?;
+        compression_artifact = current_compression_cu(
+            snapshot.compression.g1_compressions,
+            snapshot.compression.g2_compressions,
+        );
         let observed_trace = trace(&snapshot)?;
         let embedded = current_embedded_hot_core_cu(&snapshot);
         let non_core = metadata
@@ -769,6 +809,17 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
     }
     if observations[0].1 != observations[1].1 || observations[0].2 != observations[1].2 {
         return Err("repeated hot transactions produced different trace/residual".into());
+    }
+    // The sealed fixtures hold uncompressed points, so each guest rebuilds the
+    // wire encoding before it decompresses it. The model prices decompression
+    // and not compression, so this charge stays inside the residual. It is the
+    // one part of the residual no deployment pays.
+    if compression_artifact != 0 {
+        eprintln!(
+            "note: {:?}/{:?} residual {} includes {compression_artifact} CU of \
+             fixture-only compression",
+            request.row_id, request.column_id, observations[0].2
+        );
     }
 
     // Every guest/case also proves a corrupted account is rejected. This is

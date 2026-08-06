@@ -13,6 +13,10 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use groth16_solana::groth16::Groth16Verifyingkey;
+use solana_bn254::compression::prelude::{
+    alt_bn128_g1_compress_be, alt_bn128_g1_decompress_be, alt_bn128_g2_compress_be,
+    alt_bn128_g2_decompress_be,
+};
 use solana_bn254_batch_syscall::{PodG1Point, PodG2Point, PodScalar};
 use solana_bn254_groth16_batch::{
     PedersenKey, Proof, ProofCommitment, RandomizerMode, ValidatedVerifyingKey, VerifyingKey,
@@ -55,6 +59,24 @@ fn read<const N: usize>(data: &[u8], offset: &mut usize) -> Option<[u8; N]> {
 }
 
 // BN254 base-field modulus, big-endian.
+/// Charge the compressed wire form of one G1 proof point.
+///
+/// An outer proof reaches the chain compressed, so a deployment decompresses
+/// before it can pair. The payload is sealed uncompressed, so the guest
+/// re-creates the encoding the sender transmitted and decompresses that. The
+/// round trip must return the same point, which is what binds the metered
+/// decompression to the point the verifier then consumes.
+fn wire_g1(point: &[u8; 64]) -> Option<()> {
+    (alt_bn128_g1_decompress_be(&alt_bn128_g1_compress_be(point).ok()?).ok()? == *point)
+        .then_some(())
+}
+
+/// The same for `B`, the proof's only G2 point.
+fn wire_g2(point: &[u8; 128]) -> Option<()> {
+    (alt_bn128_g2_decompress_be(&alt_bn128_g2_compress_be(point).ok()?).ok()? == *point)
+        .then_some(())
+}
+
 const FQ_MODULUS_BE: [u8; 32] = [
     0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
     0x97, 0x81, 0x6a, 0x91, 0x68, 0x71, 0xca, 0x8d, 0x3c, 0x20, 0x8c, 0x16, 0xd8, 0x7c, 0xfd, 0x47,
@@ -110,11 +132,13 @@ fn vk_from_gnark(vk: &Groth16Verifyingkey<'_>) -> Option<ValidatedVerifyingKey> 
     .ok()
 }
 
-/// Verify one exact uncompressed recursive payload.
+/// Verify one exact recursive payload.
 ///
 /// Layout: `A(64) | B(128) | C(64) | commitment(64) | PoK(64) |
 /// explicit_public_inputs(N*32)`. The commitment-derived BSB22 hash scalar is
 /// recomputed inside the guest and appended as gnark's trailing K-column wire.
+/// The payload is stored uncompressed, so the five proof points go through the
+/// compressed wire form before the fold reads them.
 pub fn verify_payload<const N: usize>(data: &[u8], vk: &Groth16Verifyingkey<'_>) -> Option<bool> {
     if data.len() != layout::HEADER_BYTES + N * 32
         || vk.nr_pubinputs != N
@@ -130,6 +154,11 @@ pub fn verify_payload<const N: usize>(data: &[u8], vk: &Groth16Verifyingkey<'_>)
     let c = read::<64>(data, &mut offset)?;
     let commitment = read::<64>(data, &mut offset)?;
     let pok = read::<64>(data, &mut offset)?;
+    wire_g1(&a)?;
+    wire_g2(&b)?;
+    wire_g1(&c)?;
+    wire_g1(&commitment)?;
+    wire_g1(&pok)?;
     let mut public_inputs = Vec::with_capacity(N + 1);
     for _ in 0..N {
         public_inputs.push(PodScalar(read::<32>(data, &mut offset)?));

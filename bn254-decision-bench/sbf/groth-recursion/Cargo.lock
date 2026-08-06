@@ -531,6 +531,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solana-account 3.4.0",
+ "solana-bn254",
  "solana-bn254-batch-syscall",
  "solana-bn254-decision-litesvm",
  "solana-bn254-groth16-batch",

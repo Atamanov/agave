@@ -314,6 +314,14 @@ pub struct OperationTrace {
     /// counted as guest software until it was.
     #[serde(default)]
     pub hash_syscalls: HashSyscallTotals,
+    /// G1 proof points that arrive compressed and are decompressed before any
+    /// pairing. The wire format belongs to the deployment and not to the
+    /// verification strategy, so every column pays this.
+    #[serde(default)]
+    pub g1_decompressions: u32,
+    /// The same in G2.
+    #[serde(default)]
+    pub g2_decompressions: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -52,6 +52,14 @@ fn poseidon_measurement() -> PoseidonMeasurement {
 /// call of twenty pairs are the same product and nothing like the same charge.
 fn notation(column: ColumnId, trace: &OperationTrace) -> String {
     let mut parts = Vec::new();
+    // One G2 point is the dearest single charge in the grid, so it cannot be
+    // priced in the cells and absent from the operations that explain them.
+    match (trace.g1_decompressions, trace.g2_decompressions) {
+        (0, 0) => {}
+        (g1, 0) => parts.push(format!("DEC({g1}G1)")),
+        (0, g2) => parts.push(format!("DEC({g2}G2)")),
+        (g1, g2) => parts.push(format!("DEC({g1}G1+{g2}G2)")),
+    }
     for call in trace.pairing_checks.iter().chain(&trace.pairing_maps) {
         let width = match (call.full_pairs, call.registered_pairs) {
             (live, 0) => format!("{live}ML"),
@@ -114,7 +122,9 @@ fn notation(column: ColumnId, trace: &OperationTrace) -> String {
 fn main() {
     println!("# BN254 decision table, operations per transaction\n");
     println!(
-        "c\u{d7}pML reads as c pairing calls of p live Miller pairs each, never as \
+        "DEC(nG1+mG2) wire point decompression, paid by every column because a \
+         deployment of any of them receives the same compressed proof \u{b7} \
+         c\u{d7}pML reads as c pairing calls of p live Miller pairs each, never as \
          the product \u{b7} pML prepared pair (lines cached, subgroup paid at \
          registration) \u{b7} SC G2 subgroup check \u{b7} FE final exponentiation \u{b7} \
          kMSM(np) k MSM syscalls over n points \u{b7} GT(t) target multiexp \u{b7} RED(c/p) PLONK multi-VK reduction over c contexts and p proofs \u{b7} kLC(nt) k scalar inner products over n terms \u{b7} kH(ns) k hash syscalls over n slices \u{b7} CMP FP12 \

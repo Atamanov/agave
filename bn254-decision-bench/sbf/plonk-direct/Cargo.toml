@@ -25,7 +25,8 @@ light-hasher = { version = "5.0", features = ["keccak"] }
 pinocchio = { version = "0.11", features = ["account-resize", "cpi"] }
 pinocchio-system = "0.6.0"
 plonk-solana = { path = "vendor/plonk-solana" }
-solana-bn254-batch-syscall = { path = "../../../bn254-batch-syscall", default-features = false, features = ["agave-unstable-api", "backend-b1-arkworks", "research-observer"] }
+solana-bn254 = "3.2.1"
+solana-bn254-batch-syscall ={ path = "../../../bn254-batch-syscall", default-features = false, features = ["agave-unstable-api", "backend-b1-arkworks", "research-observer"] }
 solana-keccak-hasher = { version = "3.1.0", features = ["sha3"] }
 
 [target.'cfg(not(target_os = "solana"))'.dependencies]

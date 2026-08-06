@@ -19,6 +19,7 @@ use {
 /// across the pairing and MSM work the column is named after.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SyscallFamilies {
+    pub decompress: u64,
     pub pairing: u64,
     pub msm: u64,
     pub stock_g1: u64,
@@ -30,10 +31,34 @@ pub struct SyscallFamilies {
 
 impl SyscallFamilies {
     pub fn total(&self) -> u64 {
-        [self.pairing, self.msm, self.stock_g1, self.lincomb, self.hash, self.reduce, self.gt]
-            .into_iter()
-            .fold(0u64, u64::saturating_add)
+        [
+            self.decompress,
+            self.pairing,
+            self.msm,
+            self.stock_g1,
+            self.lincomb,
+            self.hash,
+            self.reduce,
+            self.gt,
+        ]
+        .into_iter()
+        .fold(0u64, u64::saturating_add)
     }
+}
+
+/// What `SyscallAltBn128Compression` charges for one point.
+///
+/// It adds `syscall_base_cost` to the per-point price. `SyscallAltBn128`, which
+/// serves the group ops beside it, does not, so the two cannot share a formula.
+fn decompress_cu(cost: &SVMTransactionExecutionCost, g1: u32, g2: u32) -> u64 {
+    cost.syscall_base_cost
+        .saturating_add(cost.alt_bn128_g1_decompress)
+        .saturating_mul(u64::from(g1))
+        .saturating_add(
+            cost.syscall_base_cost
+                .saturating_add(cost.alt_bn128_g2_decompress)
+                .saturating_mul(u64::from(g2)),
+        )
 }
 
 /// Syscall CU for one cell: the charge a validator meters, and nothing else.
@@ -54,7 +79,13 @@ pub fn syscall_families(
     // syscalls. Current + Fp12 is a third case: it stays per-proof independent
     // but its finalizer is `pairing_map`, which has no stock equivalent.
     let stock = matches!(column, ColumnId::Current | ColumnId::CurrentFp12);
-    let mut families = SyscallFamilies::default();
+    // Decompression is charged before any pairing, and charged by every
+    // column, because a deployment of any of them receives the same
+    // compressed proof.
+    let mut families = SyscallFamilies {
+        decompress: decompress_cu(cost, trace.g1_decompressions, trace.g2_decompressions),
+        ..SyscallFamilies::default()
+    };
     let mut cu = 0u64;
     for call in &trace.pairing_checks {
         let each = if stock {

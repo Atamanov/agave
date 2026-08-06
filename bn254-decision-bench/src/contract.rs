@@ -80,6 +80,27 @@ fn trace(
         fr_lincomb_calls: Vec::new(),
         plonk_multi_vk_reduce_calls: Vec::new(),
         hash_syscalls: HashSyscallTotals::default(),
+        g1_decompressions: 0,
+        g2_decompressions: 0,
+    }
+}
+
+/// Compressed points one proof carries on the wire, as `(G1, G2)`.
+///
+/// Groth16 sends `A` and `C` in G1 and `B` in G2. snarkjs PLONK sends nine G1
+/// commitments and keeps its only G2 in the verifying key, which is not on the
+/// wire. Recursion sends one committed outer Groth16 proof whatever the row
+/// holds, so the BSB22 commitment and its proof of knowledge ride beside `A`
+/// and `C` and the inner proofs never reach the chain.
+const fn wire_decompressions(row: RowId, column: ColumnId) -> (u32, u32) {
+    if matches!(column, ColumnId::RecursionB5) {
+        return (4, 1);
+    }
+    let n = row.proof_count();
+    if row.is_groth16() {
+        (2u32.saturating_mul(n), n)
+    } else {
+        (9u32.saturating_mul(n), 0)
     }
 }
 
@@ -363,6 +384,18 @@ fn groth_msm(row: RowId, column: ColumnId) -> Vec<MsmCall> {
 }
 
 pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
+    let mut trace = strategy_trace(row, column);
+    // Applied here rather than inside each arm, so no cell can be published
+    // without its wire cost.
+    let (g1, g2) = wire_decompressions(row, column);
+    trace.g1_decompressions = g1;
+    trace.g2_decompressions = g2;
+    trace
+}
+
+/// The work the verification strategy itself does, once the proof is a set of
+/// affine points.
+fn strategy_trace(row: RowId, column: ColumnId) -> OperationTrace {
     if row.is_groth16() {
         let n = row.proof_count();
         let k = row.vk_count();

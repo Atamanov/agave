@@ -181,6 +181,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "solana-address",
+ "solana-bn254",
  "solana-bn254-batch-syscall",
  "solana-keccak-hasher",
 ]
@@ -235,6 +236,9 @@ name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
+dependencies = [
+ "bytemuck_derive",
+]
 
 [[package]]
 name = "bytemuck_derive"
@@ -707,6 +711,21 @@ dependencies = [
  "solana-define-syscall 5.2.0",
  "solana-program-error",
  "solana-sha256-hasher",
+]
+
+[[package]]
+name = "solana-bn254"
+version = "3.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62ff13a8867fcc7b0f1114764e1bf6191b4551dcaf93729ddc676cd4ec6abc9f"
+dependencies = [
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff",
+ "ark-serialize",
+ "bytemuck",
+ "solana-define-syscall 5.2.0",
+ "thiserror",
 ]
 
 [[package]]

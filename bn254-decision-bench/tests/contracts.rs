@@ -838,6 +838,148 @@ fn structural_gate_fires_on_a_wrapper_dominated_cell() {
     assert_eq!(CostSplit { syscall: 0, sbpf: 0 }.syscall_share_per_mille(), 0);
 }
 
+/// Compressed points one proof puts on the wire, as `(G1, G2)`.
+///
+/// Restated from the proof system rather than read back from the contract, so
+/// a per-row literal in the contract fails here.
+fn wire_points(row: RowId, column: ColumnId) -> (u32, u32) {
+    let n = row.proof_count();
+    match (column, row.is_groth16()) {
+        // Recursion puts one committed outer Groth16 proof on the wire whatever
+        // the row holds. A, C, the BSB22 commitment and its proof of knowledge
+        // are G1, and B is the only G2.
+        (ColumnId::RecursionB5, _) => (4, 1),
+        (_, true) => (n.saturating_mul(2), n),
+        (_, false) => (n.saturating_mul(9), 0),
+    }
+}
+
+/// Proofs reach the chain compressed, so decompression is verification work in
+/// every cell. It was missing from all thirty, which made the absolute numbers
+/// incomparable to a real transaction.
+#[test]
+fn every_cell_decompresses_the_points_its_wire_format_carries() {
+    for row in RowId::ALL {
+        for column in ColumnId::ALL {
+            let trace = expected_trace(row, column);
+            let (g1, g2) = wire_points(row, column);
+            assert_eq!(
+                (trace.g1_decompressions, trace.g2_decompressions),
+                (g1, g2),
+                "{row:?}/{column:?}"
+            );
+            assert!(
+                trace.g1_decompressions > 0,
+                "{row:?}/{column:?}: no proof reaches the chain without a G1 point"
+            );
+        }
+    }
+}
+
+/// The count is a property of the proof system and the proof count, not of the
+/// verification strategy. Only recursion may break the scaling, because it
+/// replaces the wire proofs with one outer proof.
+#[test]
+fn decompression_scales_with_the_proof_count_and_the_proof_system() {
+    for column in ColumnId::ALL {
+        if column == ColumnId::RecursionB5 {
+            continue;
+        }
+        for row in RowId::ALL {
+            let trace = expected_trace(row, column);
+            let n = row.proof_count();
+            let per_proof = if row.is_groth16() { (2, 1) } else { (9, 0) };
+            assert_eq!(
+                (trace.g1_decompressions, trace.g2_decompressions),
+                (per_proof.0 * n, per_proof.1 * n),
+                "{row:?}/{column:?}"
+            );
+        }
+    }
+
+    let shapes: BTreeSet<_> = RowId::ALL
+        .into_iter()
+        .map(|row| {
+            let trace = expected_trace(row, ColumnId::RecursionB5);
+            (trace.g1_decompressions, trace.g2_decompressions)
+        })
+        .collect();
+    assert_eq!(
+        shapes.len(),
+        1,
+        "recursion puts one outer proof on the wire on every row: {shapes:?}"
+    );
+}
+
+/// Priced from the runtime's own fields, and from the compression syscall's own
+/// charge rather than the group op's. That syscall adds `syscall_base_cost` to
+/// the per-point price and the group op does not.
+#[test]
+fn decompression_is_priced_from_the_runtime_budget() {
+    use solana_bn254_decision_bench::{syscall_cu, syscall_families};
+
+    let cost = SVMTransactionExecutionCost::default();
+    for row in RowId::ALL {
+        for column in ColumnId::ALL {
+            let trace = expected_trace(row, column);
+            let (g1, g2) = wire_points(row, column);
+            let expected = cost
+                .syscall_base_cost
+                .saturating_add(cost.alt_bn128_g1_decompress)
+                .saturating_mul(u64::from(g1))
+                .saturating_add(
+                    cost.syscall_base_cost
+                        .saturating_add(cost.alt_bn128_g2_decompress)
+                        .saturating_mul(u64::from(g2)),
+                );
+            let families = syscall_families(&cost, column, &trace);
+            assert_eq!(families.decompress, expected, "{row:?}/{column:?}");
+            assert!(
+                families.total() >= families.decompress,
+                "{row:?}/{column:?}: the family must reach the cell total"
+            );
+            assert_eq!(
+                syscall_cu(&cost, column, &trace),
+                families.total(),
+                "{row:?}/{column:?}"
+            );
+        }
+    }
+}
+
+/// The derived charge against the one independent measurement of it. A solo
+/// zolana transact under LiteSVM meters 18,880 CU in its non-pairing BN254
+/// bucket over five calls, of which decompressing one Groth16 proof is 14,706
+/// and the single G2 point alone is 13,710. The remaining 4,174 is the one
+/// stock G1 multiplication and the one stock G1 addition that build the
+/// public-input commitment, neither of which pays a syscall base.
+#[test]
+fn one_groth16_proof_costs_what_the_zolana_pool_was_metered() {
+    use solana_bn254_decision_bench::syscall_families;
+
+    let cost = SVMTransactionExecutionCost::default();
+    let mut trace = OperationTrace {
+        g1_decompressions: 2,
+        g2_decompressions: 1,
+        ..OperationTrace::default()
+    };
+    assert_eq!(
+        syscall_families(&cost, ColumnId::Current, &trace).decompress,
+        14_706
+    );
+
+    trace.g1_decompressions = 0;
+    assert_eq!(
+        syscall_families(&cost, ColumnId::Current, &trace).decompress,
+        13_710
+    );
+
+    let stock_g1 = cost
+        .alt_bn128_g1_multiplication_cost
+        .saturating_add(cost.alt_bn128_g1_addition_cost);
+    assert_eq!(stock_g1.saturating_add(14_706), 18_880);
+}
+
 /// Every published cell's syscall CU must come from the shared pricing
 /// function, so the transaction table and the structure table cannot disagree
 /// about what a column costs.
@@ -854,3 +996,4 @@ fn both_tables_price_a_cell_identically() {
         }
     }
 }
+

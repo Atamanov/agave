@@ -1,8 +1,10 @@
 //! Campaign program for the batch-verification case grid. Account 0 holds
 //! authenticated real Zolana confidential-transfer Groth16 fixtures in a fixed layout; the instruction tag selects
 //! the verification strategy. Every case reads the same fixture, so charged
-//! CU differences come from the strategy alone. Points are uncompressed:
-//! wire decompression costs the same in every case and stays out of the grid.
+//! CU differences come from the strategy alone. A deployment of any strategy
+//! receives a compressed proof and pays to decompress it, so every case
+//! restores the compressed wire form of the uncompressed fixture points before
+//! it verifies.
 //!
 //! Account layout: tag-independent.
 //! `[n:1][k:1][vk_index:n][k x vk(576)][n x proof(320)][n x pubinput(32)]`
@@ -26,6 +28,10 @@ use ark_bn254::Fr;
 #[cfg(test)]
 use ark_ff::{BigInteger, One, PrimeField};
 use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
+use solana_bn254::compression::prelude::{
+    alt_bn128_g1_compress_be, alt_bn128_g1_decompress_be, alt_bn128_g2_compress_be,
+    alt_bn128_g2_decompress_be,
+};
 use solana_bn254::prelude::{
     alt_bn128_g1_addition_be, alt_bn128_g1_multiplication_be, alt_bn128_pairing_be,
 };
@@ -225,6 +231,24 @@ fn parse(data: &[u8]) -> Option<Fixture<'_>> {
     })
 }
 
+/// Charge the compressed wire form of one G1 proof point.
+///
+/// Zolana carries `a` and `c` in 32 bytes each, so a deployment decompresses
+/// before it can pair. The fixture is sealed uncompressed, so the guest
+/// re-creates the encoding the sender transmitted and decompresses that. The
+/// round trip must return the same point, which is what binds the metered
+/// decompression to the point the verifier then consumes.
+fn wire_g1(point: &[u8; 64]) -> Option<()> {
+    (alt_bn128_g1_decompress_be(&alt_bn128_g1_compress_be(point).ok()?).ok()? == *point)
+        .then_some(())
+}
+
+/// The same for `b`, which zolana carries in 64 bytes.
+fn wire_g2(point: &[u8; 128]) -> Option<()> {
+    (alt_bn128_g2_decompress_be(&alt_bn128_g2_compress_be(point).ok()?).ok()? == *point)
+        .then_some(())
+}
+
 /// Case 0: n independent verifies, each a 4-pair standard pairing call.
 #[inline(never)]
 fn verify_solo(f: &Fixture<'_>) -> Option<bool> {
@@ -241,6 +265,9 @@ fn verify_solo(f: &Fixture<'_>) -> Option<bool> {
             vk_commitment: None,
         };
         let p = f.proof(i)?;
+        wire_g1(p.neg_a)?;
+        wire_g2(p.b)?;
+        wire_g1(p.c)?;
         let public_inputs = [*f.input(i)?];
         let mut verifier = Groth16Verifier::new(p.neg_a, p.b, p.c, &public_inputs, &key).ok()?;
         if verifier.verify().is_err() {
@@ -382,11 +409,17 @@ fn batch_inputs(f: &Fixture<'_>) -> Option<(Vec<ValidatedVerifyingKey>, Vec<Proo
     let spare = proofs.spare_capacity_mut();
     for index in 0..f.n {
         let p = record(f.proofs, index, PROOF_BYTES)?;
+        let a: [u8; 64] = p.get(64..128)?.try_into().ok()?;
+        let b: [u8; 128] = p.get(128..256)?.try_into().ok()?;
+        let c: [u8; 64] = p.get(256..)?.try_into().ok()?;
+        wire_g1(&a)?;
+        wire_g2(&b)?;
+        wire_g1(&c)?;
         spare.get_mut(index)?.write(Proof {
             vk_index: u16::try_from(f.key_of(index)?).ok()?,
-            a: PodG1Point(p.get(64..128)?.try_into().ok()?),
-            b: PodG2Point(p.get(128..256)?.try_into().ok()?),
-            c: PodG1Point(p.get(256..)?.try_into().ok()?),
+            a: PodG1Point(a),
+            b: PodG2Point(b),
+            c: PodG1Point(c),
             commitment: None,
             public_inputs: vec![PodScalar(*f.input(index)?)],
         });

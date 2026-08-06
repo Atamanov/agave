@@ -1,4 +1,5 @@
-//! Read-only observation of stock `sol_alt_bn128_group_op` and hash syscalls.
+//! Read-only observation of the stock `sol_alt_bn128_group_op`,
+//! `sol_alt_bn128_compression` and hash syscalls.
 //!
 //! This callback inspects LiteSVM's SBPF register trace. It never registers,
 //! wraps, replaces, or reprices Agave's stock syscalls. For the hash syscalls
@@ -21,6 +22,13 @@ use {
 
 pub const GROUP_OP_SYSCALL: &str = "sol_alt_bn128_group_op";
 pub const MAX_GROUP_OP_EVENTS: usize = 1_024;
+
+pub const COMPRESSION_SYSCALL: &str = "sol_alt_bn128_compression";
+pub const MAX_COMPRESSION_EVENTS: usize = 4_096;
+
+/// Bit 7 of a compression selector picks the operand byte order. It changes
+/// neither the operation nor the charge.
+const COMPRESSION_LITTLE_ENDIAN_FLAG: u64 = 0x80;
 
 /// Every syscall the runtime serves with `SyscallHash`. They share one charge
 /// formula and one set of constants, so the campaign meters them as one class.
@@ -53,6 +61,37 @@ impl GroupOpKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompressionOpKind {
+    G1Compress,
+    G1Decompress,
+    G2Compress,
+    G2Decompress,
+}
+
+impl CompressionOpKind {
+    pub fn from_raw(value: u64) -> Option<Self> {
+        match value & !COMPRESSION_LITTLE_ENDIAN_FLAG {
+            0 => Some(Self::G1Compress),
+            1 => Some(Self::G1Decompress),
+            2 => Some(Self::G2Compress),
+            3 => Some(Self::G2Decompress),
+            _ => None,
+        }
+    }
+
+    fn expected_input_size(self, raw_input_size: u64) -> bool {
+        let expected = match self {
+            Self::G1Compress => 64,
+            Self::G1Decompress => 32,
+            Self::G2Compress => 128,
+            Self::G2Decompress => 64,
+        };
+        raw_input_size == expected
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StockGroupOpEvent {
     pub program_id: String,
@@ -68,6 +107,22 @@ pub struct StockGroupOpEvent {
     pub input_size: u64,
     pub result_addr: u64,
     pub pairing_elements: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CompressionEvent {
+    pub program_id: String,
+    pub instruction_trace_index: usize,
+    pub vm_pc: u64,
+    pub opcode: u8,
+    pub instruction_immediate: i64,
+    pub canonical_syscall_hash: u32,
+    pub static_syscalls: bool,
+    pub op: u64,
+    pub kind: CompressionOpKind,
+    pub input_addr: u64,
+    pub input_size: u64,
+    pub result_addr: u64,
 }
 
 /// One `SyscallHash` call as the register trace sees it.
@@ -89,6 +144,7 @@ pub struct StockGroupOpObservation {
     pub tracing_enabled: bool,
     pub vm_trace_count: usize,
     pub events: Vec<StockGroupOpEvent>,
+    pub compressions: Vec<CompressionEvent>,
     pub hash_syscalls: Vec<HashSyscallEvent>,
     pub errors: Vec<String>,
 }
@@ -133,6 +189,10 @@ fn matching_syscall_instruction(opcode: u8, immediate: i64, static_syscalls: boo
     is_syscall_to(opcode, immediate, static_syscalls, GROUP_OP_SYSCALL)
 }
 
+fn matching_compression_instruction(opcode: u8, immediate: i64, static_syscalls: bool) -> bool {
+    is_syscall_to(opcode, immediate, static_syscalls, COMPRESSION_SYSCALL)
+}
+
 fn is_syscall_to(opcode: u8, immediate: i64, static_syscalls: bool, name: &str) -> bool {
     let syscall_opcode = if static_syscalls {
         opcode == ebpf::SYSCALL
@@ -168,6 +228,7 @@ fn decode_trace(
     let (_, text) = executable.get_text_bytes();
     let static_syscalls = executable.get_sbpf_version().static_syscalls();
     let canonical_syscall_hash = ebpf::hash_symbol_name(GROUP_OP_SYSCALL.as_bytes());
+    let canonical_compression_hash = ebpf::hash_symbol_name(COMPRESSION_SYSCALL.as_bytes());
 
     for registers in register_trace {
         let vm_pc = registers[11];
@@ -196,6 +257,43 @@ fn decode_trace(
                 vm_pc,
                 // r2, the slice count `SyscallHash` reads as `vals_len`.
                 slices: registers[2],
+            });
+            continue;
+        }
+        if matching_compression_instruction(instruction.opc, instruction.imm, static_syscalls) {
+            if observation.compressions.len() >= MAX_COMPRESSION_EVENTS {
+                observation.errors.push(format!(
+                    "compression event count exceeds hard limit {MAX_COMPRESSION_EVENTS}"
+                ));
+                return;
+            }
+            let op = registers[1];
+            let Some(kind) = CompressionOpKind::from_raw(op) else {
+                observation.errors.push(format!(
+                    "program {program_id} PC {vm_pc}: unsupported compression selector {op}"
+                ));
+                continue;
+            };
+            let input_size = registers[3];
+            if !kind.expected_input_size(input_size) {
+                observation.errors.push(format!(
+                    "program {program_id} PC {vm_pc}: invalid {kind:?} input size {input_size}"
+                ));
+                continue;
+            }
+            observation.compressions.push(CompressionEvent {
+                program_id: program_id.clone(),
+                instruction_trace_index,
+                vm_pc,
+                opcode: instruction.opc,
+                instruction_immediate: instruction.imm,
+                canonical_syscall_hash: canonical_compression_hash,
+                static_syscalls,
+                op,
+                kind,
+                input_addr: registers[2],
+                input_size,
+                result_addr: registers[4],
             });
             continue;
         }
@@ -300,5 +398,43 @@ mod tests {
         ));
         assert!(GroupOpKind::Pairing.expected_input_size(8 * 192));
         assert!(!GroupOpKind::Pairing.expected_input_size(193));
+    }
+
+    #[test]
+    fn recognizes_stock_compression_shapes() {
+        let hash = ebpf::hash_symbol_name(COMPRESSION_SYSCALL.as_bytes());
+        assert!(matching_compression_instruction(
+            ebpf::CALL_IMM,
+            i64::from(hash),
+            false
+        ));
+        assert!(matching_compression_instruction(
+            ebpf::SYSCALL,
+            i64::from(hash),
+            true
+        ));
+        assert_ne!(hash, ebpf::hash_symbol_name(GROUP_OP_SYSCALL.as_bytes()));
+    }
+
+    /// The selectors are the runtime's, and a wrong one silently observes no
+    /// decompression at all.
+    #[test]
+    fn compression_selectors_match_the_runtime_encoding() {
+        for (raw, kind) in [
+            (0, CompressionOpKind::G1Compress),
+            (1, CompressionOpKind::G1Decompress),
+            (2, CompressionOpKind::G2Compress),
+            (3, CompressionOpKind::G2Decompress),
+        ] {
+            assert_eq!(CompressionOpKind::from_raw(raw), Some(kind));
+            assert_eq!(
+                CompressionOpKind::from_raw(raw | COMPRESSION_LITTLE_ENDIAN_FLAG),
+                Some(kind)
+            );
+        }
+        assert_eq!(CompressionOpKind::from_raw(4), None);
+        assert!(CompressionOpKind::G1Decompress.expected_input_size(32));
+        assert!(CompressionOpKind::G2Decompress.expected_input_size(64));
+        assert!(!CompressionOpKind::G2Decompress.expected_input_size(128));
     }
 }

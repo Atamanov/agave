@@ -19,6 +19,7 @@ use {
         Fr as OptimizedFr, G1 as OptimizedG1, G2 as OptimizedG2, Proof as OptimizedProof,
         VerificationKey as OptimizedVerifyingKey,
     },
+    solana_bn254::compression::prelude::{alt_bn128_g1_compress_be, alt_bn128_g1_decompress_be},
     solana_bn254_batch_syscall::{
         PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair, PodG2Point, PodScalar,
         PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput,
@@ -864,6 +865,9 @@ fn optimized_proof(proof: &Proof) -> Option<OptimizedProof> {
 /// constructor of a [`Group`], and it sets `vk_digest` from the key bytes and
 /// `application_context` from that digest, so comparing them here can only
 /// ever hash the same key a second time and find the same answer.
+///
+/// Every measured tag passes this gate exactly once per proof, which is why
+/// the wire cost below is charged here and cannot be charged twice.
 fn validate_group(group: &Group) -> Option<()> {
     if group.proofs.is_empty()
         || !group.vk.domain_size.is_power_of_two()
@@ -873,22 +877,35 @@ fn validate_group(group: &Group) -> Option<()> {
         return None;
     }
     for proof in &group.proofs {
+        let commitments = [
+            &proof.wire_commitments[0],
+            &proof.wire_commitments[1],
+            &proof.wire_commitments[2],
+            &proof.grand_product,
+            &proof.quotient[0],
+            &proof.quotient[1],
+            &proof.quotient[2],
+            &proof.opening,
+            &proof.shifted_opening,
+        ];
         if proof.public_inputs.len() != group.vk.num_public_inputs as usize
-            || [
-                &proof.wire_commitments[0],
-                &proof.wire_commitments[1],
-                &proof.wire_commitments[2],
-                &proof.grand_product,
-                &proof.quotient[0],
-                &proof.quotient[1],
-                &proof.quotient[2],
-                &proof.opening,
-                &proof.shifted_opening,
-            ]
-            .iter()
-            .any(|point| point.0 == [0u8; 64])
+            || commitments.iter().any(|point| point.0 == [0u8; 64])
         {
             return None;
+        }
+        // A snarkjs proof reaches the chain as nine compressed G1 commitments
+        // and keeps its only G2 in the verifying key, so a deployment
+        // decompresses nine points before any pairing. The fixture is sealed
+        // uncompressed, so the guest re-creates the encoding the sender
+        // transmitted and decompresses that. The round trip must return the
+        // same point, which is what binds the metered decompression to the
+        // point the reducer then reads.
+        for point in commitments {
+            if alt_bn128_g1_decompress_be(&alt_bn128_g1_compress_be(&point.0).ok()?).ok()?
+                != point.0
+            {
+                return None;
+            }
         }
     }
     Some(())

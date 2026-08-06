@@ -12,6 +12,10 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use groth16_solana::groth16::Groth16Verifyingkey;
+use solana_bn254::compression::prelude::{
+    alt_bn128_g1_compress_be, alt_bn128_g1_decompress_be, alt_bn128_g2_compress_be,
+    alt_bn128_g2_decompress_be,
+};
 use solana_bn254_batch_syscall::{PodG1Point, PodG2Point, PodScalar};
 use solana_bn254_groth16_batch::{
     PedersenKey, Proof, ProofCommitment, RandomizerMode, ValidatedVerifyingKey, VerifyingKey,
@@ -54,6 +58,24 @@ fn read<const N: usize>(data: &[u8], offset: &mut usize) -> Option<[u8; N]> {
     let value = data.get(*offset..end)?.try_into().ok()?;
     *offset = end;
     Some(value)
+}
+
+/// Charge the compressed wire form of one G1 proof point.
+///
+/// An outer proof reaches the chain compressed, so a deployment decompresses
+/// before it can pair. The payload is sealed uncompressed, so the guest
+/// re-creates the encoding the sender transmitted and decompresses that. The
+/// round trip must return the same point, which is what binds the metered
+/// decompression to the point the verifier then consumes.
+fn wire_g1(point: &[u8; 64]) -> Option<()> {
+    (alt_bn128_g1_decompress_be(&alt_bn128_g1_compress_be(point).ok()?).ok()? == *point)
+        .then_some(())
+}
+
+/// The same for `B`, the proof's only G2 point.
+fn wire_g2(point: &[u8; 128]) -> Option<()> {
+    (alt_bn128_g2_decompress_be(&alt_bn128_g2_compress_be(point).ok()?).ok()? == *point)
+        .then_some(())
 }
 
 const FQ_MODULUS_BE: [u8; 32] = [
@@ -111,7 +133,9 @@ fn vk_from_gnark(vk: &Groth16Verifyingkey<'_>) -> Option<ValidatedVerifyingKey> 
 
 /// Exact payload: `A | B | C | commitment | PoK | explicit publics`.
 /// `A` is the unnegated outer Groth16 point. The BSB22 commitment-derived
-/// hash wire is recomputed and appended inside the verifier.
+/// hash wire is recomputed and appended inside the verifier. The payload is
+/// stored uncompressed, so the five proof points go through the compressed
+/// wire form before the fold reads them.
 pub fn verify_payload<const N: usize>(data: &[u8], vk: &Groth16Verifyingkey<'_>) -> Option<bool> {
     if data.len() != layout::HEADER_BYTES + N * 32
         || vk.nr_pubinputs != N
@@ -126,6 +150,11 @@ pub fn verify_payload<const N: usize>(data: &[u8], vk: &Groth16Verifyingkey<'_>)
     let c = read::<64>(data, &mut offset)?;
     let commitment = read::<64>(data, &mut offset)?;
     let pok = read::<64>(data, &mut offset)?;
+    wire_g1(&a)?;
+    wire_g2(&b)?;
+    wire_g1(&c)?;
+    wire_g1(&commitment)?;
+    wire_g1(&pok)?;
     let mut public_inputs = Vec::with_capacity(N + 1);
     for _ in 0..N {
         public_inputs.push(PodScalar(read::<32>(data, &mut offset)?));

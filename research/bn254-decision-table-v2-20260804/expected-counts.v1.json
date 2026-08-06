@@ -27,7 +27,9 @@
           "calls": 0,
           "slices": 0,
           "byte_cu": 0
-        }
+        },
+        "g1_decompressions": 10,
+        "g2_decompressions": 5
       }
     },
     {
@@ -117,7 +119,9 @@
           "calls": 7,
           "slices": 47,
           "byte_cu": 794
-        }
+        },
+        "g1_decompressions": 10,
+        "g2_decompressions": 5
       }
     },
     {
@@ -207,7 +211,9 @@
           "calls": 7,
           "slices": 47,
           "byte_cu": 794
-        }
+        },
+        "g1_decompressions": 10,
+        "g2_decompressions": 5
       }
     },
     {
@@ -301,7 +307,9 @@
           "calls": 7,
           "slices": 40,
           "byte_cu": 774
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 1
       }
     },
     {
@@ -329,7 +337,9 @@
           "calls": 1,
           "slices": 8,
           "byte_cu": 228
-        }
+        },
+        "g1_decompressions": 10,
+        "g2_decompressions": 5
       }
     },
     {
@@ -423,7 +433,9 @@
           "calls": 7,
           "slices": 53,
           "byte_cu": 998
-        }
+        },
+        "g1_decompressions": 10,
+        "g2_decompressions": 5
       }
     },
     {
@@ -451,7 +463,9 @@
           "calls": 0,
           "slices": 0,
           "byte_cu": 0
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 2
       }
     },
     {
@@ -529,7 +543,9 @@
           "calls": 5,
           "slices": 35,
           "byte_cu": 698
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 2
       }
     },
     {
@@ -607,7 +623,9 @@
           "calls": 5,
           "slices": 35,
           "byte_cu": 698
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 2
       }
     },
     {
@@ -689,7 +707,9 @@
           "calls": 7,
           "slices": 34,
           "byte_cu": 690
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 1
       }
     },
     {
@@ -717,7 +737,9 @@
           "calls": 2,
           "slices": 16,
           "byte_cu": 456
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 2
       }
     },
     {
@@ -797,7 +819,9 @@
           "calls": 5,
           "slices": 35,
           "byte_cu": 698
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 2
       }
     },
     {
@@ -825,7 +849,9 @@
           "calls": 0,
           "slices": 0,
           "byte_cu": 0
-        }
+        },
+        "g1_decompressions": 6,
+        "g2_decompressions": 3
       }
     },
     {
@@ -927,7 +953,9 @@
           "calls": 7,
           "slices": 51,
           "byte_cu": 1042
-        }
+        },
+        "g1_decompressions": 6,
+        "g2_decompressions": 3
       }
     },
     {
@@ -1029,7 +1057,9 @@
           "calls": 7,
           "slices": 51,
           "byte_cu": 1042
-        }
+        },
+        "g1_decompressions": 6,
+        "g2_decompressions": 3
       }
     },
     {
@@ -1115,7 +1145,9 @@
           "calls": 7,
           "slices": 36,
           "byte_cu": 718
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 1
       }
     },
     {
@@ -1143,7 +1175,9 @@
           "calls": 3,
           "slices": 24,
           "byte_cu": 684
-        }
+        },
+        "g1_decompressions": 6,
+        "g2_decompressions": 3
       }
     },
     {
@@ -1247,7 +1281,9 @@
           "calls": 7,
           "slices": 51,
           "byte_cu": 1042
-        }
+        },
+        "g1_decompressions": 6,
+        "g2_decompressions": 3
       }
     },
     {
@@ -1275,7 +1311,9 @@
           "calls": 15,
           "slices": 65,
           "byte_cu": 1738
-        }
+        },
+        "g1_decompressions": 18,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1319,7 +1357,9 @@
           "calls": 3,
           "slices": 7,
           "byte_cu": 846
-        }
+        },
+        "g1_decompressions": 18,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1363,7 +1403,9 @@
           "calls": 3,
           "slices": 7,
           "byte_cu": 846
-        }
+        },
+        "g1_decompressions": 18,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1449,7 +1491,9 @@
           "calls": 7,
           "slices": 36,
           "byte_cu": 718
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 1
       }
     },
     {
@@ -1477,7 +1521,9 @@
           "calls": 15,
           "slices": 65,
           "byte_cu": 1738
-        }
+        },
+        "g1_decompressions": 18,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1521,7 +1567,9 @@
           "calls": 3,
           "slices": 7,
           "byte_cu": 846
-        }
+        },
+        "g1_decompressions": 18,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1549,7 +1597,9 @@
           "calls": 22,
           "slices": 96,
           "byte_cu": 2602
-        }
+        },
+        "g1_decompressions": 27,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1593,7 +1643,9 @@
           "calls": 4,
           "slices": 9,
           "byte_cu": 1264
-        }
+        },
+        "g1_decompressions": 27,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1637,7 +1689,9 @@
           "calls": 4,
           "slices": 9,
           "byte_cu": 1264
-        }
+        },
+        "g1_decompressions": 27,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1735,7 +1789,9 @@
           "calls": 7,
           "slices": 42,
           "byte_cu": 802
-        }
+        },
+        "g1_decompressions": 4,
+        "g2_decompressions": 1
       }
     },
     {
@@ -1763,7 +1819,9 @@
           "calls": 22,
           "slices": 96,
           "byte_cu": 2602
-        }
+        },
+        "g1_decompressions": 27,
+        "g2_decompressions": 0
       }
     },
     {
@@ -1807,7 +1865,9 @@
           "calls": 4,
           "slices": 9,
           "byte_cu": 1264
-        }
+        },
+        "g1_decompressions": 27,
+        "g2_decompressions": 0
       }
     }
   ]

@@ -7,8 +7,8 @@
 mod stock_observer;
 
 pub use stock_observer::{
-    GroupOpKind, HASH_SYSCALLS, HashSyscallEvent, StockGroupOpEvent, StockGroupOpObservation,
-    StockGroupOpObserver,
+    COMPRESSION_SYSCALL, CompressionEvent, CompressionOpKind, GroupOpKind, HASH_SYSCALLS,
+    HashSyscallEvent, StockGroupOpEvent, StockGroupOpObservation, StockGroupOpObserver,
 };
 
 use {
@@ -58,6 +58,11 @@ pub const CURRENT_GROUP_OP_PAIRING_FIRST_CU: u64 = 36_364;
 pub const CURRENT_GROUP_OP_PAIRING_OTHER_CU: u64 = 12_121;
 pub const CURRENT_FR_LINCOMB_BASE_CU: u64 = 1;
 pub const CURRENT_FR_LINCOMB_PER_TERM_CU: u64 = 1;
+pub const CURRENT_SYSCALL_BASE_CU: u64 = 100;
+pub const CURRENT_G1_COMPRESS_CU: u64 = 30;
+pub const CURRENT_G1_DECOMPRESS_CU: u64 = 398;
+pub const CURRENT_G2_COMPRESS_CU: u64 = 86;
+pub const CURRENT_G2_DECOMPRESS_CU: u64 = 13_610;
 pub use solana_bn254_decision_bench::{
     HASH_BASE_CU, MAX_TRANSACTION_CU, MEM_OP_BASE_CU, stock_group_op_pairing_cu,
 };
@@ -106,6 +111,21 @@ pub struct HashSyscallObservation {
     pub byte_cu: u64,
 }
 
+/// Every `sol_alt_bn128_compression` call of one transaction, by direction.
+///
+/// The compress directions are an artifact of the sealed fixtures. They hold
+/// uncompressed points, so a guest must rebuild the wire encoding before it can
+/// decompress it. A deployment receives the compressed point and pays for the
+/// decompression alone, so only the decompress counts may reach a modelled
+/// total.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CompressionObservation {
+    pub g1_compressions: u64,
+    pub g1_decompressions: u64,
+    pub g2_compressions: u64,
+    pub g2_decompressions: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PlonkMultiVkReduceObservation {
     pub contexts: u64,
@@ -148,6 +168,7 @@ pub struct ObserverSnapshot {
     /// `byte_cu` stays zero until a caller supplies the differential; the
     /// register trace alone cannot fill it.
     pub hash_syscalls: HashSyscallObservation,
+    pub compression: CompressionObservation,
     pub plonk_multi_vk_reduces: Vec<PlonkMultiVkReduceObservation>,
     /// Setup is separate so hot-path totals can exclude it without inference.
     pub registry_init: RegistryInitObservation,
@@ -233,6 +254,34 @@ pub fn current_registry_init_cu(g2_entries: u64, gt_entries: u64) -> u64 {
         .saturating_add(per_validated_pair.saturating_mul(gt_entries))
 }
 
+/// `SyscallAltBn128Compression` adds `syscall_base_cost` to the per-point
+/// price. `SyscallAltBn128` beside it does not, so the two cannot share a
+/// formula.
+pub fn current_decompression_cu(g1: u64, g2: u64) -> u64 {
+    CURRENT_SYSCALL_BASE_CU
+        .saturating_add(CURRENT_G1_DECOMPRESS_CU)
+        .saturating_mul(g1)
+        .saturating_add(
+            CURRENT_SYSCALL_BASE_CU
+                .saturating_add(CURRENT_G2_DECOMPRESS_CU)
+                .saturating_mul(g2),
+        )
+}
+
+/// The charge for the compress direction, which the model deliberately does not
+/// price. Report it so the part of a residual that no deployment pays stays
+/// nameable instead of hiding in the guest total.
+pub fn current_compression_cu(g1: u64, g2: u64) -> u64 {
+    CURRENT_SYSCALL_BASE_CU
+        .saturating_add(CURRENT_G1_COMPRESS_CU)
+        .saturating_mul(g1)
+        .saturating_add(
+            CURRENT_SYSCALL_BASE_CU
+                .saturating_add(CURRENT_G2_COMPRESS_CU)
+                .saturating_mul(g2),
+        )
+}
+
 pub fn current_stock_group_op_cu(event: &StockGroupOpEvent) -> u64 {
     match event.kind {
         GroupOpKind::G1Add => CURRENT_GROUP_OP_G1_ADD_CU,
@@ -250,6 +299,11 @@ pub fn current_embedded_core_cu(snapshot: &ObserverSnapshot) -> u64 {
 }
 
 /// Current-pricing sum with one-time registry initialization excluded.
+///
+/// Decompression belongs here because the published model charges it. The
+/// compress direction does not, so its charge stays in whatever a caller
+/// computes as `metered - this`, which is where an artifact no deployment pays
+/// belongs.
 pub fn current_embedded_hot_core_cu(snapshot: &ObserverSnapshot) -> u64 {
     snapshot
         .msm_calls
@@ -274,6 +328,10 @@ pub fn current_embedded_hot_core_cu(snapshot: &ObserverSnapshot) -> u64 {
             snapshot.hash_syscalls.calls,
             snapshot.hash_syscalls.slices,
             snapshot.hash_syscalls.byte_cu,
+        )))
+        .chain(core::iter::once(current_decompression_cu(
+            snapshot.compression.g1_decompressions,
+            snapshot.compression.g2_decompressions,
         )))
         .chain(
             snapshot
@@ -364,6 +422,7 @@ pub fn observer_snapshot() -> ObserverSnapshot {
                 ),
             })
             .collect(),
+        compression: compression_observation(&stock.compressions),
         hash_syscalls: HashSyscallObservation {
             calls: stock.hash_syscalls.len() as u64,
             slices: stock
@@ -395,6 +454,20 @@ pub fn observer_snapshot() -> ObserverSnapshot {
         ifma_mixed_batch8_dispatches: backend_observer::observed_ifma_mixed_batch8_dispatches(),
         stock_group_ops: stock,
     }
+}
+
+fn compression_observation(events: &[CompressionEvent]) -> CompressionObservation {
+    let mut totals = CompressionObservation::default();
+    for event in events {
+        let counter = match event.kind {
+            CompressionOpKind::G1Compress => &mut totals.g1_compressions,
+            CompressionOpKind::G1Decompress => &mut totals.g1_decompressions,
+            CompressionOpKind::G2Compress => &mut totals.g2_compressions,
+            CompressionOpKind::G2Decompress => &mut totals.g2_decompressions,
+        };
+        *counter = counter.saturating_add(1);
+    }
+    totals
 }
 
 /// Construct a normal LiteSVM 0.12 environment and install all decision
@@ -967,6 +1040,40 @@ mod tests {
         // The campaign's transactions request exactly this limit, so pinning
         // the budget cannot change what they are allowed to spend.
         assert_eq!(budget.compute_unit_limit, MAX_TRANSACTION_CU);
+    }
+
+    /// The compression syscall prices four directions and the campaign copies
+    /// all four. A copy that drifts from the budget puts the difference into
+    /// the residual under the wrong name.
+    #[test]
+    fn the_budget_carries_the_compression_constants() {
+        let budget = ComputeBudget::new_with_defaults(true, true);
+        assert_eq!(budget.syscall_base_cost, CURRENT_SYSCALL_BASE_CU);
+        assert_eq!(budget.alt_bn128_g1_compress, CURRENT_G1_COMPRESS_CU);
+        assert_eq!(budget.alt_bn128_g1_decompress, CURRENT_G1_DECOMPRESS_CU);
+        assert_eq!(budget.alt_bn128_g2_compress, CURRENT_G2_COMPRESS_CU);
+        assert_eq!(budget.alt_bn128_g2_decompress, CURRENT_G2_DECOMPRESS_CU);
+    }
+
+    /// One Groth16 proof carries two G1 and one G2. These two numbers are the
+    /// ones `syscall_families` charges the same shape. If they drift apart the
+    /// residual is short or long by the difference.
+    #[test]
+    fn one_groth16_proof_decompresses_for_the_modelled_charge() {
+        assert_eq!(current_decompression_cu(2, 1), 14_706);
+        assert_eq!(current_compression_cu(2, 1), 446);
+        let snapshot = ObserverSnapshot {
+            compression: CompressionObservation {
+                g1_compressions: 2,
+                g1_decompressions: 2,
+                g2_compressions: 1,
+                g2_decompressions: 1,
+            },
+            ..ObserverSnapshot::default()
+        };
+        // Only the decompress half reaches the modelled core. The rest is the
+        // guest-side round trip and stays in the residual.
+        assert_eq!(current_embedded_hot_core_cu(&snapshot), 14_706);
     }
 
     /// Zeroing the byte cost must leave the floor and the base alone, or the

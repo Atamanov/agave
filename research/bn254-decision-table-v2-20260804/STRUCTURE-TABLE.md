@@ -6,11 +6,11 @@ is measuring its own wrapper.
 
 | Scenario | Current | Batching syscalls (B5) | Batching + VK registry (B5) | Recursion over B5 | Current + Fp12 | Batching + Fp12 (B5) |
 |---|---:|---:|---:|---:|---:|---:|
-| 5 real Zolana Groth16 proofs — same VK | 388930 / 3229 = 99.1% | 38437 / 6910 = 84.7% | 35011 / 7499 = 82.3% | 37545 / 8784 = 81.0% | 247533 / 17793 = 93.2% | 43631 / 7740 = 84.9% |
-| 2 real Zolana Groth16 proofs — distinct VKs | 155572 / 1492 = 99.0% | 36945 / 5513 = 87.0% | 30093 / 6382 = 82.5% | 36303 / 7740 = 82.4% | 99642 / 8345 = 92.2% | 41938 / 6754 = 86.1% |
-| 3 real Zolana Groth16 proofs — distinct VKs | 233358 / 2071 = 99.1% | 64280 / 7626 = 89.3% | 54002 / 8868 = 85.8% | 36717 / 8026 = 82.0% | 149463 / 12113 = 92.5% | 53836 / 9111 = 85.5% |
-| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | 267259 / 243358 = 52.3% | 37279 / 6892 = 84.3% | 31641 / 7427 = 80.9% | 36717 / 8026 = 82.0% | 241123 / 243598 = 49.7% | 37279 / 6954 = 84.2% |
-| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | 400826 / 365355 = 52.3% | 47707 / 9239 = 83.7% | 42069 / 9827 = 81.0% | 37959 / 9067 = 80.7% | 361622 / 365703 = 49.7% | 47707 / 9301 = 83.6% |
+| 5 real Zolana Groth16 proofs — same VK | 462460 / 7409 = 98.4% | 111967 / 11080 = 90.9% | 108541 / 11669 = 90.2% | 53247 / 10226 = 83.8% | 321063 / 21963 = 93.5% | 117161 / 11910 = 90.7% |
+| 2 real Zolana Groth16 proofs — distinct VKs | 184984 / 3173 = 98.3% | 66357 / 7187 = 90.2% | 59505 / 8056 = 88.0% | 52005 / 9182 = 84.9% | 129054 / 10019 = 92.7% | 71350 / 8428 = 89.4% |
+| 3 real Zolana Groth16 proofs — distinct VKs | 277476 / 4585 = 98.3% | 108398 / 10132 = 91.4% | 98120 / 11374 = 89.6% | 52419 / 9468 = 84.7% | 193581 / 14619 = 92.9% | 97954 / 11617 = 89.3% |
+| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | 276223 / 247818 = 52.7% | 46243 / 11352 = 80.2% | 40605 / 11887 = 77.3% | 52419 / 9468 = 84.7% | 250087 / 248058 = 50.2% | 46243 / 11414 = 80.2% |
+| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | 414272 / 372045 = 52.6% | 61153 / 15929 = 79.3% | 55515 / 16517 = 77.0% | 53661 / 10509 = 83.6% | 375068 / 372393 = 50.1% | 61153 / 15991 = 79.2% |
 
 Each cell is `syscall CU / sBPF CU = syscall share`.
 
@@ -26,22 +26,22 @@ returned to the guest side.
 
 | Scenario | Column | Hash CU | Share | Share with hash as sBPF |
 |---|---|---:|---:|---:|
-| 5 real Zolana Groth16 proofs — same VK | Batching syscalls (B5) | 1859 | 84.7% | 80.6% |
-| 5 real Zolana Groth16 proofs — same VK | Batching + VK registry (B5) | 1859 | 82.3% | 77.9% |
-| 5 real Zolana Groth16 proofs — same VK | Batching + Fp12 (B5) | 2123 | 84.9% | 80.8% |
-| 2 real Zolana Groth16 proofs — distinct VKs | Batching syscalls (B5) | 1473 | 87.0% | 83.5% |
-| 2 real Zolana Groth16 proofs — distinct VKs | Batching + VK registry (B5) | 1473 | 82.5% | 78.4% |
-| 2 real Zolana Groth16 proofs — distinct VKs | Batching + Fp12 (B5) | 1473 | 86.1% | 83.1% |
-| 3 real Zolana Groth16 proofs — distinct VKs | Batching syscalls (B5) | 2147 | 89.3% | 86.4% |
-| 3 real Zolana Groth16 proofs — distinct VKs | Batching + VK registry (B5) | 2147 | 85.8% | 82.4% |
-| 3 real Zolana Groth16 proofs — distinct VKs | Batching + Fp12 (B5) | 2147 | 85.5% | 82.1% |
-| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching syscalls (B5) | 1171 | 84.3% | 81.7% |
-| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + VK registry (B5) | 1171 | 80.9% | 77.9% |
-| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + Fp12 (B5) | 1171 | 84.2% | 81.6% |
-| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching syscalls (B5) | 1694 | 83.7% | 80.8% |
-| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + VK registry (B5) | 1694 | 81.0% | 77.7% |
-| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + Fp12 (B5) | 1694 | 83.6% | 80.7% |
+| 5 real Zolana Groth16 proofs — same VK | Batching syscalls (B5) | 1859 | 90.9% | 89.4% |
+| 5 real Zolana Groth16 proofs — same VK | Batching + VK registry (B5) | 1859 | 90.2% | 88.7% |
+| 5 real Zolana Groth16 proofs — same VK | Batching + Fp12 (B5) | 2123 | 90.7% | 89.1% |
+| 2 real Zolana Groth16 proofs — distinct VKs | Batching syscalls (B5) | 1473 | 90.2% | 88.2% |
+| 2 real Zolana Groth16 proofs — distinct VKs | Batching + VK registry (B5) | 1473 | 88.0% | 85.8% |
+| 2 real Zolana Groth16 proofs — distinct VKs | Batching + Fp12 (B5) | 1473 | 89.4% | 87.5% |
+| 3 real Zolana Groth16 proofs — distinct VKs | Batching syscalls (B5) | 2147 | 91.4% | 89.6% |
+| 3 real Zolana Groth16 proofs — distinct VKs | Batching + VK registry (B5) | 2147 | 89.6% | 87.6% |
+| 3 real Zolana Groth16 proofs — distinct VKs | Batching + Fp12 (B5) | 2147 | 89.3% | 87.4% |
+| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching syscalls (B5) | 1171 | 80.2% | 78.2% |
+| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + VK registry (B5) | 1171 | 77.3% | 75.1% |
+| 2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + Fp12 (B5) | 1171 | 80.2% | 78.1% |
+| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching syscalls (B5) | 1694 | 79.3% | 77.1% |
+| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + VK registry (B5) | 1694 | 77.0% | 74.7% |
+| 3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS | Batching + Fp12 (B5) | 1694 | 79.2% | 77.0% |
 
-The lowest syscall-bearing share is 77.7% once the hash charge is returned to the guest side.
+The lowest syscall-bearing share is 74.7% once the hash charge is returned to the guest side.
 
 No breach.
