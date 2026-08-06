@@ -168,7 +168,8 @@ fn parse_scalar_block(bytes: &[u8]) -> Option<Vec<(Fp2, Fp2, Fp2)>> {
         let mut fp2 = [Fp2::ZERO; 3];
         for (output, encoded) in fp2.iter_mut().zip(triple.chunks_exact(64)) {
             let mut components = [Fp::ZERO; 2];
-            for (component, encoded_component) in components.iter_mut().zip(encoded.chunks_exact(32))
+            for (component, encoded_component) in
+                components.iter_mut().zip(encoded.chunks_exact(32))
             {
                 let mut limbs = [0u64; 4];
                 for (limb, bytes) in limbs.iter_mut().zip(encoded_component.chunks_exact(8)) {

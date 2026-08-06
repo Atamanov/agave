@@ -7,17 +7,22 @@
 mod stock_observer;
 
 pub use stock_observer::{
-    GroupOpKind, StockGroupOpEvent, StockGroupOpObservation, StockGroupOpObserver,
+    COMPRESSION_SYSCALL, CompressionEvent, CompressionOpKind, GroupOpKind, HASH_SYSCALLS,
+    HashSyscallEvent, StockGroupOpEvent, StockGroupOpObservation, StockGroupOpObserver,
 };
 
 use {
     litesvm::LiteSVM,
     serde::{Deserialize, Serialize},
     solana_bn254_batch_syscall::{
-        FQ12_BYTES, G1_BYTES, G2_BYTES, PAIR_BYTES, PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair,
-        PodPairingResult, PodScalar, PodTrustedGtExponent, SCALAR_BYTES, Version, alt_bn128_g1_msm,
-        alt_bn128_pairing_check, alt_bn128_pairing_map, research_observer as backend_observer,
+        FQ12_BYTES, FR_MAX_ELEMS, G1_BYTES, G2_BYTES, PAIR_BYTES, PodG1G2Pair, PodG1Point,
+        PodG1RegisteredG2Pair, PodPairingResult, PodScalar, PodSnarkjsPlonkMultiVkContext,
+        PodSnarkjsPlonkMultiVkInput, PodTrustedGtExponent, SCALAR_BYTES, Version,
+        alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check, alt_bn128_pairing_map,
+        alt_bn128_snarkjs_plonk_multi_vk_batch_reduce, research_observer as backend_observer,
+        unpack_snarkjs_plonk_multi_vk_shape,
     },
+    solana_compute_budget::compute_budget::ComputeBudget,
     solana_program_runtime::{
         invoke_context::InvokeContext,
         solana_sbpf::{
@@ -61,16 +66,28 @@ pub const CURRENT_G2_SUBGROUP_CHECK_CU: u64 = 3_595;
 // The prepared-operand ops charge the RUNTIME lane tariff, not the embedded
 // linear current-pricing model above: they are new ops with no legacy
 // schedule, and consumer CU assertions should match the fork validator.
-pub const RUNTIME_PAIRING_BASE_CU: u64 = 4_641;
-pub const RUNTIME_PAIRING_PER_PAIR_CU: u64 = 4_188;
-pub const RUNTIME_PAIRING_LANE_CU: u64 = 20_338;
+pub const RUNTIME_PAIRING_BASE_CU: u64 = 6_105;
+pub const RUNTIME_PAIRING_PER_PAIR_CU: u64 = 4_350;
+pub const RUNTIME_PAIRING_LANE_BASE_CU: u64 = 4_655;
+pub const RUNTIME_PAIRING_LANE_CU: u64 = 22_505;
+pub const RUNTIME_PAIRING_LANE_REM_CU: u64 = 5_865;
 pub const RUNTIME_PREPARED_SCALAR_CREDIT_CU: u64 = 2_200;
 pub const RUNTIME_PREPARED_LANE_CREDIT_CU: u64 = 750;
-pub const RUNTIME_G2_PREPARE_CU: u64 = 700 + 4_188;
+pub const RUNTIME_G2_PREPARE_CU: u64 = 700 + 4_350;
 pub const CURRENT_GROUP_OP_G1_ADD_CU: u64 = 334;
 pub const CURRENT_GROUP_OP_G1_MUL_CU: u64 = 3_840;
 pub const CURRENT_GROUP_OP_PAIRING_FIRST_CU: u64 = 36_364;
 pub const CURRENT_GROUP_OP_PAIRING_OTHER_CU: u64 = 12_121;
+pub const CURRENT_FR_LINCOMB_BASE_CU: u64 = 1;
+pub const CURRENT_FR_LINCOMB_PER_TERM_CU: u64 = 1;
+pub const CURRENT_SYSCALL_BASE_CU: u64 = 100;
+pub const CURRENT_G1_COMPRESS_CU: u64 = 30;
+pub const CURRENT_G1_DECOMPRESS_CU: u64 = 398;
+pub const CURRENT_G2_COMPRESS_CU: u64 = 86;
+pub const CURRENT_G2_DECOMPRESS_CU: u64 = 13_610;
+pub use solana_bn254_decision_bench::{
+    HASH_BASE_CU, MAX_TRANSACTION_CU, MEM_OP_BASE_CU, stock_group_op_pairing_cu,
+};
 
 const MSM_DISCOUNT_PER_THOUSAND: [u64; 12] =
     [1000, 636, 449, 320, 246, 199, 166, 131, 113, 98, 85, 79];
@@ -93,6 +110,55 @@ pub struct RegisteredPairingObservation {
     pub full_pairs: u64,
     pub registered_pairs: u64,
     pub nonidentity_pairs: u64,
+    pub charged_cu: u64,
+}
+
+/// Every `SyscallHash` call of one transaction, summed.
+///
+/// Per-call totals are deliberately absent, and this is a fact about the
+/// runtime rather than a modelling shortcut. The charge depends on the length
+/// of each slice, those lengths live in guest memory, and the only two ways to
+/// reach them are both closed: LiteSVM 0.12 cannot replace the builtin
+/// `sol_keccak256` with an observing shim, and the VM register trace carries
+/// registers, not memory. `byte_cu` therefore comes from the metered
+/// difference between two runs of the same transaction whose
+/// `sha256_byte_cost` differs, which yields one number for the transaction and
+/// cannot be attributed back to individual calls. Do not try to make this
+/// per-call.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HashSyscallObservation {
+    pub calls: u64,
+    pub slices: u64,
+    /// Sum over slices of `max(0, len / 2 - mem_op_base_cost)`.
+    pub byte_cu: u64,
+}
+
+/// Every `sol_alt_bn128_compression` call of one transaction, by direction.
+///
+/// The compress directions are an artifact of the sealed fixtures. They hold
+/// uncompressed points, so a guest must rebuild the wire encoding before it can
+/// decompress it. A deployment receives the compressed point and pays for the
+/// decompression alone, so only the decompress counts may reach a modelled
+/// total.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CompressionObservation {
+    pub g1_compressions: u64,
+    pub g1_decompressions: u64,
+    pub g2_compressions: u64,
+    pub g2_decompressions: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PlonkMultiVkReduceObservation {
+    pub contexts: u64,
+    pub proofs: u64,
+    pub public_inputs: u64,
+    pub charged_cu: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FrLincombObservation {
+    pub terms: u64,
     pub charged_cu: u64,
 }
 
@@ -120,6 +186,12 @@ pub struct ObserverSnapshot {
     pub pairing_maps: Vec<PairingObservation>,
     pub registered_pairing_checks: Vec<RegisteredPairingObservation>,
     pub trusted_gt_multiexps: Vec<TrustedGtObservation>,
+    pub fr_lincombs: Vec<FrLincombObservation>,
+    /// `byte_cu` stays zero until a caller supplies the differential; the
+    /// register trace alone cannot fill it.
+    pub hash_syscalls: HashSyscallObservation,
+    pub compression: CompressionObservation,
+    pub plonk_multi_vk_reduces: Vec<PlonkMultiVkReduceObservation>,
     /// Setup is separate so hot-path totals can exclude it without inference.
     pub registry_init: RegistryInitObservation,
     pub standalone_subgroup_checks: u64,
@@ -168,19 +240,53 @@ pub fn current_prepared_pairing_cu(full: u64, prepared: u64) -> u64 {
     let pairs = full.saturating_add(prepared);
     let lanes = pairs / 8;
     let remainder = pairs % 8;
-    let credit = if lanes == 0 {
-        RUNTIME_PREPARED_SCALAR_CREDIT_CU
+    let (price, credit) = if lanes == 0 {
+        (
+            RUNTIME_PAIRING_BASE_CU
+                .saturating_add(RUNTIME_PAIRING_PER_PAIR_CU.saturating_mul(remainder)),
+            RUNTIME_PREPARED_SCALAR_CREDIT_CU,
+        )
     } else {
-        RUNTIME_PREPARED_LANE_CREDIT_CU
+        (
+            RUNTIME_PAIRING_LANE_BASE_CU
+                .saturating_add(RUNTIME_PAIRING_LANE_CU.saturating_mul(lanes))
+                .saturating_add(RUNTIME_PAIRING_LANE_REM_CU.saturating_mul(remainder)),
+            RUNTIME_PREPARED_LANE_CREDIT_CU,
+        )
     };
-    RUNTIME_PAIRING_BASE_CU
-        .saturating_add(RUNTIME_PAIRING_LANE_CU.saturating_mul(lanes))
-        .saturating_add(RUNTIME_PAIRING_PER_PAIR_CU.saturating_mul(remainder))
-        .saturating_sub(credit.saturating_mul(prepared))
+    price.saturating_sub(credit.saturating_mul(prepared))
 }
 
 pub fn current_g2_prepare_cu() -> u64 {
     RUNTIME_G2_PREPARE_CU
+}
+
+/// Charge for the atomic multi-VK snarkjs PLONK reduction, mirroring
+/// `syscalls/src/lib.rs`. The scalar half is the committed schedule; the
+/// transcript half prices the six phased keccaks the runtime replays so the
+/// guest does not have to.
+pub fn current_snarkjs_plonk_multi_vk_reduce_cu(
+    contexts: u64,
+    proofs: u64,
+    public_inputs: u64,
+) -> u64 {
+    const SCALAR_BASE: u64 = 127;
+    const SCALAR_PER_PROOF: u64 = 62;
+    const SCALAR_PER_LAGRANGE: u64 = 6;
+    let scalar = SCALAR_BASE
+        .saturating_add(SCALAR_PER_PROOF.saturating_mul(proofs))
+        .saturating_add(SCALAR_PER_LAGRANGE.saturating_mul(public_inputs.saturating_add(proofs)));
+    let transcript = 200u64
+        .saturating_add(800u64.saturating_mul(contexts))
+        .saturating_add(1719u64.saturating_mul(proofs))
+        .saturating_add(32u64.saturating_mul(public_inputs));
+    scalar.saturating_add(transcript)
+}
+
+pub use solana_bn254_decision_bench::hash_syscall_cu as current_hash_syscall_cu;
+
+pub fn current_fr_lincomb_cu(terms: u64) -> u64 {
+    CURRENT_FR_LINCOMB_BASE_CU.saturating_add(CURRENT_FR_LINCOMB_PER_TERM_CU.saturating_mul(terms))
 }
 
 pub fn current_registry_init_cu(g2_entries: u64, gt_entries: u64) -> u64 {
@@ -195,15 +301,39 @@ pub fn current_registry_init_cu(g2_entries: u64, gt_entries: u64) -> u64 {
         .saturating_add(per_validated_pair.saturating_mul(gt_entries))
 }
 
+/// `SyscallAltBn128Compression` adds `syscall_base_cost` to the per-point
+/// price. `SyscallAltBn128` beside it does not, so the two cannot share a
+/// formula.
+pub fn current_decompression_cu(g1: u64, g2: u64) -> u64 {
+    CURRENT_SYSCALL_BASE_CU
+        .saturating_add(CURRENT_G1_DECOMPRESS_CU)
+        .saturating_mul(g1)
+        .saturating_add(
+            CURRENT_SYSCALL_BASE_CU
+                .saturating_add(CURRENT_G2_DECOMPRESS_CU)
+                .saturating_mul(g2),
+        )
+}
+
+/// The charge for the compress direction, which the model deliberately does not
+/// price. Report it so the part of a residual that no deployment pays stays
+/// nameable instead of hiding in the guest total.
+pub fn current_compression_cu(g1: u64, g2: u64) -> u64 {
+    CURRENT_SYSCALL_BASE_CU
+        .saturating_add(CURRENT_G1_COMPRESS_CU)
+        .saturating_mul(g1)
+        .saturating_add(
+            CURRENT_SYSCALL_BASE_CU
+                .saturating_add(CURRENT_G2_COMPRESS_CU)
+                .saturating_mul(g2),
+        )
+}
+
 pub fn current_stock_group_op_cu(event: &StockGroupOpEvent) -> u64 {
     match event.kind {
         GroupOpKind::G1Add => CURRENT_GROUP_OP_G1_ADD_CU,
         GroupOpKind::G1Mul => CURRENT_GROUP_OP_G1_MUL_CU,
-        GroupOpKind::Pairing => event.pairing_elements.map_or(0, |pairs| {
-            CURRENT_GROUP_OP_PAIRING_FIRST_CU.saturating_add(
-                CURRENT_GROUP_OP_PAIRING_OTHER_CU.saturating_mul(pairs.saturating_sub(1)),
-            )
-        }),
+        GroupOpKind::Pairing => event.pairing_elements.map_or(0, stock_group_op_pairing_cu),
     }
 }
 
@@ -214,6 +344,11 @@ pub fn current_embedded_core_cu(snapshot: &ObserverSnapshot) -> u64 {
 }
 
 /// Current-pricing sum with one-time registry initialization excluded.
+///
+/// Decompression belongs here because the published model charges it. The
+/// compress direction does not, so its charge stays in whatever a caller
+/// computes as `metered - this`, which is where an artifact no deployment pays
+/// belongs.
 pub fn current_embedded_hot_core_cu(snapshot: &ObserverSnapshot) -> u64 {
     snapshot
         .msm_calls
@@ -230,6 +365,22 @@ pub fn current_embedded_hot_core_cu(snapshot: &ObserverSnapshot) -> u64 {
         .chain(
             snapshot
                 .trusted_gt_multiexps
+                .iter()
+                .map(|event| event.charged_cu),
+        )
+        .chain(snapshot.fr_lincombs.iter().map(|event| event.charged_cu))
+        .chain(core::iter::once(current_hash_syscall_cu(
+            snapshot.hash_syscalls.calls,
+            snapshot.hash_syscalls.slices,
+            snapshot.hash_syscalls.byte_cu,
+        )))
+        .chain(core::iter::once(current_decompression_cu(
+            snapshot.compression.g1_decompressions,
+            snapshot.compression.g2_decompressions,
+        )))
+        .chain(
+            snapshot
+                .plonk_multi_vk_reduces
                 .iter()
                 .map(|event| event.charged_cu),
         )
@@ -259,6 +410,7 @@ pub fn observer_snapshot() -> ObserverSnapshot {
     let registry_preparations = backend_observer::observed_registry_g2_preparation_calls();
     let standalone = backend_observer::observed_standalone_probe_calls();
     let legacy = backend_observer::observed_legacy_group_ops();
+    let stock = stock_observer().snapshot();
     ObserverSnapshot {
         msm_calls: backend_observer::observed_g1_msm_point_count_list()
             .into_iter()
@@ -302,6 +454,38 @@ pub fn observer_snapshot() -> ObserverSnapshot {
                 charged_cu: current_trusted_gt_multiexp_cu(targets),
             })
             .collect(),
+        plonk_multi_vk_reduces: backend_observer::observed_snarkjs_plonk_multi_vk_shapes()
+            .into_iter()
+            .map(
+                |(contexts, proofs, public_inputs)| PlonkMultiVkReduceObservation {
+                    contexts,
+                    proofs,
+                    public_inputs,
+                    charged_cu: current_snarkjs_plonk_multi_vk_reduce_cu(
+                        contexts,
+                        proofs,
+                        public_inputs,
+                    ),
+                },
+            )
+            .collect(),
+        compression: compression_observation(&stock.compressions),
+        hash_syscalls: HashSyscallObservation {
+            calls: stock.hash_syscalls.len() as u64,
+            slices: stock
+                .hash_syscalls
+                .iter()
+                .map(|event| event.slices)
+                .fold(0u64, u64::saturating_add),
+            byte_cu: 0,
+        },
+        fr_lincombs: backend_observer::observed_fr_lincomb_term_counts()
+            .into_iter()
+            .map(|terms| FrLincombObservation {
+                terms,
+                charged_cu: current_fr_lincomb_cu(terms),
+            })
+            .collect(),
         registry_init: RegistryInitObservation {
             g2_entries: registry_init_shape.0,
             gt_entries: registry_init_shape.1,
@@ -315,17 +499,53 @@ pub fn observer_snapshot() -> ObserverSnapshot {
         legacy_g1_additions: legacy.1,
         ifma_batch8_dispatches: backend_observer::observed_ifma_batch8_dispatches(),
         ifma_mixed_batch8_dispatches: backend_observer::observed_ifma_mixed_batch8_dispatches(),
-        stock_group_ops: stock_observer().snapshot(),
+        stock_group_ops: stock,
     }
+}
+
+fn compression_observation(events: &[CompressionEvent]) -> CompressionObservation {
+    let mut totals = CompressionObservation::default();
+    for event in events {
+        let counter = match event.kind {
+            CompressionOpKind::G1Compress => &mut totals.g1_compressions,
+            CompressionOpKind::G1Decompress => &mut totals.g1_decompressions,
+            CompressionOpKind::G2Compress => &mut totals.g2_compressions,
+            CompressionOpKind::G2Decompress => &mut totals.g2_decompressions,
+        };
+        *counter = counter.saturating_add(1);
+    }
+    totals
 }
 
 /// Construct a normal LiteSVM 0.12 environment and install all decision
 /// syscalls after stock builtins and before default programs.
 pub fn new_litesvm_with_decision_syscalls() -> LiteSVM {
+    new_litesvm_charging_hash_bytes(DEFAULT_HASH_BYTE_COST)
+}
+
+/// Consensus `sha256_byte_cost`.
+pub const DEFAULT_HASH_BYTE_COST: u64 = 1;
+
+/// The same environment with `sha256_byte_cost` set explicitly.
+///
+/// That constant multiplies the per-slice half of every `SyscallHash` charge
+/// and nothing else, so two runs of one transaction that differ only in it
+/// differ by exactly `sum over slices of max(0, cost * len / 2 - 10)`. At zero
+/// each slice falls to the `mem_op_base_cost` floor, which makes the metered
+/// difference between `1` and `0` the byte half no register trace can see.
+///
+/// `the_budget_carries_the_charge_constants_the_model_prices` pins the three
+/// constants this rests on; that all 30 cells meter the same total with the
+/// budget passed explicitly as without it is checked by the collection.
+pub fn new_litesvm_charging_hash_bytes(hash_byte_cost: u64) -> LiteSVM {
     const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
     let mut svm = with_decision_syscalls(
         LiteSVM::new_debuggable(true)
             .with_mainnet_features()
+            .with_compute_budget(ComputeBudget {
+                sha256_byte_cost: hash_byte_cost,
+                ..ComputeBudget::new_with_defaults(true, true)
+            })
             .with_builtins(),
     )
     .with_lamports(1_000_000u64.wrapping_mul(LAMPORTS_PER_SOL))
@@ -359,6 +579,11 @@ fn with_decision_syscalls(svm: LiteSVM) -> LiteSVM {
         .with_custom_syscall(
             "sol_alt_bn128_pairing_map_prepared",
             SyscallPairingMapPrepared::vm,
+        )
+        .with_custom_syscall("sol_alt_bn128_fr_lincomb", SyscallFrLincomb::vm)
+        .with_custom_syscall(
+            "sol_alt_bn128_snarkjs_plonk_multi_vk_batch_reduce",
+            SyscallSnarkjsPlonkMultiVkBatchReduce::vm,
         )
 }
 
@@ -461,6 +686,99 @@ declare_builtin_function!(
             Ok(result) => {
                 translate_mut(memory_mapping, result_addr, G1_BYTES as u64)?
                     .copy_from_slice(&result.0);
+                Ok(0)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    SyscallFrLincomb,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        num_elems: u64,
+        left_addr: u64,
+        right_addr: u64,
+        result_addr: u64,
+        _arg5: u64,
+        memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        // Charged from the declared count before any translation, as Agave does,
+        // so malformed input costs the same as valid input.
+        invoke_context.consume_checked(current_fr_lincomb_cu(num_elems))?;
+        if num_elems == 0 || num_elems > FR_MAX_ELEMS as u64 {
+            return Ok(1);
+        }
+        let left: &[PodScalar] = pod_slice(translate(
+            memory_mapping,
+            left_addr,
+            byte_len(num_elems, SCALAR_BYTES)?,
+        )?)?;
+        let right: &[PodScalar] = pod_slice(translate(
+            memory_mapping,
+            right_addr,
+            byte_len(num_elems, SCALAR_BYTES)?,
+        )?)?;
+        match alt_bn128_fr_lincomb(Version::V0, left, right) {
+            Ok(result) => {
+                translate_mut(memory_mapping, result_addr, SCALAR_BYTES as u64)?
+                    .copy_from_slice(&result.0);
+                Ok(0)
+            }
+            Err(_) => Ok(1),
+        }
+    }
+);
+
+declare_builtin_function!(
+    SyscallSnarkjsPlonkMultiVkBatchReduce,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        shape: u64,
+        contexts_addr: u64,
+        inputs_addr: u64,
+        public_inputs_addr: u64,
+        result_addr: u64,
+        memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let (num_contexts, num_proofs, num_public_inputs) =
+            unpack_snarkjs_plonk_multi_vk_shape(shape);
+        // Charged from the declared shape before any translation, as Agave does.
+        invoke_context.consume_checked(current_snarkjs_plonk_multi_vk_reduce_cu(
+            num_contexts,
+            num_proofs,
+            num_public_inputs,
+        ))?;
+        let contexts: &[PodSnarkjsPlonkMultiVkContext] = pod_slice(translate(
+            memory_mapping,
+            contexts_addr,
+            byte_len(
+                num_contexts,
+                core::mem::size_of::<PodSnarkjsPlonkMultiVkContext>(),
+            )?,
+        )?)?;
+        let inputs: &[PodSnarkjsPlonkMultiVkInput] = pod_slice(translate(
+            memory_mapping,
+            inputs_addr,
+            byte_len(
+                num_proofs,
+                core::mem::size_of::<PodSnarkjsPlonkMultiVkInput>(),
+            )?,
+        )?)?;
+        let publics: &[PodScalar] = pod_slice(translate(
+            memory_mapping,
+            public_inputs_addr,
+            byte_len(num_public_inputs, SCALAR_BYTES)?,
+        )?)?;
+        match alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(Version::V0, contexts, inputs, publics)
+        {
+            Ok(scalars) => {
+                let bytes = byte_len(scalars.len() as u64, SCALAR_BYTES)?;
+                let out = translate_mut(memory_mapping, result_addr, bytes)?;
+                for (slot, scalar) in out.chunks_exact_mut(SCALAR_BYTES).zip(&scalars) {
+                    slot.copy_from_slice(&scalar.0);
+                }
                 Ok(0)
             }
             Err(_) => Ok(1),
@@ -744,8 +1062,12 @@ declare_builtin_function!(
         else {
             return Ok(1);
         };
-        translate_mut(memory_mapping, prepared_out_addr, PREPARED_G2_WIRE_BYTES as u64)?
-            .copy_from_slice(&wire);
+        translate_mut(
+            memory_mapping,
+            prepared_out_addr,
+            PREPARED_G2_WIRE_BYTES as u64,
+        )?
+        .copy_from_slice(&wire);
         Ok(0)
     }
 );
@@ -906,6 +1228,12 @@ mod tests {
         assert_eq!(current_registered_pairing_cu(5, 3), 81_149);
         assert_eq!(current_trusted_gt_multiexp_cu(2), 28_728);
         assert_eq!(current_registry_init_cu(1, 1), 35_918);
+        assert_eq!(current_fr_lincomb_cu(3), 4);
+        // Must equal syscalls/src/lib.rs's charge for the same shape, or the
+        // residual is measured against a price the runtime never charges.
+        // n=2: scalar 127 + 62*2 + 6*(2+2) = 275; transcript 200 + 800*2 + 1719*2 + 32*2 = 5302.
+        assert_eq!(current_snarkjs_plonk_multi_vk_reduce_cu(2, 2, 2), 5_577);
+        assert_eq!(current_snarkjs_plonk_multi_vk_reduce_cu(3, 3, 3), 8_202);
     }
 
     #[test]
@@ -926,6 +1254,67 @@ mod tests {
             current_embedded_core_cu(&snapshot),
             current_registry_init_cu(1, 0)
         );
+    }
+
+    /// `hash_syscall_cu` hardcodes the runtime's hash schedule. If the budget
+    /// ever carries different constants, every cell's hash charge is wrong by
+    /// a silent amount, so read them back from the budget the shim installs.
+    #[test]
+    fn the_budget_carries_the_charge_constants_the_model_prices() {
+        let budget = ComputeBudget::new_with_defaults(true, true);
+        assert_eq!(budget.sha256_base_cost, HASH_BASE_CU);
+        assert_eq!(budget.sha256_byte_cost, DEFAULT_HASH_BYTE_COST);
+        assert_eq!(budget.mem_op_base_cost, MEM_OP_BASE_CU);
+        // The campaign's transactions request exactly this limit, so pinning
+        // the budget cannot change what they are allowed to spend.
+        assert_eq!(budget.compute_unit_limit, MAX_TRANSACTION_CU);
+    }
+
+    /// The compression syscall prices four directions and the campaign copies
+    /// all four. A copy that drifts from the budget puts the difference into
+    /// the residual under the wrong name.
+    #[test]
+    fn the_budget_carries_the_compression_constants() {
+        let budget = ComputeBudget::new_with_defaults(true, true);
+        assert_eq!(budget.syscall_base_cost, CURRENT_SYSCALL_BASE_CU);
+        assert_eq!(budget.alt_bn128_g1_compress, CURRENT_G1_COMPRESS_CU);
+        assert_eq!(budget.alt_bn128_g1_decompress, CURRENT_G1_DECOMPRESS_CU);
+        assert_eq!(budget.alt_bn128_g2_compress, CURRENT_G2_COMPRESS_CU);
+        assert_eq!(budget.alt_bn128_g2_decompress, CURRENT_G2_DECOMPRESS_CU);
+    }
+
+    /// One Groth16 proof carries two G1 and one G2. These two numbers are the
+    /// ones `syscall_families` charges the same shape. If they drift apart the
+    /// residual is short or long by the difference.
+    #[test]
+    fn one_groth16_proof_decompresses_for_the_modelled_charge() {
+        assert_eq!(current_decompression_cu(2, 1), 14_706);
+        assert_eq!(current_compression_cu(2, 1), 446);
+        let snapshot = ObserverSnapshot {
+            compression: CompressionObservation {
+                g1_compressions: 2,
+                g1_decompressions: 2,
+                g2_compressions: 1,
+                g2_decompressions: 1,
+            },
+            ..ObserverSnapshot::default()
+        };
+        // Only the decompress half reaches the modelled core. The rest is the
+        // guest-side round trip and stays in the residual.
+        assert_eq!(current_embedded_hot_core_cu(&snapshot), 14_706);
+    }
+
+    /// Zeroing the byte cost must leave the floor and the base alone, or the
+    /// difference between the two runs is not the byte half.
+    #[test]
+    fn the_free_byte_run_leaves_only_the_floor() {
+        let free = ComputeBudget {
+            sha256_byte_cost: 0,
+            ..ComputeBudget::new_with_defaults(true, true)
+        };
+        assert_eq!(free.sha256_base_cost, HASH_BASE_CU);
+        assert_eq!(free.mem_op_base_cost, MEM_OP_BASE_CU);
+        assert_eq!(current_hash_syscall_cu(7, 47, 0), 85 * 7 + 10 * 47);
     }
 
     #[test]

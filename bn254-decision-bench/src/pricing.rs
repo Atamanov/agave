@@ -1,0 +1,241 @@
+//! The one definition of a cell's syscall cost, and the structural split that
+//! says how much of a transaction the syscall actually accounts for.
+//!
+//! Both renderers price through `syscall_cu`. A second copy is what let the
+//! stock pairing charge drift between the renderer and the residual subtractor.
+
+use {
+    crate::{
+        ColumnId, OperationTrace, RowId, current_pairing_map_cu, expected_trace,
+        stock_group_op_pairing_cu,
+    },
+    solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
+};
+
+/// Syscall CU for one cell, split by the syscall that charges it.
+///
+/// The split exists so a reader can see which family carries a cell's share.
+/// A share that rests on one family is a different claim from one spread
+/// across the pairing and MSM work the column is named after.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SyscallFamilies {
+    pub decompress: u64,
+    pub pairing: u64,
+    pub msm: u64,
+    pub stock_g1: u64,
+    pub lincomb: u64,
+    pub hash: u64,
+    pub reduce: u64,
+    pub gt: u64,
+}
+
+impl SyscallFamilies {
+    pub fn total(&self) -> u64 {
+        [
+            self.decompress,
+            self.pairing,
+            self.msm,
+            self.stock_g1,
+            self.lincomb,
+            self.hash,
+            self.reduce,
+            self.gt,
+        ]
+        .into_iter()
+        .fold(0u64, u64::saturating_add)
+    }
+}
+
+/// What `SyscallAltBn128Compression` charges for one point.
+///
+/// It adds `syscall_base_cost` to the per-point price. `SyscallAltBn128`, which
+/// serves the group ops beside it, does not, so the two cannot share a formula.
+fn decompress_cu(cost: &SVMTransactionExecutionCost, g1: u32, g2: u32) -> u64 {
+    cost.syscall_base_cost
+        .saturating_add(cost.alt_bn128_g1_decompress)
+        .saturating_mul(u64::from(g1))
+        .saturating_add(
+            cost.syscall_base_cost
+                .saturating_add(cost.alt_bn128_g2_decompress)
+                .saturating_mul(u64::from(g2)),
+        )
+}
+
+/// Syscall CU for one cell: the charge a validator meters, and nothing else.
+pub fn syscall_cu(
+    cost: &SVMTransactionExecutionCost,
+    column: ColumnId,
+    trace: &OperationTrace,
+) -> u64 {
+    syscall_families(cost, column, trace).total()
+}
+
+pub fn syscall_families(
+    cost: &SVMTransactionExecutionCost,
+    column: ColumnId,
+    trace: &OperationTrace,
+) -> SyscallFamilies {
+    // Current keeps the stock precompile; every other column reaches the batch
+    // syscalls. Current + Fp12 is a third case: it stays per-proof independent
+    // but its finalizer is `pairing_map`, which has no stock equivalent.
+    let stock = matches!(column, ColumnId::Current | ColumnId::CurrentFp12);
+    // Decompression is charged before any pairing, and charged by every
+    // column, because a deployment of any of them receives the same
+    // compressed proof.
+    let mut families = SyscallFamilies {
+        decompress: decompress_cu(cost, trace.g1_decompressions, trace.g2_decompressions),
+        ..SyscallFamilies::default()
+    };
+    let mut cu = 0u64;
+    for call in &trace.pairing_checks {
+        let each = if stock {
+            stock_group_op_pairing_cu(call.pairs.into())
+        } else {
+            cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into())
+        };
+        cu = cu.saturating_add(u64::from(call.calls).saturating_mul(each));
+    }
+    for call in &trace.pairing_maps {
+        let each = if stock {
+            current_pairing_map_cu(call.pairs.into())
+        } else {
+            cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into())
+        };
+        cu = cu.saturating_add(u64::from(call.calls).saturating_mul(each));
+    }
+    families.pairing = cu;
+
+    cu = 0;
+    for call in &trace.msm_calls {
+        cu = cu.saturating_add(
+            u64::from(call.calls).saturating_mul(
+                cost.alt_bn128_g1_msm_base_cost.saturating_add(
+                    cost.alt_bn128_g1_msm_per_point_cost
+                        .saturating_mul(u64::from(call.points)),
+                ),
+            ),
+        );
+    }
+    families.msm = cu;
+
+    // The unbatched path forms its public-input commitment with stock G1
+    // operations rather than an MSM syscall. They are metered, and the residual
+    // subtracts them, so omitting them here understates the baseline.
+    families.stock_g1 = cost
+        .alt_bn128_g1_addition_cost
+        .saturating_mul(u64::from(trace.stock_g1_additions))
+        .saturating_add(
+            cost.alt_bn128_g1_multiplication_cost
+                .saturating_mul(u64::from(trace.stock_g1_multiplications)),
+        );
+
+    cu = 0;
+    for call in &trace.fr_lincomb_calls {
+        cu = cu.saturating_add(
+            u64::from(call.calls).saturating_mul(
+                cost.alt_bn128_fr_lincomb_base_cost.saturating_add(
+                    cost.alt_bn128_fr_lincomb_per_term_cost
+                        .saturating_mul(u64::from(call.terms)),
+                ),
+            ),
+        );
+    }
+    families.lincomb = cu;
+
+    families.hash = crate::hash_syscall_cu(
+        u64::from(trace.hash_syscalls.calls),
+        u64::from(trace.hash_syscalls.slices),
+        u64::from(trace.hash_syscalls.byte_cu),
+    );
+
+    cu = 0;
+    for call in &trace.plonk_multi_vk_reduce_calls {
+        // Same formula the runtime charges: the fitted scalar schedule plus the
+        // transcript keccaks it replays on the guest's behalf.
+        let scalar = cost
+            .alt_bn128_plonk_batch_reduce_base_cost
+            .saturating_add(
+                cost.alt_bn128_plonk_batch_reduce_per_proof_cost
+                    .saturating_mul(u64::from(call.proofs)),
+            )
+            .saturating_add(
+                cost.alt_bn128_plonk_batch_reduce_per_lagrange_cost
+                    .saturating_mul(
+                        u64::from(call.public_inputs).saturating_add(u64::from(call.proofs)),
+                    ),
+            );
+        let transcript = 200u64
+            .saturating_add(800u64.saturating_mul(u64::from(call.contexts)))
+            .saturating_add(1_719u64.saturating_mul(u64::from(call.proofs)))
+            .saturating_add(32u64.saturating_mul(u64::from(call.public_inputs)));
+        cu = cu.saturating_add(
+            u64::from(call.calls).saturating_mul(scalar.saturating_add(transcript)),
+        );
+    }
+    families.reduce = cu;
+
+    cu = 0;
+    for call in &trace.gt_target_multiexp_calls {
+        cu = cu.saturating_add(
+            u64::from(call.calls).saturating_mul(
+                cost.alt_bn128_gt_multiexp_base_cost.saturating_add(
+                    cost.alt_bn128_gt_multiexp_per_target_cost
+                        .saturating_mul(u64::from(call.targets)),
+                ),
+            ),
+        );
+    }
+    families.gt = cu;
+
+    families
+}
+
+/// How a cell's transaction CU divides between the syscall and the guest.
+#[derive(Clone, Copy, Debug)]
+pub struct CostSplit {
+    pub syscall: u64,
+    pub sbpf: u64,
+}
+
+impl CostSplit {
+    pub fn total(&self) -> u64 {
+        self.syscall.saturating_add(self.sbpf)
+    }
+
+    /// Syscall share in tenths of a percent, so the gate needs no float.
+    /// A cell with no work reads as zero rather than dividing by it.
+    pub fn syscall_share_per_mille(&self) -> u64 {
+        self.syscall
+            .saturating_mul(1_000)
+            .checked_div(self.total())
+            .unwrap_or_default()
+    }
+}
+
+pub fn cost_split(
+    cost: &SVMTransactionExecutionCost,
+    row: RowId,
+    column: ColumnId,
+    residual: u64,
+) -> CostSplit {
+    CostSplit {
+        syscall: syscall_cu(cost, column, &expected_trace(row, column)),
+        sbpf: residual,
+    }
+}
+
+/// Floor below which a column stops describing the syscall it is named after.
+///
+/// Not a physical law. It is a smell detector: a batching column whose cost is
+/// overwhelmingly guest-side is measuring the wrapper, not the batch. The value
+/// is deliberately loose so that only a structural problem trips it.
+pub const MIN_SYSCALL_SHARE_PER_MILLE: u64 = 250;
+
+/// Columns whose whole purpose is to move work into a syscall. `Current` is
+/// exempt because it is the baseline, and recursion is exempt because it
+/// deliberately trades on-chain pairing work for prover work.
+pub const SYSCALL_BEARING_COLUMNS: [ColumnId; 3] = [
+    ColumnId::BatchB5,
+    ColumnId::RegistryB5,
+    ColumnId::BatchFp12B5,
+];

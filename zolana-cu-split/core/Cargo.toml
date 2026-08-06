@@ -1,0 +1,19 @@
+[package]
+name = "zolana-cu-split-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Independent workspace. The directory sits inside the agave checkout but is
+# not an agave member, so agave builds never see it.
+[workspace]
+
+[dependencies]
+anyhow = "1.0"
+litesvm = { version = "0.15", features = ["register-tracing"] }
+object = "0.36"
+rustc-demangle = "0.1"
+solana-program-runtime = "4.1"
+solana-pubkey = { version = "4.2", features = ["curve25519"] }
+solana-transaction = { version = "4.1", features = ["verify"] }
+solana-transaction-context = "4.1"

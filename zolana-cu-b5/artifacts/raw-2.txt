@@ -1,0 +1,23 @@
+mode raw  legs 2  symbols 375
+
+=== solo transact [raw] ===
+  transaction CU               166940
+  executed sBPF CU              19105   11.4%
+  BN254 pairing                 73612   44.1%   x1 over 4 pairs
+  BN254 MSM / other             18880   11.3%   x5
+  Poseidon                      45588   27.3%   x58
+  keccak256 / sha256                ?    0.0%   x7 over 0 slices
+  mem ops                         740    0.4%   x74
+  everything else                9015    5.4%   3 CPI
+
+=== aggregate transact, 2 legs [raw] ===
+  transaction CU               311744
+  executed sBPF CU              51549   16.5%
+  BN254 pairing                122598   39.3%   x2 over 6 pairs
+  BN254 MSM / other             24384    7.8%   x10
+  Poseidon                      93534   30.0%   x119
+  keccak256 / sha256                ?    0.0%   x17 over 0 slices
+  mem ops                        1530    0.5%   x153
+  everything else               18149    5.8%   6 CPI
+
+summary [raw] legs 2: aggregate 311744, solo x2 333880, per solo 166940

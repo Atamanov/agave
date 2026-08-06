@@ -24,6 +24,16 @@ solana-bn254-groth16-batch = { path = "../../../bn254-groth16-batch", default-fe
 solana-keccak-hasher = "3.1.0"
 solana-sha256-hasher = "3.1.0"
 
+# `curve25519` gives the host build of pinocchio's `Address` a real
+# `find_program_address`; the pin test re-derives every pinned registry PDA.
+[dev-dependencies]
+ark-std = "0.5"
+solana-address = { version = "2.7.0", features = ["curve25519"] }
+solana-bn254-groth16-batch = { path = "../../../bn254-groth16-batch", default-features = false, features = [
+    "agave-unstable-api",
+    "test-fixtures",
+] }
+
 [lints.rust.unexpected_cfgs]
 level = "allow"
 check-cfg = ["cfg(target_os, values(\"solana\"))"]

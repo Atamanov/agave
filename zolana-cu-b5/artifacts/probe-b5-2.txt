@@ -1,0 +1,295 @@
+
+=== probe, solo transact [b5] ===
+transaction CU 113940   pool tree account 1185728 bytes
+
+-- runtime invocation log --
+  Program ComputeBudget111111111111111111111111111111 invoke [1]
+  Program ComputeBudget111111111111111111111111111111 success
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG invoke [1]
+  Program 11111111111111111111111111111111 invoke [2]
+  Program 11111111111111111111111111111111 success
+  Program 11111111111111111111111111111111 invoke [2]
+  Program 11111111111111111111111111111111 success
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG invoke [2]
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG consumed 46 of 1286125 compute units
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG success
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG consumed 113790 of 1399850 compute units
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG success
+
+-- sBPF invocations --
+  #0  sbpf       46  syscalls    0  bn254 subtree      0  depth 2
+  #1  sbpf    19059  syscalls  149  bn254 subtree   2511  depth 10
+  total 19105  bn254 dynamic 2511  bn254 static 1059  callee sbpf 46
+
+-- every syscall, with the frame that issued it --
+  sol_alt_bn128_compression    x3       14706 CU from registers
+  sol_alt_bn128_group_op       x3       24786 CU from registers
+  sol_get_sysvar               x1           0 CU from registers
+  sol_invoke_signed_c          x3           0 CU from registers
+  sol_keccak256                x6           0 CU from registers
+  sol_memcpy_                  x66        660 CU from registers
+  sol_memset_                  x8          80 CU from registers
+  sol_poseidon                 x58      45588 CU from registers
+  sol_sha256                   x1           0 CU from registers
+
+-- BN254 and hash calls, one line each --
+  sol_keccak256              r1=8589979600 r2=1   r3=8589979616        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589979600 r2=1   r3=8589979616        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589971408 r2=1   r3=8589971424        0 CU  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+  sol_keccak256              r1=8589979600 r2=1   r3=8589979616        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589979600 r2=1   r3=8589979616        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589971408 r2=1   r3=8589971424        0 CU  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+  sol_sha256                 r1=8589971408 r2=1   r3=8589971424        0 CU  <zolana_hasher::sha256::Sha256BE as zolana_hasher::Hasher>::hash
+  sol_alt_bn128_compression  r1=1    r2=8589952928 r3=32          498 CU  groth16_solana::decompression::decompress_g1
+  sol_alt_bn128_compression  r1=3    r2=8589952864 r3=64        13710 CU  groth16_solana::decompression::decompress_g2
+  sol_alt_bn128_compression  r1=1    r2=8589952960 r3=32          498 CU  groth16_solana::decompression::decompress_g1
+  sol_alt_bn128_group_op     r1=2    r2=8589987552 r3=96          947 CU  groth16_solana::groth16::g1_mul_add
+  sol_alt_bn128_group_op     r1=0    r2=8589987648 r3=128         334 CU  groth16_solana::groth16::g1_mul_add
+  sol_alt_bn128_group_op     r1=3    r2=8589978216 r3=768       23505 CU  groth16_solana::syscalls::inner::pairing_be
+
+-- Poseidon by issuing frame --
+  x36      28296 CU  <zolana_hasher::poseidon::Poseidon as zolana_hasher::Hasher>::hashv
+  x19      14934 CU  zolana_hasher::hash_chain::create_hash_chain_from_slice
+  x3        2358 CU  zolana_hasher::hash_chain::create_hash_chain_from_slice_ref
+
+-- mem ops by issuing frame --
+  x66        660 CU  memcpy
+  x8          80 CU  memset
+
+-- measured at the charge site --
+  CPI windows       x3      7927 CU  [1096, 5838, 993]
+  sysvar reads      x1       110 CU
+  hash syscalls     x7       874 CU over 7 slices
+
+-- what is left --
+  transaction                    113940
+  priced from the trace          105799
+  residual                         8141
+  CPI window minus callee          7881
+  sysvar                            110
+  still unattributed                150
+
+-- top frames, inclusive sBPF --
+     19059  entrypoint
+     18933  shielded_pool_program::process_instruction
+     18902  shielded_pool_program::instructions::transact::processor::process_transact_ix
+      7626  shielded_pool_program::instructions::transact::verify::TransactProof::verify
+      6974  shielded_pool_program::instructions::transact::verify::TransactProof::public_input_hash
+      5235  shielded_pool_program::instructions::transact::verify::amount_field
+      4184  __multi3
+      3035  shielded_pool_program::instructions::transact::tree::apply_output_tree
+      2143  shielded_pool_program::instructions::transact::tree::apply_input_tree
+      2076  <ark_ff::fields::models::fp::montgomery_backend::MontBackend<T,_> as ark_ff::fields::models::fp::FpConfig<_>>::from_bigint
+      1482  zolana_interface::instruction::instruction_data::transact::ExternalDataHash<M>::hash
+      1440  <zolana_hasher::poseidon::Poseidon as zolana_hasher::Hasher>::hashv
+      1220  shielded_pool_program::instructions::event::emit_general_event
+      1195  zolana_event::encode_event_instruction
+      1194  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+      1095  <zolana_event::GeneralEvent as borsh::ser::BorshSerialize>::serialize
+       960  alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+       917  zolana_interface::instruction::instruction_data::transact::TransactIxDataRef::from_bytes
+       850  zolana_interface::instruction::instruction_data::transact::_::<impl wincode::schema::SchemaRead<__WincodeConfig> for zolana_interface::instruction::instruction_data::transact::TransactIxDataRef>::read
+       826  zolana_hasher::hash_chain::create_hash_chain_from_slice
+       611  alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+       571  shielded_pool_program::instructions::verifier::verify_groth16
+       390  alloc::raw_vec::finish_grow
+       384  shielded_pool_program::instructions::transact::verify::TransactProofInputs::fill_output_owner_pk_hashes
+       372  shielded_pool_program::instructions::transact::event::build_transact_event
+       324  alloc::raw_vec::finish_grow
+       313  shielded_pool_program::instructions::transact::account::TransactAccounts::validate_and_parse
+       297  groth16_solana::groth16::Groth16Verifier<_>::verify_common
+       296  shielded_pool_program::instructions::transact::verify::cached_owner_hash
+       264  memcpy
+
+-- top functions, exclusive sBPF --
+      4184         __multi3
+      1657         shielded_pool_program::instructions::transact::tree::apply_output_tree
+      1440         <zolana_hasher::poseidon::Poseidon as zolana_hasher::Hasher>::hashv
+      1119         shielded_pool_program::instructions::transact::verify::amount_field
+       826         zolana_hasher::hash_chain::create_hash_chain_from_slice
+       706  BN254  <ark_ff::fields::models::fp::montgomery_backend::MontBackend<T,_> as ark_ff::fields::models::fp::FpConfig<_>>::from_bigint
+       652         zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+       571         shielded_pool_program::instructions::transact::verify::TransactProof::public_input_hash
+       529         zolana_interface::instruction::instruction_data::transact::_::<impl wincode::schema::SchemaRead<__WincodeConfig> for zolana_interface::instruction::instruction_data::transact::TransactIxDataRef>::read
+       472         <zolana_event::GeneralEvent as borsh::ser::BorshSerialize>::serialize
+       464         shielded_pool_program::instructions::transact::tree::apply_input_tree
+       409         zolana_interface::instruction::instruction_data::transact::ExternalDataHash<M>::hash
+       402         shielded_pool_program::instructions::transact::processor::process_transact_ix
+       378         alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+       327         shielded_pool_program::instructions::transact::event::build_transact_event
+       300         alloc::raw_vec::finish_grow
+       264         memcpy
+       252         zolana_tree::TreeAccount::get_utxo_tree_root
+       229         shielded_pool_program::instructions::transact::event::resolve_outputs
+       222         __rustc[95bceff0ff0a01a5]::__rust_realloc
+       221         alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+       204         shielded_pool_program::instructions::transact::verify::cached_owner_hash
+       202         shielded_pool_program::instructions::transact::account::TransactAccounts::from_iter
+       167         zolana_hasher::hash_chain::create_hash_chain_from_slice_ref
+       148         shielded_pool_program::instructions::verifier::verify_groth16
+       146         entrypoint
+       144         alloc::raw_vec::finish_grow
+       136         __rustc[95bceff0ff0a01a5]::__rust_alloc_zeroed
+       135         shielded_pool_program::instructions::transact::interface_transfer::resolve_interface_transfers
+       126  BN254  groth16_solana::groth16::Groth16Verifier<_>::verify_common
+  batch-2 instruction data 1217 bytes over 14 accounts
+
+=== probe, aggregate transact, 2 legs [b5] ===
+transaction CU 221695   pool tree account 1185728 bytes
+
+-- runtime invocation log --
+  Program ComputeBudget111111111111111111111111111111 invoke [1]
+  Program ComputeBudget111111111111111111111111111111 success
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG invoke [1]
+  Program 11111111111111111111111111111111 invoke [2]
+  Program 11111111111111111111111111111111 success
+  Program 11111111111111111111111111111111 invoke [2]
+  Program 11111111111111111111111111111111 success
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG invoke [2]
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG consumed 46 of 1323895 compute units
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG success
+  Program 11111111111111111111111111111111 invoke [2]
+  Program 11111111111111111111111111111111 success
+  Program 11111111111111111111111111111111 invoke [2]
+  Program 11111111111111111111111111111111 success
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG invoke [2]
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG consumed 46 of 1250889 compute units
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG success
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG consumed 221545 of 1399850 compute units
+  Program sppXZU59VoYodv9Accs4hHNTjYiuYmDFyFVjUjPxFsG success
+
+-- sBPF invocations --
+  #0  sbpf       46  syscalls    0  bn254 subtree      0  depth 2
+  #1  sbpf       46  syscalls    0  bn254 subtree      0  depth 2
+  #2  sbpf    51482  syscalls  308  bn254 subtree  17722  depth 11
+  total 51574  bn254 dynamic 17722  bn254 static 7122  callee sbpf 92
+
+-- every syscall, with the frame that issued it --
+  sol_alt_bn128_compression    x5       15702 CU from registers
+  sol_alt_bn128_group_op       x7       41206 CU from registers
+  sol_get_sysvar               x1           0 CU from registers
+  sol_invoke_signed_c          x6           0 CU from registers
+  sol_keccak256                x12          0 CU from registers
+  sol_memcmp_                  x2          20 CU from registers
+  sol_memcpy_                  x135      1350 CU from registers
+  sol_memset_                  x16        160 CU from registers
+  sol_poseidon                 x119     93534 CU from registers
+  sol_sha256                   x5           0 CU from registers
+
+-- BN254 and hash calls, one line each --
+  sol_keccak256              r1=8589987792 r2=1   r3=8589987808        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589987792 r2=1   r3=8589987808        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589979600 r2=1   r3=8589979616        0 CU  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+  sol_keccak256              r1=8589987792 r2=1   r3=8589987808        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589987792 r2=1   r3=8589987808        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589979600 r2=1   r3=8589979616        0 CU  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+  sol_sha256                 r1=8589979600 r2=1   r3=8589979616        0 CU  <zolana_hasher::sha256::Sha256BE as zolana_hasher::Hasher>::hash
+  sol_keccak256              r1=8589987792 r2=1   r3=8589987808        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589987792 r2=1   r3=8589987808        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589979600 r2=1   r3=8589979616        0 CU  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+  sol_keccak256              r1=8589987792 r2=1   r3=8589987808        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589987792 r2=1   r3=8589987808        0 CU  zolana_bloom_filter::BloomFilter<_,_>::contains
+  sol_keccak256              r1=8589979600 r2=1   r3=8589979616        0 CU  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+  sol_sha256                 r1=8589979600 r2=1   r3=8589979616        0 CU  <zolana_hasher::sha256::Sha256BE as zolana_hasher::Hasher>::hash
+  sol_alt_bn128_compression  r1=1    r2=8589954488 r3=32          498 CU  groth16_solana::decompression::decompress_g1
+  sol_alt_bn128_compression  r1=3    r2=8589954424 r3=64        13710 CU  groth16_solana::decompression::decompress_g2
+  sol_alt_bn128_compression  r1=1    r2=8589954520 r3=32          498 CU  groth16_solana::decompression::decompress_g1
+  sol_alt_bn128_compression  r1=1    r2=8589954552 r3=32          498 CU  groth16_solana::decompression::decompress_g1
+  sol_alt_bn128_compression  r1=1    r2=8589954584 r3=32          498 CU  groth16_solana::decompression::decompress_g1
+  sol_alt_bn128_group_op     r1=2    r2=8589979360 r3=96          947 CU  groth16_solana::groth16::g1_mul_add
+  sol_alt_bn128_group_op     r1=0    r2=8589979456 r3=128         334 CU  groth16_solana::groth16::g1_mul_add
+  sol_sha256                 r1=8589979600 r2=1   r3=8589979616        0 CU  groth16_solana::syscalls::inner::sha256
+  sol_sha256                 r1=8589979600 r2=1   r3=8589979616        0 CU  groth16_solana::syscalls::inner::sha256
+  sol_sha256                 r1=8589979600 r2=1   r3=8589979616        0 CU  groth16_solana::syscalls::inner::sha256
+  sol_alt_bn128_group_op     r1=2    r2=8589979360 r3=96          947 CU  groth16_solana::groth16::g1_mul_add
+  sol_alt_bn128_group_op     r1=0    r2=8589979456 r3=128         334 CU  groth16_solana::groth16::g1_mul_add
+  sol_alt_bn128_group_op     r1=0    r2=8589979456 r3=128         334 CU  groth16_solana::groth16::g1_add
+  sol_alt_bn128_group_op     r1=3    r2=8589970024 r3=768       23505 CU  groth16_solana::syscalls::inner::pairing_be
+  sol_alt_bn128_group_op     r1=3    r2=8589971072 r3=384       14805 CU  groth16_solana::syscalls::inner::pairing_be
+
+-- Poseidon by issuing frame --
+  x74      58164 CU  <zolana_hasher::poseidon::Poseidon as zolana_hasher::Hasher>::hashv
+  x39      30654 CU  zolana_hasher::hash_chain::create_hash_chain_from_slice
+  x6        4716 CU  zolana_hasher::hash_chain::create_hash_chain_from_slice_ref
+
+-- mem ops by issuing frame --
+  x135      1350 CU  memcpy
+  x16        160 CU  memset
+  x2          20 CU  memcmp
+
+-- measured at the charge site --
+  CPI windows       x6     15854 CU  [1096, 5838, 993, 1096, 5838, 993]
+  sysvar reads      x1       110 CU
+  hash syscalls     x17      2127 CU over 17 slices
+
+-- what is left --
+  transaction                    221695
+  priced from the trace          205673
+  residual                        16022
+  CPI window minus callee         15762
+  sysvar                            110
+  still unattributed                150
+
+-- top frames, inclusive sBPF --
+     51482  entrypoint
+     51285  shielded_pool_program::process_instruction
+     51254  shielded_pool_program::instructions::aggregate_transact::processor::process_aggregate_transact_ix
+     34724  shielded_pool_program::instructions::aggregate_transact::processor::settle_leg
+     15979  __multi3
+     13948  shielded_pool_program::instructions::transact::verify::TransactProof::public_input_hash
+     13629  shielded_pool_program::instructions::verifier::verify_groth16
+     13208  groth16_solana::groth16::Groth16Verifier<_>::verify_common
+     12319  <ark_ff::fields::models::fp::montgomery_backend::MontBackend<T,_> as ark_ff::fields::models::fp::FpConfig<_>>::from_bigint
+     10470  shielded_pool_program::instructions::transact::verify::amount_field
+      9195  ark_ff::fields::prime::PrimeField::from_le_bytes_mod_order
+      6152  shielded_pool_program::instructions::transact::tree::apply_output_tree
+      4360  shielded_pool_program::instructions::transact::tree::apply_input_tree
+      2964  zolana_interface::instruction::instruction_data::transact::ExternalDataHash<M>::hash
+      2960  <zolana_hasher::poseidon::Poseidon as zolana_hasher::Hasher>::hashv
+      2462  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+      2440  shielded_pool_program::instructions::event::emit_general_event
+      2390  zolana_event::encode_event_instruction
+      2190  <zolana_event::GeneralEvent as borsh::ser::BorshSerialize>::serialize
+      2089  zolana_interface::instruction::instruction_data::aggregate_transact::AggregateTransactIxDataRef::from_bytes
+      1920  alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+      1716  zolana_hasher::hash_chain::create_hash_chain_from_slice
+      1698  zolana_interface::instruction::instruction_data::transact::_::<impl wincode::schema::SchemaRead<__WincodeConfig> for zolana_interface::instruction::instruction_data::transact::TransactIxDataRef>::read
+      1222  alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+       780  alloc::raw_vec::finish_grow
+       768  shielded_pool_program::instructions::transact::verify::TransactProofInputs::fill_output_owner_pk_hashes
+       744  shielded_pool_program::instructions::transact::event::build_transact_event
+       648  alloc::raw_vec::finish_grow
+       626  shielded_pool_program::instructions::transact::account::TransactAccounts::validate_and_parse
+       592  shielded_pool_program::instructions::transact::verify::cached_owner_hash
+
+-- top functions, exclusive sBPF --
+     15979         __multi3
+      4107  BN254  <ark_ff::fields::models::fp::montgomery_backend::MontBackend<T,_> as ark_ff::fields::models::fp::FpConfig<_>>::from_bigint
+      3356         shielded_pool_program::instructions::transact::tree::apply_output_tree
+      2960         <zolana_hasher::poseidon::Poseidon as zolana_hasher::Hasher>::hashv
+      2238         shielded_pool_program::instructions::transact::verify::amount_field
+      1716         zolana_hasher::hash_chain::create_hash_chain_from_slice
+      1526  BN254  groth16_solana::groth16::Groth16Verifier<_>::verify_common
+      1304         zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+      1142         shielded_pool_program::instructions::transact::verify::TransactProof::public_input_hash
+      1058         zolana_interface::instruction::instruction_data::transact::_::<impl wincode::schema::SchemaRead<__WincodeConfig> for zolana_interface::instruction::instruction_data::transact::TransactIxDataRef>::read
+       944         <zolana_event::GeneralEvent as borsh::ser::BorshSerialize>::serialize
+       928         shielded_pool_program::instructions::transact::tree::apply_input_tree
+       844  BN254  ark_ff::fields::prime::PrimeField::from_le_bytes_mod_order
+       828         shielded_pool_program::instructions::aggregate_transact::processor::settle_leg
+       818         zolana_interface::instruction::instruction_data::transact::ExternalDataHash<M>::hash
+       756         alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+       654         shielded_pool_program::instructions::transact::event::build_transact_event
+       600         alloc::raw_vec::finish_grow
+       540         memcpy
+       504         zolana_tree::TreeAccount::get_utxo_tree_root
+       493         shielded_pool_program::instructions::aggregate_transact::processor::process_aggregate_transact_ix
+       458         shielded_pool_program::instructions::transact::event::resolve_outputs
+       444         __rustc[95bceff0ff0a01a5]::__rust_realloc
+       442         alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+       408         shielded_pool_program::instructions::transact::verify::cached_owner_hash
+       404         shielded_pool_program::instructions::transact::account::TransactAccounts::from_iter
+       334         zolana_hasher::hash_chain::create_hash_chain_from_slice_ref
+       325         __rustc[95bceff0ff0a01a5]::__rust_alloc_zeroed
+       288         alloc::raw_vec::finish_grow
+       270         shielded_pool_program::instructions::transact::interface_transfer::resolve_interface_transfers

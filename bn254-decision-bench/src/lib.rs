@@ -1,13 +1,21 @@
 mod contract;
 mod io;
 mod model;
+mod pricing;
 mod report;
 mod runner;
 mod tariff;
 
 pub use {
-    contract::{builtin_expected_counts, expected_trace, validate_expected_counts},
+    contract::{
+        PAIRING_CHECK_CAP, PAIRING_MAP_CAP, builtin_expected_counts, expected_trace, lane_pad,
+        reject_deprecated_or_derived_json, validate_expected_counts,
+    },
     model::*,
+    pricing::{
+        CostSplit, MIN_SYSCALL_SHARE_PER_MILLE, SYSCALL_BEARING_COLUMNS, SyscallFamilies,
+        cost_split, syscall_cu, syscall_families,
+    },
     report::render_report,
     runner::{Cli, OutputPaths, TransactionExecutor, run_campaign, run_cli},
     tariff::HostCapabilities,

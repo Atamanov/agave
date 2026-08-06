@@ -145,7 +145,10 @@ fn groth16_target_form_verifies_and_flips_on_a_wrong_input() {
 
     // A wrong public input contributes a wrong exponent and must fail closed.
     let wrong = [
-        (g1(-(l_pub.mul(Fr::from(2u64)).into_affine())), gamma_blob.as_slice()),
+        (
+            g1(-(l_pub.mul(Fr::from(2u64)).into_affine())),
+            gamma_blob.as_slice(),
+        ),
         (g1(-c), delta_blob.as_slice()),
     ];
     assert!(!pairing_check_prepared_blobs(&full, &wrong, Some(&target)).unwrap());
@@ -164,16 +167,14 @@ fn hostile_blobs_and_shapes_fail_closed() {
         AltBn128BatchError::InvalidPreparedBlob,
     );
     assert_eq!(
-        pairing_check_prepared_blobs(&[], &[(pair.g1, &blob[..blob.len() - 1])], None)
-            .unwrap_err(),
+        pairing_check_prepared_blobs(&[], &[(pair.g1, &blob[..blob.len() - 1])], None).unwrap_err(),
         AltBn128BatchError::InvalidPreparedBlob,
     );
 
     let mut noncanonical = blob.clone();
     noncanonical[8..40].fill(0xff);
     assert_eq!(
-        pairing_check_prepared_blobs(&[], &[(pair.g1, noncanonical.as_slice())], None)
-            .unwrap_err(),
+        pairing_check_prepared_blobs(&[], &[(pair.g1, noncanonical.as_slice())], None).unwrap_err(),
         AltBn128BatchError::NonCanonical,
     );
 

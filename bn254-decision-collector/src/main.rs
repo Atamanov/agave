@@ -5,13 +5,14 @@ use {
     solana_account_v3::Account,
     solana_address_v2::Address,
     solana_bn254_decision_bench::{
-        ColumnId, ExecutionRequest, FixtureManifest, GtTargetMultiexpCall, MsmCall, OperationTrace,
-        PairingCall, ResidualCell, RowId,
+        ColumnId, ExecutionRequest, FixtureManifest, FrLincombCall, GtTargetMultiexpCall,
+        HashSyscallTotals, MsmCall, OperationTrace, PairingCall, PlonkMultiVkReduceCall,
+        ResidualCell, RowId,
     },
     solana_bn254_decision_litesvm::{
-        GroupOpKind, ObserverSnapshot, current_embedded_hot_core_cu,
-        new_litesvm_with_decision_syscalls, observer_snapshot, registry_account_len,
-        reset_observers,
+        CompressionObservation, DEFAULT_HASH_BYTE_COST, GroupOpKind, ObserverSnapshot,
+        current_compression_cu, current_embedded_hot_core_cu, new_litesvm_charging_hash_bytes,
+        observer_snapshot, registry_account_len, reset_observers,
     },
     solana_compute_budget_interface_v3::ComputeBudgetInstruction,
     solana_instruction_v3::{Instruction, account_meta::AccountMeta},
@@ -30,6 +31,8 @@ use {
 const SAMPLE_COUNT: u64 = 2;
 const INPUT_PDA_SEED: &[u8] = b"plonk-input-v1";
 const REGISTRY_PDA_SEED: &[u8] = b"bn254-b5-vk-registry-v3";
+const REGISTRY_HEADER_BYTES: usize = 80;
+const REGISTRY_ENTRY_BYTES: usize = 32 + 128 + 37_584;
 const GROTH_KEYSET_DOMAIN: &[u8] = b"agave:bn254:b5:keyset:v3";
 const GROTH_REGISTRY_VERSION: u8 = 3;
 
@@ -77,6 +80,10 @@ struct Case {
     tag: u8,
     registry: Option<(Address, usize)>,
     setup_tag: Option<u8>,
+    /// The PLONK guest takes the two registry entry IDs in the hot instruction,
+    /// ordered tau then generator. They exist only after initialization, so the
+    /// setup transaction reads them back out of the account.
+    hot_registry_ids: bool,
 }
 
 fn parse_cli() -> Result<Cli, String> {
@@ -208,7 +215,7 @@ fn groth_registry_material(data: &[u8]) -> Result<([u8; 32], usize), String> {
 fn plonk_metadata(dir: &Path, proof_count: u32) -> Result<PlonkMaterial, String> {
     let metadata_path = dir.join("manifest.json");
     let metadata_bytes = read(&metadata_path)?;
-    if digest(&metadata_bytes) != "7a48e0a7631ae55da0502074b8ae9efad4bf305fad65ce51b63d8e9f26b8b38b"
+    if digest(&metadata_bytes) != "e0029065e7450f1987fab16163584381970cb57af60712a08280cac4c0012fc8"
     {
         return Err("canonical PLONK exporter manifest digest changed".into());
     }
@@ -216,9 +223,11 @@ fn plonk_metadata(dir: &Path, proof_count: u32) -> Result<PlonkMaterial, String>
         .map_err(|error| format!("PLONK exporter manifest JSON: {error}"))?;
     if metadata.schema != "helius.bn254-decision.plonk-direct-test-exceptions.v1"
         || metadata.semantics
-            != "canonical committed Zolana snarkjs mul1/mul2/mul3 test exceptions; not fresh or production proofs"
+            != "committed snarkjs PLONK fixtures shaped like zolana transact: one public \
+signal, Poseidon chain over (nIn, nOut) at 1_1, 2_2, 2_3, distinct keys over one SRS; \
+not production proofs"
         || metadata.source_set_sha256
-            != "a9a1f8411ff1793d3e7679f3ae3158100a930aa91b7c21ffbb91742723b1fd17"
+            != "be0d2d01245e8ef0bac319a60033ce96d64dddb39a6431d9ed4e4e2c7042dd73"
     {
         return Err("PLONK exporter manifest schema changed".into());
     }
@@ -228,12 +237,12 @@ fn plonk_metadata(dir: &Path, proof_count: u32) -> Result<PlonkMaterial, String>
         .ok_or("PLONK exporter omitted requested row")?;
     let (expected_length, expected_sha256) = match proof_count {
         2 => (
-            3_340,
-            "52021a8bc72f6249a298cee84067172ecefefd27c4b3eb9b558336232fcb592f",
+            3_308,
+            "0596581e68c6f23f422ff2932f6d66c8bea7b92d2b21ce937507ee1df9bfb88c",
         ),
         3 => (
-            5_052,
-            "e4d65c42220173b6d12d2c3e85a2bef999ff78357b4038b17cb363b19c1d7cef",
+            4_956,
+            "c2a0a59915ef6de40645737c61f98b5e82856638150d5d073d5909510ec71b9a",
         ),
         _ => return Err("canonical PLONK row proof count changed".into()),
     };
@@ -322,6 +331,7 @@ fn build_case(cli: &Cli, request: &ExecutionRequest) -> Result<Case, String> {
             tag: 0,
             registry: None,
             setup_tag: None,
+            hot_registry_ids: false,
         });
     }
 
@@ -350,6 +360,7 @@ fn build_case(cli: &Cli, request: &ExecutionRequest) -> Result<Case, String> {
             },
             registry: registry_needed.then_some((registry_address, registry_len)),
             setup_tag: registry_needed.then_some(5),
+            hot_registry_ids: false,
         });
     }
 
@@ -379,6 +390,7 @@ fn build_case(cli: &Cli, request: &ExecutionRequest) -> Result<Case, String> {
         },
         registry: registry_needed.then_some((registry_address, registry_len)),
         setup_tag: registry_needed.then_some(5),
+        hot_registry_ids: registry_needed,
     })
 }
 
@@ -392,7 +404,12 @@ fn account(data: Vec<u8>, owner: Address) -> Account {
     }
 }
 
-fn instruction(case: &Case, tag: u8, registry_writable: bool) -> Instruction {
+fn instruction(
+    case: &Case,
+    tag: u8,
+    registry_writable: bool,
+    registry_ids: &[[u8; 32]],
+) -> Instruction {
     let mut accounts = Vec::new();
     if let Some((registry, _)) = case.registry {
         accounts.push(AccountMeta {
@@ -406,10 +423,14 @@ fn instruction(case: &Case, tag: u8, registry_writable: bool) -> Instruction {
         is_signer: false,
         is_writable: false,
     });
+    let mut data = vec![tag];
+    for id in registry_ids {
+        data.extend_from_slice(id);
+    }
     Instruction {
         program_id: case.program_id,
         accounts,
-        data: vec![tag],
+        data,
     }
 }
 
@@ -448,6 +469,31 @@ fn append_pairing(calls: &mut Vec<PairingCall>, full: u32, registered: u32) {
     });
 }
 
+/// A zero decompression count is never a valid observation.
+///
+/// Every guest rebuilds the compressed wire form before it decompresses, so the
+/// two directions balance, and no proof reaches the chain without a G1 point.
+/// Zero therefore means the observer missed the syscall, not that the guest
+/// skipped it. Left unchecked it publishes a cell whose modelled charge is
+/// 14,706 CU per proof short and moves that CU into the residual in silence.
+fn require_observed_compression(observed: &CompressionObservation) -> Result<(), String> {
+    if observed.g1_compressions != observed.g1_decompressions
+        || observed.g2_compressions != observed.g2_decompressions
+    {
+        return Err(format!(
+            "compression round trip is unbalanced: G1 {}/{}, G2 {}/{}",
+            observed.g1_compressions,
+            observed.g1_decompressions,
+            observed.g2_compressions,
+            observed.g2_decompressions
+        ));
+    }
+    if observed.g1_decompressions == 0 {
+        return Err("no G1 decompression observed in a hot transaction".into());
+    }
+    Ok(())
+}
+
 fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
     snapshot.stock_group_ops.require_valid_count(1)?;
     if snapshot.registry_init.g2_entries != 0
@@ -457,6 +503,7 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
     {
         return Err("hot transaction contains setup/probe-only observer events".into());
     }
+    require_observed_compression(&snapshot.compression)?;
     let mut pairing_checks = Vec::new();
     for event in &snapshot.pairing_checks {
         append_pairing(&mut pairing_checks, event.pairs as u32, 0);
@@ -493,7 +540,57 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
         .chain(&pairing_maps)
         .map(|call| call.full_pairs.saturating_mul(call.calls))
         .sum();
+    let mut stock_g1_additions = 0u32;
+    let mut stock_g1_multiplications = 0u32;
+    for event in &snapshot.stock_group_ops.events {
+        match event.kind {
+            GroupOpKind::G1Add => stock_g1_additions = stock_g1_additions.saturating_add(1),
+            GroupOpKind::G1Mul => {
+                stock_g1_multiplications = stock_g1_multiplications.saturating_add(1)
+            }
+            GroupOpKind::Pairing => {}
+        }
+    }
+    let fr_lincomb_calls = snapshot
+        .fr_lincombs
+        .iter()
+        .map(|event| {
+            u32::try_from(event.terms)
+                .map(FrLincombCall::one)
+                .map_err(|_| "fr_lincomb term count overflows u32".to_owned())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let plonk_multi_vk_reduce_calls = snapshot
+        .plonk_multi_vk_reduces
+        .iter()
+        .map(|event| {
+            Ok(PlonkMultiVkReduceCall {
+                contexts: u32::try_from(event.contexts).map_err(|_| "contexts overflow")?,
+                proofs: u32::try_from(event.proofs).map_err(|_| "proofs overflow")?,
+                public_inputs: u32::try_from(event.public_inputs)
+                    .map_err(|_| "public inputs overflow")?,
+                calls: 1,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let hash_syscalls = HashSyscallTotals {
+        calls: u32::try_from(snapshot.hash_syscalls.calls)
+            .map_err(|_| "hash syscall count overflow")?,
+        slices: u32::try_from(snapshot.hash_syscalls.slices)
+            .map_err(|_| "hash syscall slice overflow")?,
+        byte_cu: u32::try_from(snapshot.hash_syscalls.byte_cu)
+            .map_err(|_| "hash syscall byte CU overflow")?,
+    };
     Ok(OperationTrace {
+        g1_decompressions: u32::try_from(snapshot.compression.g1_decompressions)
+            .map_err(|_| "G1 decompression count overflow")?,
+        g2_decompressions: u32::try_from(snapshot.compression.g2_decompressions)
+            .map_err(|_| "G2 decompression count overflow")?,
+        hash_syscalls,
+        plonk_multi_vk_reduce_calls,
+        fr_lincomb_calls,
+        stock_g1_additions,
+        stock_g1_multiplications,
         pairing_checks,
         pairing_maps,
         msm_calls: snapshot
@@ -552,8 +649,17 @@ fn require_b5_dispatch_attestation(snapshot: &ObserverSnapshot) -> Result<(), St
     Ok(())
 }
 
-fn setup_svm(case: &Case) -> Result<LiteSVM, String> {
-    let mut svm = new_litesvm_with_decision_syscalls();
+/// Returns the SVM plus the registry entry IDs the hot instruction needs, in
+/// the order the guest reads them.
+fn setup_svm(case: &Case) -> Result<(LiteSVM, Vec<[u8; 32]>), String> {
+    setup_svm_charging_hash_bytes(case, DEFAULT_HASH_BYTE_COST)
+}
+
+fn setup_svm_charging_hash_bytes(
+    case: &Case,
+    hash_byte_cost: u64,
+) -> Result<(LiteSVM, Vec<[u8; 32]>), String> {
+    let mut svm = new_litesvm_charging_hash_bytes(hash_byte_cost);
     let program = read(&case.program_path)?;
     svm.add_program(case.program_id, &program)
         .map_err(|error| format!("load {}: {error}", case.program_path.display()))?;
@@ -572,13 +678,16 @@ fn setup_svm(case: &Case) -> Result<LiteSVM, String> {
                 case,
                 case.setup_tag.ok_or("registry has no setup tag")?,
                 true,
+                &[],
             ),
         )?;
         let setup = observer_snapshot();
         if setup.registry_init.g2_entries == 0 {
             return Err("registry setup did not cross the initialization syscall".into());
         }
-        if env::var_os("BN254_DUMP_GROTH_SEALS").is_some() && case.program_id == program_id(RowId::Groth16N5SameVk, false) {
+        if env::var_os("BN254_DUMP_GROTH_SEALS").is_some()
+            && case.program_id == program_id(RowId::Groth16N5SameVk, false)
+        {
             let registry = svm
                 .get_account(&address)
                 .ok_or("initialized registry account disappeared")?;
@@ -587,40 +696,115 @@ fn setup_svm(case: &Case) -> Result<LiteSVM, String> {
             let vk_base = 2 + n;
             let mut vk_digests = Vec::with_capacity(k);
             for key in 0..k {
-                let vk = &case.fixture_data[vk_base + key * 576..vk_base + (key + 1) * 576];
-                vk_digests.push(solana_keccak_hasher::hashv(&[
-                    &[0],
-                    &vk[..64],
-                    &vk[64..192],
-                    &vk[192..320],
-                    &vk[320..448],
-                    &2u16.to_be_bytes(),
-                    &vk[448..512],
-                    &vk[512..576],
-                ]).to_bytes());
+                let vk_start = vk_base.saturating_add(key.saturating_mul(576));
+                let vk = &case.fixture_data[vk_start..vk_start.saturating_add(576)];
+                vk_digests.push(
+                    solana_keccak_hasher::hashv(&[
+                        &[0],
+                        &vk[..64],
+                        &vk[64..192],
+                        &vk[192..320],
+                        &vk[320..448],
+                        &2u16.to_be_bytes(),
+                        &vk[448..512],
+                        &vk[512..576],
+                    ])
+                    .to_bytes(),
+                );
             }
             let ids: Vec<[u8; 32]> = (0..3 * k)
                 .map(|index| {
-                    let start = 80 + index * 37_744;
-                    registry.data[start..start + 32].try_into().unwrap()
+                    let start = 80usize.saturating_add(index.saturating_mul(37_744));
+                    registry.data[start..start.saturating_add(32)]
+                        .try_into()
+                        .unwrap()
                 })
                 .collect();
-            eprintln!("GROTH_SEAL n={n} k={k} address={} digest={} vk={} ids={}", hex::encode(address.as_array()), hex::encode(&registry.data[48..80]), hex::encode(vk_digests.concat()), hex::encode(ids.concat()));
+            eprintln!(
+                "GROTH_SEAL n={n} k={k} address={} digest={} vk={} ids={}",
+                hex::encode(address.as_array()),
+                hex::encode(&registry.data[48..80]),
+                hex::encode(vk_digests.concat()),
+                hex::encode(ids.concat())
+            );
         }
     }
-    Ok(svm)
+    let hot_ids = match case.registry {
+        Some((address, _)) if case.hot_registry_ids => {
+            let registry = svm
+                .get_account(&address)
+                .ok_or("initialized registry account disappeared")?;
+            // Entry 1 is tau and entry 0 the generator, and the guest reads them
+            // in that order. Anything else fails its index-prefix check rather
+            // than verifying against the wrong source.
+            [1usize, 0]
+                .iter()
+                .map(|index| {
+                    let start = REGISTRY_HEADER_BYTES
+                        .saturating_add(index.saturating_mul(REGISTRY_ENTRY_BYTES));
+                    registry
+                        .data
+                        .get(start..start.saturating_add(32))
+                        .and_then(|id| <[u8; 32]>::try_from(id).ok())
+                        .ok_or("registry account is shorter than its entry table")
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => Vec::new(),
+    };
+    Ok((svm, hot_ids))
+}
+
+/// The byte half of the cell's hash-syscall charge, by difference.
+///
+/// `sha256_byte_cost` scales the per-slice term of every `SyscallHash` charge
+/// and touches nothing else, so running the same transaction at cost 1 and at
+/// cost 0 isolates it. At 0 each slice falls to the `mem_op_base_cost` floor,
+/// which the register trace already accounts for. The two runs must agree on
+/// the call shapes, or the difference is measuring two different executions.
+fn measure_hash_byte_cu(case: &Case) -> Result<u64, String> {
+    let mut charged = Vec::new();
+    for hash_byte_cost in [DEFAULT_HASH_BYTE_COST, 0] {
+        let (mut svm, registry_ids) = setup_svm_charging_hash_bytes(case, hash_byte_cost)?;
+        reset_observers();
+        let metadata = send(&mut svm, instruction(case, case.tag, false, &registry_ids))?;
+        let snapshot = observer_snapshot();
+        charged.push((
+            metadata.compute_units_consumed,
+            snapshot.hash_syscalls.calls,
+            snapshot.hash_syscalls.slices,
+        ));
+    }
+    let (metered, calls, slices) = charged[0];
+    let (floored, free_calls, free_slices) = charged[1];
+    if (calls, slices) != (free_calls, free_slices) {
+        return Err(format!(
+            "hash-syscall shape moved with the byte cost: {calls}/{slices} against \
+             {free_calls}/{free_slices}"
+        ));
+    }
+    metered.checked_sub(floored).ok_or_else(|| {
+        format!("free-byte run charged {floored}, more than the metered run's {metered}")
+    })
 }
 
 fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String> {
     let case = build_case(cli, request)?;
     let program_bytes = read(&case.program_path)?;
-    let mut svm = setup_svm(&case)?;
+    let hash_byte_cu = measure_hash_byte_cu(&case)?;
+    let (mut svm, registry_ids) = setup_svm(&case)?;
     let mut observations = Vec::new();
+    let mut compression_artifact = 0u64;
     for _ in 0..SAMPLE_COUNT {
         reset_observers();
-        let metadata = send(&mut svm, instruction(&case, case.tag, false))?;
-        let snapshot = observer_snapshot();
+        let metadata = send(&mut svm, instruction(&case, case.tag, false, &registry_ids))?;
+        let mut snapshot = observer_snapshot();
+        snapshot.hash_syscalls.byte_cu = hash_byte_cu;
         require_b5_dispatch_attestation(&snapshot)?;
+        compression_artifact = current_compression_cu(
+            snapshot.compression.g1_compressions,
+            snapshot.compression.g2_compressions,
+        );
         let observed_trace = trace(&snapshot)?;
         let embedded = current_embedded_hot_core_cu(&snapshot);
         let non_core = metadata
@@ -637,13 +821,24 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
     if observations[0].1 != observations[1].1 || observations[0].2 != observations[1].2 {
         return Err("repeated hot transactions produced different trace/residual".into());
     }
+    // The sealed fixtures hold uncompressed points, so each guest rebuilds the
+    // wire encoding before it decompresses it. The model prices decompression
+    // and not compression, so this charge stays inside the residual. It is the
+    // one part of the residual no deployment pays.
+    if compression_artifact != 0 {
+        eprintln!(
+            "note: {:?}/{:?} residual {} includes {compression_artifact} CU of \
+             fixture-only compression",
+            request.row_id, request.column_id, observations[0].2
+        );
+    }
 
     // Every guest/case also proves a corrupted account is rejected. This is
     // deliberately outside both setup and the measured samples.
     let mut negative_case = case.clone();
     let index = negative_case.fixture_data.len() / 2;
     negative_case.fixture_data[index] ^= 1;
-    let mut negative_svm = setup_svm(&case)?;
+    let (mut negative_svm, negative_ids) = setup_svm(&case)?;
     negative_svm
         .set_account(
             negative_case.fixture_address,
@@ -653,7 +848,7 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
     reset_observers();
     if send(
         &mut negative_svm,
-        instruction(&negative_case, negative_case.tag, false),
+        instruction(&negative_case, negative_case.tag, false, &negative_ids),
     )
     .is_ok()
     {
@@ -667,6 +862,7 @@ fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String
         column_id: request.column_id,
         observed_trace: observations[0].1.clone(),
         non_core_transaction_cu: observations[0].2,
+        transaction_cu: observations[0].0.compute_units_consumed,
         source: "observed_in_tree_host_non_core".into(),
         sample_count: SAMPLE_COUNT,
         program_sha256: digest(&program_bytes),

@@ -5,12 +5,20 @@ was rejected on 2026-08-05 after run 1, and the reasons generalize.
 
 ## Reject a host that fails any of these
 
-| Check | Threshold | 46891192 |
-|---|---|---|
-| `cpu MHz` | at or near the part's rated clock | **1500** |
-| `uptime` load average | below ~1 per benchmark core | **61** on 128 threads |
-| `model name` | a retail part string | **"AMD Eng Sample"** |
-| `avx512ifma` in `/proc/cpuinfo` | present | present |
+`scripts/verify-capture-host.sh` is the gate. Run it before building anything:
+rejecting a host takes ten seconds, a wasted capture takes twenty minutes.
+
+| Check | Threshold | Source | 46891192 |
+|---|---|---|---|
+| clock | >= 2,800 MHz | `docs/src/operations/requirements.md` | **1,500** |
+| threads | >= 24 | `docs/src/operations/requirements.md` | 128 |
+| `model name` | a retail part, not an engineering sample | non-final clocks and errata | **"AMD Eng Sample"** |
+| `avx512ifma` | present | the B5 tariff basis | present |
+| load average | below one per benchmark core | timing validity | **61** on 128 threads |
+
+Read the clock from `cpufreq/cpuinfo_max_freq`, not `cpu MHz`. Under a powersave
+governor an idle core reports about 600 MHz on a 5 GHz part, which rejects a
+healthy host.
 
 ## Why 46891192 failed
 
@@ -78,23 +86,18 @@ instruction`, so rebuild the four guests (`groth16`, `groth-recursion`,
 `run_campaign` with `ExecutorConfig::Command { argv }` already drives this
 per cell, so the 30-cell sweep needs the campaign spec, not a new driver.
 
-## The PLONK residual is blocked on a lost artifact
+## The PLONK fixture set was replaced
 
-18 of 30 residuals are measured: every Groth16 cell, plus both PLONK recursion
-cells. The other 12 PLONK cells cannot be measured on this machine.
+The old set was sealed by an exporter manifest that no longer exists anywhere,
+so its twelve residuals could not be measured. It was also measuring the wrong
+shape: circomlib multipliers with 1, 2 and 3 public inputs, where every zolana
+verifying key declares one. Public-input count drives the verifier's Lagrange
+evaluation and its MSM width.
 
-The collector reads `<plonk-fixture-dir>/manifest.json` and rejects anything
-whose digest is not
-`7a48e0a7631ae55da0502074b8ae9efad4bf305fad65ce51b63d8e9f26b8b38b`. That file
-exists nowhere under `_OLD`, searched by content digest. Only the proof
-directories (`mul1`, `mul2`, `mul3`) were preserved; the exporter manifest that
-seals them was left in a session scratchpad and is gone.
+The replacement is `bn254-decision-bench/plonk-fixtures/zolana-shapes`: three
+circuits mirroring transact, one public signal over a Poseidon chain, distinct
+keys over one SRS. `generate.sh` regenerates them and
+`export_rows --reseal` recomputes every pinned digest from the files on disk.
 
-The seal is doing its job. Reconstructing a `manifest.json` to satisfy the
-digest is impossible, and writing a new one with a new digest would assert a
-provenance no longer held. Either recover the original from the canonical
-snarkjs exporter run, or regenerate the PLONK fixture set and re-seal it as a
-new set with its own recorded provenance.
-
-Until then the PLONK rows carry syscall core only, and must be labelled that
-way rather than presented beside complete Groth16 rows.
+The seal discipline is unchanged. A reseal replaces the whole table in one
+commit and the ordinary path must then reproduce it byte for byte.

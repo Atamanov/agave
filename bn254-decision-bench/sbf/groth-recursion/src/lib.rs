@@ -3,7 +3,8 @@
 //!
 //! The three OS-random gnark Groth16/BSB22 outer VKs are generated into this
 //! guest from digest-sealed compact artifacts. Each payload ends in exactly
-//! one six-pair B5 check: one final exponentiation and six G2 subgroup checks.
+//! one B5 check: six fold terms padded to a full eight-pair lane, one final
+//! exponentiation and eight G2 subgroup checks.
 
 #![cfg_attr(target_os = "solana", no_std)]
 
@@ -11,6 +12,10 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use groth16_solana::groth16::Groth16Verifyingkey;
+use solana_bn254::compression::prelude::{
+    alt_bn128_g1_compress_be, alt_bn128_g1_decompress_be, alt_bn128_g2_compress_be,
+    alt_bn128_g2_decompress_be,
+};
 use solana_bn254_batch_syscall::{PodG1Point, PodG2Point, PodScalar};
 use solana_bn254_groth16_batch::{
     PedersenKey, Proof, ProofCommitment, RandomizerMode, ValidatedVerifyingKey, VerifyingKey,
@@ -53,6 +58,24 @@ fn read<const N: usize>(data: &[u8], offset: &mut usize) -> Option<[u8; N]> {
     let value = data.get(*offset..end)?.try_into().ok()?;
     *offset = end;
     Some(value)
+}
+
+/// Charge the compressed wire form of one G1 proof point.
+///
+/// An outer proof reaches the chain compressed, so a deployment decompresses
+/// before it can pair. The payload is sealed uncompressed, so the guest
+/// re-creates the encoding the sender transmitted and decompresses that. The
+/// round trip must return the same point, which is what binds the metered
+/// decompression to the point the verifier then consumes.
+fn wire_g1(point: &[u8; 64]) -> Option<()> {
+    (alt_bn128_g1_decompress_be(&alt_bn128_g1_compress_be(point).ok()?).ok()? == *point)
+        .then_some(())
+}
+
+/// The same for `B`, the proof's only G2 point.
+fn wire_g2(point: &[u8; 128]) -> Option<()> {
+    (alt_bn128_g2_decompress_be(&alt_bn128_g2_compress_be(point).ok()?).ok()? == *point)
+        .then_some(())
 }
 
 const FQ_MODULUS_BE: [u8; 32] = [
@@ -110,7 +133,9 @@ fn vk_from_gnark(vk: &Groth16Verifyingkey<'_>) -> Option<ValidatedVerifyingKey> 
 
 /// Exact payload: `A | B | C | commitment | PoK | explicit publics`.
 /// `A` is the unnegated outer Groth16 point. The BSB22 commitment-derived
-/// hash wire is recomputed and appended inside the verifier.
+/// hash wire is recomputed and appended inside the verifier. The payload is
+/// stored uncompressed, so the five proof points go through the compressed
+/// wire form before the fold reads them.
 pub fn verify_payload<const N: usize>(data: &[u8], vk: &Groth16Verifyingkey<'_>) -> Option<bool> {
     if data.len() != layout::HEADER_BYTES + N * 32
         || vk.nr_pubinputs != N
@@ -125,6 +150,11 @@ pub fn verify_payload<const N: usize>(data: &[u8], vk: &Groth16Verifyingkey<'_>)
     let c = read::<64>(data, &mut offset)?;
     let commitment = read::<64>(data, &mut offset)?;
     let pok = read::<64>(data, &mut offset)?;
+    wire_g1(&a)?;
+    wire_g2(&b)?;
+    wire_g1(&c)?;
+    wire_g1(&commitment)?;
+    wire_g1(&pok)?;
     let mut public_inputs = Vec::with_capacity(N + 1);
     for _ in 0..N {
         public_inputs.push(PodScalar(read::<32>(data, &mut offset)?));
@@ -135,7 +165,7 @@ pub fn verify_payload<const N: usize>(data: &[u8], vk: &Groth16Verifyingkey<'_>)
     public_inputs.push(PodScalar(hash_to_field_bn254_fr(
         &commitment,
         b"bsb22-commitment",
-    )));
+    )?));
 
     let key = vk_from_gnark(vk)?;
     let proof = Proof {
@@ -266,7 +296,7 @@ mod tests {
             let generation = fixture_file(selector, "generation.json");
             let generation = std::str::from_utf8(&generation).expect("generation UTF-8");
             assert!(generation.contains(
-                "\"schema\": \"helius.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
+                "\"schema\": \"helios.gnark-bn254-recursion.secure-os-random.imported-zolana-statement.v4\""
             ));
             assert!(generation.contains("\"exact_inner_proof_equality_constrained\": true"));
             assert!(generation.contains("\"all_inner_proofs_host_verified\": true"));
@@ -320,7 +350,7 @@ mod tests {
 
     #[cfg(feature = "research-observer")]
     #[test]
-    fn exact_outer_operation_shapes_are_one_six_pair_check() {
+    fn exact_outer_operation_shapes_are_one_padded_lane_check() {
         use solana_bn254_batch_syscall::research_observer;
 
         let _guard = VERIFICATION_LOCK.lock().expect("verification test lock");
@@ -332,7 +362,7 @@ mod tests {
             assert_eq!(verify_scenario(selector, &data), Some(true));
             assert_eq!(
                 research_observer::observed_pairing_check_shapes(),
-                vec![(6, 6)]
+                vec![(8, 8)]
             );
             assert_eq!(
                 research_observer::observed_g1_msm_point_count_list(),
@@ -340,6 +370,35 @@ mod tests {
             );
             assert!(research_observer::observed_pairing_map_shapes().is_empty());
             assert!(research_observer::observed_registered_pairing_shapes().is_empty());
+        }
+    }
+
+    /// The BSB22 wire is a challenge, so a reduction that differs from the
+    /// arkworks original on any real commitment binds the proof to another
+    /// statement while still verifying.
+    #[test]
+    fn bsb22_reduction_is_byte_identical_on_every_real_commitment() {
+        use ark_ff::PrimeField;
+
+        for selector in [2u8, 3, 5] {
+            let data = fixture_file(selector, "payload_unnegated_a.bin");
+            let commitment: [u8; 64] = data[layout::PROOF_BYTES..layout::PROOF_BYTES + 64]
+                .try_into()
+                .expect("commitment slice");
+            let digest =
+                hash_to_field::expand_message_xmd_sha256_l48(&commitment, b"bsb22-commitment");
+            let mut le = digest;
+            le.reverse();
+            let limbs = ark_bn254::Fr::from_le_bytes_mod_order(&le).into_bigint().0;
+            let mut expected = [0u8; 32];
+            for (chunk, limb) in expected.chunks_exact_mut(8).zip(limbs.iter().rev()) {
+                chunk.copy_from_slice(&limb.to_be_bytes());
+            }
+            assert_eq!(
+                hash_to_field::reduce_be_384(&digest),
+                Some(expected),
+                "selector={selector}"
+            );
         }
     }
 

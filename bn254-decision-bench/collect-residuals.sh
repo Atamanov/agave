@@ -1,14 +1,35 @@
 #!/usr/bin/env bash
 # Measures the guest-side sBPF residual for all 30 decision-table cells.
 # One ExecutionRequest per cell into the collector, one ResidualCell out.
-# Writes research/bn254-decision-table-v2-20260804/residuals.json.
+#
+# Writes two files under research/bn254-decision-table-v2-20260804.
+# residuals.json keeps only non_core_transaction_cu per cell, which is what the
+# renderer reads. observed-traces.json keeps the whole cell, including the
+# operation trace the guest really executed, so a test can compare it against
+# the trace the table prices.
+#
+# A failed cell is fatal here. Discarding it leaves a null in residuals.json and
+# an incomplete trace contract, and both feed published numbers.
+#
+# Not `set -e`: a cell failure is handled per cell and reported at the end.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 RESEARCH=research/bn254-decision-table-v2-20260804
-PROGS=${PROGS:-/tmp/progs2}
+PROGS=${PROGS:-$ROOT/target/decision-guests}
+# Cargo writes to CARGO_TARGET_DIR when it is set, so a hardcoded ./target path
+# silently runs whatever binary was left there. That once published a 30-cell
+# contract from a collector built before the feature under test existed.
+COLLECTOR=${CARGO_TARGET_DIR:-$ROOT/target}/debug/solana-bn254-decision-collector
+if [ ! -x "$COLLECTOR" ]; then
+    echo "FAIL: no collector at $COLLECTOR" >&2
+    exit 1
+fi
 OUT=$RESEARCH/residuals.json
+TRACES=$RESEARCH/observed-traces.json
+CELLS=$(mktemp -d)
+trap 'rm -rf "$CELLS"' EXIT
 
 ALGO() { # row is_groth16 column -> algorithm_id
     case "$3" in
@@ -40,6 +61,7 @@ BACKEND() {
 REV=$(git rev-parse HEAD)
 echo '{' > "$OUT"
 first=1
+index=0
 for row in groth16_n5_same_vk groth16_n2_distinct_vk groth16_n3_distinct_vk \
            plonk_n2_distinct_vk_shared_srs plonk_n3_distinct_vk_shared_srs; do
     case "$row" in groth16_*) g=true ;; *) g=false ;; esac
@@ -61,16 +83,21 @@ print(json.dumps({
     "fixture": fixture, "tariff_sha256": "0" * 64,
 }))
 PY
-        cell=$(./target/debug/solana-bn254-decision-collector \
+        index=$((index + 1))
+        cell=$("$COLLECTOR" \
             --workspace-root . --program-dir "$PROGS" \
-            --plonk-fixture-dir "$RESEARCH/fixtures-v3/plonk-test-exceptions" \
-            --runtime-revision "$REV" < /tmp/cell-req.json 2>/dev/null)
+            --plonk-fixture-dir "$RESEARCH/fixtures-v3/plonk-zolana-shapes" \
+            --runtime-revision "$REV" < /tmp/cell-req.json 2>"$CELLS/error")
+        printf -v slot '%02d-%s-%s.json' "$index" "$row" "$col"
         if [ -n "$cell" ]; then
+            printf '%s' "$cell" > "$CELLS/$slot"
             cu=$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['non_core_transaction_cu'])" "$cell")
             status=ok
         else
+            printf 'null' > "$CELLS/$slot"
             cu=null
             status=FAILED
+            sed "s|^|  $row/$col: |" "$CELLS/error" >&2
         fi
         [ $first -eq 0 ] && echo ',' >> "$OUT"
         printf '  "%s/%s": %s' "$row" "$col" "$cu" >> "$OUT"
@@ -80,3 +107,29 @@ PY
 done
 printf '\n}\n' >> "$OUT"
 echo "wrote $OUT"
+
+python3 - "$CELLS" "$TRACES" <<'PY' || exit 1
+import json, os, sys
+
+cells_dir, out_path = sys.argv[1:3]
+cells, missing = [], []
+for name in sorted(n for n in os.listdir(cells_dir) if n.endswith(".json")):
+    with open(os.path.join(cells_dir, name)) as handle:
+        cell = json.load(handle)
+    if cell is None:
+        missing.append(name[3:-5])
+    else:
+        cells.append(cell)
+if len(cells) + len(missing) != 30:
+    sys.exit(f"collector loop covered {len(cells) + len(missing)} cells, not 30")
+with open(out_path, "w") as handle:
+    json.dump({
+        "schema": "helius.bn254-decision-table-v3.residual-cu-contract.v1",
+        "contract_id": "local-residual-20260805",
+        "cells": cells,
+    }, handle, indent=2)
+    handle.write("\n")
+print(f"wrote {out_path}")
+if missing:
+    sys.exit("no observed cell for " + ", ".join(missing))
+PY

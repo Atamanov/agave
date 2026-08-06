@@ -20,17 +20,24 @@ current-only = []
 ark-bn254 = "0.5"
 ark-ec = "0.5"
 ark-ff = "0.5"
+bytemuck = "1.25"
 light-hasher = { version = "5.0", features = ["keccak"] }
 pinocchio = { version = "0.11", features = ["account-resize", "cpi"] }
 pinocchio-system = "0.6.0"
 plonk-solana = { path = "vendor/plonk-solana" }
-solana-bn254-batch-syscall = { path = "../../../bn254-batch-syscall", default-features = false, features = ["agave-unstable-api", "backend-b1-arkworks", "research-observer"] }
+solana-bn254 = "3.2.1"
+solana-bn254-batch-syscall ={ path = "../../../bn254-batch-syscall", default-features = false, features = ["agave-unstable-api", "backend-b1-arkworks", "research-observer"] }
 solana-keccak-hasher = { version = "3.1.0", features = ["sha3"] }
 
 [target.'cfg(not(target_os = "solana"))'.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+
+# `curve25519` gives the host build of pinocchio's `Address` a real
+# `find_program_address`; the pin test re-derives the pinned registry PDA.
+[dev-dependencies]
+solana-address = { version = "2.7.0", features = ["curve25519"] }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"

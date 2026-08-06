@@ -528,8 +528,10 @@ dependencies = [
  "ark-ff 0.5.0",
  "groth16-solana",
  "pinocchio 0.11.2",
+ "serde_json",
  "sha2 0.10.9",
  "solana-account 3.4.0",
+ "solana-bn254",
  "solana-bn254-batch-syscall",
  "solana-bn254-decision-litesvm",
  "solana-bn254-groth16-batch",
@@ -2495,6 +2497,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-bn254-decision-bench"
+version = "4.1.2"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "solana-program-runtime 4.1.2",
+ "solana-sha256-hasher",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "solana-bn254-decision-litesvm"
 version = "4.1.2"
 dependencies = [
@@ -2502,6 +2516,9 @@ dependencies = [
  "litesvm",
  "serde",
  "solana-bn254-batch-syscall",
+ "solana-bn254-decision-bench",
+ "solana-compute-budget",
+ "solana-keccak-hasher",
  "solana-program-runtime 3.1.14",
  "solana-pubkey 4.3.0",
  "solana-syscalls",

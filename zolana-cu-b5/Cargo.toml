@@ -1,0 +1,52 @@
+[package]
+name = "zolana-cu-b5"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Independent workspace. The directory sits inside the agave checkout but is
+# not an agave member, so agave builds never see it.
+[workspace]
+
+[[bin]]
+name = "zolana_cu_b5"
+path = "src/main.rs"
+
+# LiteSVM registers a syscall by the hash of its name, so a custom syscall that
+# shadows a stock one is a hash collision upstream rather than an override. The
+# fork drops the shadowed stock entry and adds a process-global hook, which is
+# the only way to reach an SVM that `ZolanaProgramTest` builds internally.
+# github.com/Atamanov/litesvm branch custom-syscall-shadowing, off v0.15.2.
+[patch.crates-io]
+litesvm = { path = "../../litesvm-b5/crates/litesvm" }
+
+[dependencies]
+anyhow = "1.0"
+bytemuck = "1"
+num-bigint = "0.4.6"
+sha2 = "0.10"
+sha3 = "0.10"
+litesvm = { version = "0.15", features = ["register-tracing"] }
+solana-compute-budget-interface = "3.0"
+solana-program-runtime = "4.1"
+solana-syscalls = { version = "4.1", features = ["agave-unstable-api"] }
+solana-pubkey = { version = "4.2", features = ["curve25519"] }
+solana-signer = "3.0"
+solana-transaction = { version = "4.1", features = ["verify"] }
+solana-transaction-context = "4.1"
+zolana-cu-split-core = { path = "../zolana-cu-split/core" }
+
+# The B5 kernel under measurement, from this worktree.
+solana-bn254-batch-syscall = { path = "../bn254-batch-syscall", features = ["agave-unstable-api"] }
+
+# Read-only path dependencies into a worktree owned by another session.
+groth16-solana = { git = "https://github.com/Atamanov/groth16-solana", rev = "d0b84554d8ee67c059cd379b6e3293eea7b1920d", features = ["bsb22"] }
+shielded-pool-tests = { path = "../../zolana/.worktrees/groth16-recursion/program-tests/shielded-pool" }
+zolana-client = { path = "../../zolana/.worktrees/groth16-recursion/sdk-libs/client" }
+zolana-hasher = { path = "../../zolana/.worktrees/groth16-recursion/program-libs/hasher", features = ["poseidon"] }
+zolana-interface = { path = "../../zolana/.worktrees/groth16-recursion/program-libs/interface", features = ["solana"] }
+zolana-keypair = { path = "../../zolana/.worktrees/groth16-recursion/sdk-libs/keypair" }
+zolana-merkle-tree = { path = "../../zolana/.worktrees/groth16-recursion/sdk-libs/merkle-tree" }
+zolana-program-test = { path = "../../zolana/.worktrees/groth16-recursion/sdk-libs/program-test" }
+zolana-test-utils = { path = "../../zolana/.worktrees/groth16-recursion/program-tests/test-utils" }
+zolana-transaction = { path = "../../zolana/.worktrees/groth16-recursion/sdk-libs/transaction" }

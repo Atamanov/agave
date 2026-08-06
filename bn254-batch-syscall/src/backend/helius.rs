@@ -42,8 +42,7 @@ pub fn g2_prepare(source: &PodG2Point) -> Result<PreparedG2, AltBn128BatchError>
 /// Restore a prepared operand from caller-supplied wire bytes. Header and
 /// canonical limbs are checked; nothing binds the blob to a G2 point.
 pub fn prepared_g2_from_wire(blob: &[u8]) -> Result<PreparedG2, AltBn128BatchError> {
-    let block =
-        prepared_blob_scalar_block(blob).ok_or(AltBn128BatchError::InvalidPreparedBlob)?;
+    let block = prepared_blob_scalar_block(blob).ok_or(AltBn128BatchError::InvalidPreparedBlob)?;
     HeliusPreparedG2Handle::from_scalar_bytes(block)
         .map(PreparedG2)
         .map_err(|error| match error {

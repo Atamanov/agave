@@ -1,8 +1,12 @@
 use {
-    crate::{verify::Proof, vk::ValidatedVerifyingKey},
+    crate::{
+        verify::{Proof, fr_to_pod},
+        vk::ValidatedVerifyingKey,
+    },
     ark_bn254::Fr,
     ark_ff::One,
     core::ops::{Add, MulAssign},
+    solana_bn254_batch_syscall::PodScalar,
     solana_keccak_hasher::hashv,
 };
 
@@ -23,6 +27,7 @@ pub enum RandomizerMode {
 /// Public as a composition surface: a joint (multi-scheme) verifier absorbs
 /// this seed as its Groth16 section digest, so one collision-resistant value
 /// binds the section's whole framing.
+#[inline]
 pub fn derive_seed(
     mode: RandomizerMode,
     vks: &[ValidatedVerifyingKey],
@@ -95,6 +100,56 @@ pub fn derive_randomizers(seed: &[u8; 32], num_equations: u64, mode: RandomizerM
     }
 }
 
+/// [`derive_randomizers`] in the canonical big-endian encoding the MSM and
+/// inner-product syscalls consume, which is the form the fold actually needs.
+///
+/// `Independent` never leaves the byte domain: `1 + lo128(digest)` is at most
+/// `2^128`, so the carry stops inside the top half and the result is below r
+/// with no reduction. `Powers` needs field multiplication and converts once.
+/// `randomizer_scalars_are_the_field_derivation` pins both modes against
+/// [`derive_randomizers`] element by element.
+#[inline]
+pub fn derive_randomizer_scalars(
+    seed: &[u8; 32],
+    num_equations: u64,
+    mode: RandomizerMode,
+) -> Vec<PodScalar> {
+    match mode {
+        RandomizerMode::Independent => (1..=num_equations).map(|k| draw_scalar(seed, k)).collect(),
+        RandomizerMode::Powers => derive_randomizers(seed, num_equations, mode)
+            .iter()
+            .map(fr_to_pod)
+            .collect(),
+    }
+}
+
+#[inline]
+fn draw_scalar(seed: &[u8; 32], k: u64) -> PodScalar {
+    let digest = keccak_parts(&[seed, &k.to_be_bytes()]);
+    let mut lo = [0u8; 16];
+    lo.copy_from_slice(&digest[16..]);
+    small_plus_lo128(1, &lo)
+}
+
+/// `addend + x` for a 128-bit big-endian `x`. The sum is at most
+/// `2^128 + 254 < r`, so the carry stops inside the top half of the buffer and
+/// the result is canonical without a reduction.
+#[inline]
+pub(crate) fn small_plus_lo128(addend: u8, lo: &[u8; 16]) -> PodScalar {
+    let mut bytes = [0u8; 32];
+    bytes[16..].copy_from_slice(lo);
+    let mut carry = u16::from(addend);
+    for byte in bytes.iter_mut().rev() {
+        if carry == 0 {
+            break;
+        }
+        let [low, high] = u16::from(*byte).saturating_add(carry).to_le_bytes();
+        *byte = low;
+        carry = u16::from(high);
+    }
+    PodScalar(bytes)
+}
+
 impl RandomizerMode {
     // The domain separates each mode, protocol, and transcript version.
     pub(crate) fn domain_tag(self) -> &'static [u8] {
@@ -106,6 +161,7 @@ impl RandomizerMode {
 }
 
 /// Hash ordered chunks on native and SBF targets.
+#[inline]
 fn keccak_parts(parts: &[&[u8]]) -> [u8; 32] {
     hashv(parts).to_bytes()
 }
@@ -249,6 +305,66 @@ mod tests {
         assert_eq!(randomizers[1], r2);
         assert_eq!(randomizers[2], r3);
         assert_eq!(randomizers[3], r4);
+    }
+
+    /// The byte derivation must reproduce the field derivation exactly. It
+    /// feeds the MSM scalars, so a divergence changes the statement the
+    /// pairing check proves while still verifying.
+    #[test]
+    fn randomizer_scalars_are_the_field_derivation() {
+        let (vks, proofs) = setup();
+        for mode in [RandomizerMode::Independent, RandomizerMode::Powers] {
+            let seed = derive_seed(mode, &vks, &proofs);
+            for count in [1u64, 2, 3, 6, 17] {
+                let expected: Vec<PodScalar> = derive_randomizers(&seed, count, mode)
+                    .iter()
+                    .map(fr_to_pod)
+                    .collect();
+                let scalars = derive_randomizer_scalars(&seed, count, mode);
+                assert_eq!(scalars.len(), count as usize);
+                for (index, (scalar, expected)) in scalars.iter().zip(&expected).enumerate() {
+                    assert_eq!(scalar, expected, "{mode:?} count {count} index {index}");
+                }
+            }
+        }
+    }
+
+    /// `addend + lo128` at both ends of the 128-bit range, where the carry
+    /// chain is longest and the result is largest. Addend two is the same-VK
+    /// tail offset.
+    #[test]
+    fn small_plus_lo128_matches_the_field_addition() {
+        let mut cases = vec![
+            0u128,
+            1,
+            2,
+            u128::MAX,
+            u128::MAX - 1,
+            u128::MAX - 2,
+            1 << 127,
+            (1 << 64) - 1,
+        ];
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..1024 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            cases.push(u128::from(state) << 64 | u128::from(state.rotate_left(17)));
+        }
+        for addend in [0u8, 1, 2, 3, u8::MAX] {
+            for lo in &cases {
+                let expected = fr_to_pod(&Fr::from(*lo).add(Fr::from(u64::from(addend))));
+                assert_eq!(
+                    small_plus_lo128(addend, &lo.to_be_bytes()),
+                    expected,
+                    "{addend} + {lo:#x}"
+                );
+            }
+            // the largest draw carries into the top half and stops there
+            let largest = small_plus_lo128(addend, &u128::MAX.to_be_bytes());
+            assert_eq!(largest.0[15], u8::from(addend > 0));
+            assert_eq!(largest.0[..15], [0u8; 15]);
+        }
     }
 
     #[test]

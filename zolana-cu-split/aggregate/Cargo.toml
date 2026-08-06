@@ -1,0 +1,31 @@
+[package]
+name = "zolana-cu-split-aggregate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "aggregate_transact"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+num-bigint = "0.4.6"
+solana-compute-budget-interface = "3.0"
+solana-pubkey = { version = "4.2", features = ["curve25519"] }
+solana-signer = "3.0"
+zolana-cu-split-core = { path = "../core" }
+
+# Read-only path dependencies into a worktree owned by another session.
+groth16-solana = { git = "https://github.com/Atamanov/groth16-solana", rev = "d0b84554d8ee67c059cd379b6e3293eea7b1920d", features = ["bsb22"] }
+shielded-pool-tests = { path = "../../../zolana/.worktrees/groth16-recursion/program-tests/shielded-pool" }
+zolana-client = { path = "../../../zolana/.worktrees/groth16-recursion/sdk-libs/client" }
+zolana-hasher = { path = "../../../zolana/.worktrees/groth16-recursion/program-libs/hasher", features = ["poseidon"] }
+zolana-interface = { path = "../../../zolana/.worktrees/groth16-recursion/program-libs/interface", features = ["solana"] }
+zolana-keypair = { path = "../../../zolana/.worktrees/groth16-recursion/sdk-libs/keypair" }
+zolana-merkle-tree = { path = "../../../zolana/.worktrees/groth16-recursion/sdk-libs/merkle-tree" }
+zolana-program-test = { path = "../../../zolana/.worktrees/groth16-recursion/sdk-libs/program-test" }
+zolana-test-utils = { path = "../../../zolana/.worktrees/groth16-recursion/program-tests/test-utils" }
+zolana-transaction = { path = "../../../zolana/.worktrees/groth16-recursion/sdk-libs/transaction" }

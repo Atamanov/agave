@@ -1,0 +1,39 @@
+mode stock  legs 2  symbols 375
+  solo instruction data 508 bytes
+
+=== solo transact Poseidon attribution ===
+  Poseidon calls 58  arities {2: 58}
+       58  entrypoint
+       58  shielded_pool_program::instructions::transact::processor::process_transact_ix
+       58  shielded_pool_program::process_instruction
+       36  <zolana_hasher::poseidon::Poseidon as zolana_hasher::Hasher>::hashv
+       33  shielded_pool_program::instructions::transact::tree::apply_output_tree
+       23  shielded_pool_program::instructions::transact::verify::TransactProof::public_input_hash
+       23  shielded_pool_program::instructions::transact::verify::TransactProof::verify
+       19  zolana_hasher::hash_chain::create_hash_chain_from_slice
+        3  zolana_hasher::hash_chain::create_hash_chain_from_slice_ref
+        1  shielded_pool_program::instructions::transact::tree::apply_input_tree
+        1  shielded_pool_program::instructions::transact::verify::TransactProofInputs::fill_output_owner_pk_hashes
+        1  shielded_pool_program::instructions::transact::verify::cached_owner_hash
+        1  shielded_pool_program::instructions::transact::verify::fixed_signer_hash_chain
+        1  zolana_batched_merkle_tree::batch::Batch::add_to_hash_chain
+        1  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+  batch-2 instruction data 1217 bytes over 14 accounts
+
+=== aggregate transact, 2 legs Poseidon attribution ===
+  Poseidon calls 119  arities {2: 119}
+      119  entrypoint
+      119  shielded_pool_program::instructions::aggregate_transact::processor::process_aggregate_transact_ix
+      119  shielded_pool_program::process_instruction
+      118  shielded_pool_program::instructions::aggregate_transact::processor::settle_leg
+       74  <zolana_hasher::poseidon::Poseidon as zolana_hasher::Hasher>::hashv
+       67  shielded_pool_program::instructions::transact::tree::apply_output_tree
+       46  shielded_pool_program::instructions::transact::verify::TransactProof::public_input_hash
+       39  zolana_hasher::hash_chain::create_hash_chain_from_slice
+        6  zolana_hasher::hash_chain::create_hash_chain_from_slice_ref
+        3  shielded_pool_program::instructions::transact::tree::apply_input_tree
+        3  zolana_batched_merkle_tree::batch::Batch::add_to_hash_chain
+        3  zolana_batched_merkle_tree::merkle_tree::BatchedMerkleTreeAccount<_,_,_,_>::insert_nullifier_into_queue
+        2  shielded_pool_program::instructions::transact::verify::TransactProofInputs::fill_output_owner_pk_hashes
+        2  shielded_pool_program::instructions::transact::verify::cached_owner_hash
+        2  shielded_pool_program::instructions::transact::verify::fixed_signer_hash_chain

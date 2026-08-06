@@ -3,10 +3,11 @@ use {
         B5Attestation, CampaignMode, CampaignSpec, Cli, ColumnId, ExactMeasurement,
         ExactShapeTariff, ExecutionRequest, ExpectedCountContract, FixtureManifest,
         FixtureProvenance, FixtureRow, HostCapabilities, MeasurementKind, MsmCall, OperationKind,
-        OutputPaths, PinnedFile, RowId, SCHEMA_PREFIX, TariffEntry,
-        TariffSourceConfig, TransactionExecutor, TransactionMeasurement, builtin_expected_counts,
-        expected_trace, render_report, run_campaign,
+        OperationTrace, OutputPaths, PAIRING_CHECK_CAP, PinnedFile, RowId, SCHEMA_PREFIX,
+        TariffEntry, TariffSourceConfig, TransactionExecutor, TransactionMeasurement,
+        builtin_expected_counts, expected_trace, lane_pad, render_report, run_campaign,
     },
+    solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
     std::{
         collections::{BTreeMap, BTreeSet},
         ffi::OsString,
@@ -315,7 +316,7 @@ fn run_valid_campaign(
 }
 
 #[test]
-fn count_contract_has_exact_rows_columns_and_current_fp12_semantics() {
+fn count_contract_covers_every_cell_exactly_once() {
     let contract = builtin_expected_counts();
     assert_eq!(contract.cells.len(), 30);
     let identities: BTreeSet<_> = contract
@@ -324,67 +325,260 @@ fn count_contract_has_exact_rows_columns_and_current_fp12_semantics() {
         .map(|cell| (cell.row_id, cell.column_id))
         .collect();
     assert_eq!(identities.len(), 30);
+}
 
+/// Total Miller-loop pairs a trace runs, however the calls are grouped.
+fn total_pairs(trace: &solana_bn254_decision_bench::OperationTrace) -> u32 {
+    trace
+        .pairing_checks
+        .iter()
+        .chain(&trace.pairing_maps)
+        .map(|call| call.pairs.saturating_mul(call.calls))
+        .sum()
+}
+
+/// What the batch tariff charges for a trace's pairing calls.
+///
+/// Pair count stopped ranking the columns when lane padding landed: the 8-wide
+/// kernel makes a full lane cheaper than the partial one it completes, so a
+/// column can run more pairs for less. The charge is what the ranking is
+/// about, and it is the same function the renderer prices with.
+fn batch_pairing_cu(trace: &OperationTrace) -> u64 {
+    let cost = SVMTransactionExecutionCost::default();
+    trace
+        .pairing_checks
+        .iter()
+        .chain(&trace.pairing_maps)
+        .map(|call| {
+            u64::from(call.calls).saturating_mul(
+                cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into()),
+            )
+        })
+        .sum()
+}
+
+fn registered_pairs(trace: &solana_bn254_decision_bench::OperationTrace) -> u32 {
+    trace
+        .pairing_checks
+        .iter()
+        .chain(&trace.pairing_maps)
+        .map(|call| call.registered_pairs.saturating_mul(call.calls))
+        .sum()
+}
+
+/// Pairs one Groth16 or PLONK proof needs on the stock path.
+fn pairs_per_proof(row: RowId) -> u32 {
+    if row.is_groth16() { 4 } else { 2 }
+}
+
+/// Current verifies each proof on its own: nothing is shared, so every count
+/// scales with the proof count and no batching syscall is reached.
+#[test]
+fn current_column_is_n_independent_verifications() {
     for row in RowId::ALL {
         let n = row.proof_count();
-        let current_fp12 = expected_trace(row, ColumnId::CurrentFp12);
-        assert!(current_fp12.pairing_checks.is_empty());
-        assert!(current_fp12.msm_calls.is_empty());
-        assert_eq!(current_fp12.pairing_maps.len(), 1);
-        assert_eq!(current_fp12.pairing_maps[0].calls, n);
+        let trace = expected_trace(row, ColumnId::Current);
+        assert_eq!(trace.final_exponentiations, n, "{row:?}");
+        assert!(trace.msm_calls.is_empty(), "{row:?}");
+        assert!(trace.gt_target_multiexp_calls.is_empty(), "{row:?}");
+        assert!(trace.pairing_maps.is_empty(), "{row:?}");
+        assert_eq!(registered_pairs(&trace), 0, "{row:?}");
         assert_eq!(
-            current_fp12.pairing_maps[0].pairs,
-            if row.is_groth16() { 3 } else { 2 }
+            trace.pairing_checks,
+            vec![solana_bn254_decision_bench::PairingCall::full(
+                pairs_per_proof(row),
+                n
+            )],
+            "{row:?}"
         );
-        assert_eq!(current_fp12.final_exponentiations, n);
+        assert_eq!(total_pairs(&trace), pairs_per_proof(row) * n, "{row:?}");
+    }
+}
+
+/// Batching collapses N independent checks into one, so exactly one final
+/// exponentiation is shared and no call runs more pairs than the independent
+/// path would.
+///
+/// Pair count itself only drops where the statements share structure: a shared
+/// verifying key folds its alpha/beta and gamma pairs, and PLONK folds its
+/// openings. Groth16 rows over distinct keys keep all 4n pairs and win on the
+/// shared final exponentiation and on lane packing alone. Asserting a strict
+/// drop everywhere would encode a saving this column does not make.
+#[test]
+fn batch_column_folds_into_one_final_exponentiation() {
+    for row in RowId::ALL {
+        let current = expected_trace(row, ColumnId::Current);
+        let trace = expected_trace(row, ColumnId::BatchB5);
+        assert_eq!(trace.final_exponentiations, 1, "{row:?}");
+        assert!(
+            current.final_exponentiations > 1,
+            "{row:?}: every row must have more than one proof to fold"
+        );
+        assert_eq!(registered_pairs(&trace), 0, "{row:?}");
+        assert!(!trace.msm_calls.is_empty(), "{row:?}");
         assert_eq!(
-            current_fp12.g2_subgroup_checks,
-            if row.is_groth16() {
-                3u32.saturating_mul(n)
-            } else {
-                2u32.saturating_mul(n)
-            }
+            trace
+                .pairing_checks
+                .iter()
+                .map(|call| call.calls)
+                .sum::<u32>(),
+            1,
+            "{row:?}: batching must reach exactly one pairing syscall"
         );
+        assert!(
+            batch_pairing_cu(&trace) <= batch_pairing_cu(&current),
+            "{row:?}: batching must never cost more than verifying each proof alone"
+        );
+    }
+}
 
-        let batch_fp12 = expected_trace(row, ColumnId::BatchFp12B5);
-        assert_eq!(batch_fp12.pairing_maps.len(), 1);
-        assert_eq!(batch_fp12.pairing_maps[0].calls, 1);
-        assert_eq!(batch_fp12.final_exponentiations, 1);
-        assert!(!batch_fp12.msm_calls.is_empty());
-
-        if row.is_groth16() {
+/// Where the pair count does fold, and why. A shared key folds its fixed pairs
+/// across proofs; PLONK folds every proof into one two-pair opening check.
+/// Groth16 over distinct keys cannot fold either, which is what makes the
+/// registry and Fp12 columns worth measuring on those rows.
+#[test]
+fn pair_folding_happens_only_where_the_statements_share_structure() {
+    for row in RowId::ALL {
+        let current = total_pairs(&expected_trace(row, ColumnId::Current));
+        let batch = total_pairs(&expected_trace(row, ColumnId::BatchB5));
+        let shares_structure = !row.is_groth16() || row.vk_count() == 1;
+        if shares_structure {
+            assert!(batch < current, "{row:?}: {batch} !< {current}");
+        } else {
             assert_eq!(
-                expected_trace(row, ColumnId::RegistryB5).msm_calls,
-                expected_trace(row, ColumnId::BatchB5).msm_calls,
-                "registry must reuse the exact B5 fold and change only the fixed-G2 boundary"
+                batch,
+                current.saturating_add(lane_pad(current, 0, PAIRING_CHECK_CAP)),
+                "{row:?}: distinct Groth16 keys have no pairs to fold, only a lane to fill"
             );
         }
     }
+}
 
-    for (row, outer_points) in [
-        (RowId::PlonkN2DistinctVkSharedSrs, 7),
-        (RowId::PlonkN3DistinctVkSharedSrs, 10),
-    ] {
-        let recursion = expected_trace(row, ColumnId::RecursionB5);
-        assert_eq!(
-            recursion.pairing_checks,
-            vec![solana_bn254_decision_bench::PairingCall::full(6, 1)]
+/// Registration moves the fixed-G2 boundary off the hot path. It does not
+/// change how many pairs the Miller loop runs, only who paid for their subgroup
+/// check and line preparation, so the fold must be identical to plain batching.
+#[test]
+fn registry_column_reuses_the_fold_and_only_moves_the_g2_boundary() {
+    for row in RowId::ALL {
+        let batch = expected_trace(row, ColumnId::BatchB5);
+        let registry = expected_trace(row, ColumnId::RegistryB5);
+        assert_eq!(registry.final_exponentiations, 1, "{row:?}");
+        assert_eq!(registry.msm_calls, batch.msm_calls, "{row:?}");
+        assert_eq!(total_pairs(&registry), total_pairs(&batch), "{row:?}");
+        assert!(
+            registered_pairs(&registry) > 0,
+            "{row:?}: a registry column with no registered pair is just batching"
         );
-        assert_eq!(recursion.final_exponentiations, 1);
-        assert_eq!(recursion.g2_subgroup_checks, 6);
-        assert_eq!(
-            recursion.msm_calls,
-            [1, 1, outer_points, 1, 1, 1]
-                .into_iter()
-                .map(MsmCall::one)
-                .collect::<Vec<_>>()
+        assert!(
+            registry.g2_subgroup_checks < batch.g2_subgroup_checks,
+            "{row:?}: registered pairs must skip subgroup checks the batch pays"
         );
+    }
+}
+
+/// Recursion replaces N inner verifications with one outer proof, so its
+/// pairing work is the same on every row. That independence is the claim the
+/// column makes; row-by-row pinning cannot express it.
+#[test]
+fn recursion_column_costs_the_same_pairing_work_on_every_row() {
+    let mut shapes: Vec<_> = RowId::ALL
+        .iter()
+        .map(|row| {
+            let trace = expected_trace(*row, ColumnId::RecursionB5);
+            assert_eq!(trace.final_exponentiations, 1, "{row:?}");
+            assert_eq!(registered_pairs(&trace), 0, "{row:?}");
+            (trace.pairing_checks.clone(), trace.g2_subgroup_checks)
+        })
+        .collect();
+    shapes.dedup();
+    assert_eq!(
+        shapes.len(),
+        1,
+        "recursion must not vary its pairing shape by row: {shapes:?}"
+    );
+    let (checks, subgroup_checks) = shapes.into_iter().next().expect("one shape");
+    // Six fold terms padded to a full lane.
+    assert_eq!(
+        checks,
+        vec![solana_bn254_decision_bench::PairingCall::full(8, 1)]
+    );
+    assert_eq!(subgroup_checks, 8);
+
+    // One outer Groth16/BSB22 verification is six MSM calls. Five are single
+    // points; only the gamma slot carries the outer public inputs, so that is
+    // the one place the inner count may show up. A seventh call, or a second
+    // wide slot, would mean the column stopped verifying one outer proof.
+    for row in RowId::ALL {
+        let msm = expected_trace(row, ColumnId::RecursionB5).msm_calls;
+        assert_eq!(msm.len(), 6, "{row:?}: {msm:?}");
+        let points: Vec<u32> = msm.iter().map(|call| call.points).collect();
+        assert!(msm.iter().all(|call| call.calls == 1), "{row:?}");
+        assert_eq!(
+            [points[0], points[1], points[3], points[4], points[5]],
+            [1, 1, 1, 1, 1],
+            "{row:?}: only the gamma slot may widen"
+        );
+        assert!(points[2] >= row.proof_count(), "{row:?}: {points:?}");
+    }
+
+    // The gamma slot is monotone in the inner count within a proof system.
+    for rows in RowId::ALL.windows(2) {
+        let [lower, higher] = rows else { continue };
+        if lower.is_groth16() != higher.is_groth16() || lower.proof_count() >= higher.proof_count()
+        {
+            continue;
+        }
+        let gamma = |row: RowId| expected_trace(row, ColumnId::RecursionB5).msm_calls[2].points;
+        assert!(
+            gamma(*lower) <= gamma(*higher),
+            "{lower:?} -> {higher:?}: the outer statement must not shrink as inner proofs are added"
+        );
+    }
+}
+
+/// Current + Fp12 keeps the per-proof independence of Current and only swaps
+/// the finalizer, so it maps once per proof and never reaches an MSM syscall.
+#[test]
+fn current_fp12_column_stays_independent_per_proof() {
+    for row in RowId::ALL {
+        let n = row.proof_count();
+        let trace = expected_trace(row, ColumnId::CurrentFp12);
+        assert!(trace.pairing_checks.is_empty(), "{row:?}");
+        assert!(trace.msm_calls.is_empty(), "{row:?}");
+        assert_eq!(trace.pairing_maps.len(), 1, "{row:?}");
+        assert_eq!(trace.pairing_maps[0].calls, n, "{row:?}");
+        assert_eq!(
+            trace.pairing_maps[0].pairs,
+            if row.is_groth16() { 3 } else { 2 },
+            "{row:?}"
+        );
+        assert_eq!(trace.final_exponentiations, n, "{row:?}");
+        assert_eq!(
+            trace.g2_subgroup_checks,
+            if row.is_groth16() { 3u32 } else { 2 }.saturating_mul(n),
+            "{row:?}"
+        );
+    }
+}
+
+/// Batching + Fp12 folds like Batching and finishes with one map. Distinct
+/// verifying keys leave one GT target each to fold; a shared key leaves none.
+#[test]
+fn batch_fp12_column_folds_once_and_charges_one_gt_target_per_distinct_key() {
+    for row in RowId::ALL {
+        let trace = expected_trace(row, ColumnId::BatchFp12B5);
+        assert_eq!(trace.pairing_maps.len(), 1, "{row:?}");
+        assert_eq!(trace.pairing_maps[0].calls, 1, "{row:?}");
+        assert_eq!(trace.final_exponentiations, 1, "{row:?}");
+        assert_eq!(registered_pairs(&trace), 0, "{row:?}");
+        assert!(!trace.msm_calls.is_empty(), "{row:?}");
     }
 
     assert!(
         expected_trace(RowId::Groth16N5SameVk, ColumnId::BatchFp12B5)
             .gt_target_multiexp_calls
-            .is_empty()
+            .is_empty(),
+        "one shared key leaves nothing to fold"
     );
     for (row, targets) in [
         (RowId::Groth16N2DistinctVk, 2),
@@ -394,6 +588,30 @@ fn count_contract_has_exact_rows_columns_and_current_fp12_semantics() {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].targets, targets);
         assert_eq!(calls[0].nontrivial_exponents, targets - 1);
+    }
+}
+
+/// The table exists to rank these strategies. Pin the ranking itself, so an
+/// edit that inverts it fails here instead of being published as a finding.
+/// Pairing work is non-increasing left to right, and registration never changes
+/// it at all.
+#[test]
+fn pairing_work_ranks_current_then_batch_then_registry() {
+    for row in RowId::ALL {
+        let current = expected_trace(row, ColumnId::Current);
+        let batch = expected_trace(row, ColumnId::BatchB5);
+        let registry = expected_trace(row, ColumnId::RegistryB5);
+        assert!(
+            batch_pairing_cu(&current) >= batch_pairing_cu(&batch),
+            "{row:?}: {} !>= {}",
+            batch_pairing_cu(&current),
+            batch_pairing_cu(&batch)
+        );
+        assert_eq!(
+            total_pairs(&batch),
+            total_pairs(&registry),
+            "{row:?}: registration must not change the pair count"
+        );
     }
 }
 
@@ -557,4 +775,253 @@ fn cli_requires_the_public_flags_and_absolute_output() {
     );
     let _: Option<OutputPaths> = None;
     let _: Option<MsmCall> = None;
+}
+
+/// The forbidden-token screen matched substrings, so `fp12_b5` inside the live
+/// column id `batch_fp12_b5` and `ratio` inside `operation` rejected every real
+/// document. That took the whole campaign entrypoint offline, and with it every
+/// seal and trace check it performs.
+#[test]
+fn forbidden_token_screen_admits_the_documents_the_campaign_actually_reads() {
+    use solana_bn254_decision_bench::reject_deprecated_or_derived_json as screen;
+
+    for (label, raw) in [
+        ("column id", r#"{"column_id":"batch_fp12_b5"}"#),
+        ("pricing id", r#"{"pricing_id":"batch_fp12_b5"}"#),
+        ("tariff key", r#"{"operation":"PairingCheck"}"#),
+        (
+            "both",
+            r#"{"operation":"G1Msm","pricing_id":"batch_fp12_b5"}"#,
+        ),
+    ] {
+        assert!(
+            screen(raw, label).is_ok(),
+            "{label} must be readable: {raw}"
+        );
+    }
+
+    for (label, raw) in [
+        ("retired column", r#"{"column_id":"fp12_b5"}"#),
+        ("retired b1", r#"{"column_id":"batch_b1"}"#),
+        ("derived value", r#"{"derived_cu":1}"#),
+        ("ratio field", r#"{"ratio":1.23}"#),
+    ] {
+        assert!(
+            screen(raw, label).is_err(),
+            "{label} must be rejected: {raw}"
+        );
+    }
+}
+
+/// Every JSON document the campaign reads must survive its own screen. This is
+/// the regression that the substring bug was: the committed files were
+/// unreadable by the code meant to validate them.
+#[test]
+fn every_committed_campaign_document_passes_its_own_screen() {
+    use solana_bn254_decision_bench::reject_deprecated_or_derived_json as screen;
+
+    let research =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../research/bn254-decision-table-v2-20260804");
+    for name in [
+        "expected-counts.v1.json",
+        "campaign.template.json",
+        "fixture-manifest.real-20260805.json",
+    ] {
+        let path = research.join(name);
+        let raw = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        screen(&raw, name).unwrap_or_else(|e| panic!("{name} is unreadable by the campaign: {e}"));
+    }
+}
+
+/// The structural gate must be able to fire, and must be able to stay quiet.
+/// A detector that cannot do both is decoration.
+#[test]
+fn structural_gate_fires_on_a_wrapper_dominated_cell() {
+    use solana_bn254_decision_bench::{CostSplit, MIN_SYSCALL_SHARE_PER_MILLE};
+
+    let dominated = CostSplit {
+        syscall: 30_531,
+        sbpf: 294_386,
+    };
+    assert!(dominated.syscall_share_per_mille() < MIN_SYSCALL_SHARE_PER_MILLE);
+    assert_eq!(dominated.syscall_share_per_mille(), 93);
+
+    let healthy = CostSplit {
+        syscall: 368_060,
+        sbpf: 3_899,
+    };
+    assert!(healthy.syscall_share_per_mille() >= MIN_SYSCALL_SHARE_PER_MILLE);
+
+    // A cell with no work at all must not read as a breach by dividing by zero.
+    assert_eq!(
+        CostSplit {
+            syscall: 0,
+            sbpf: 0
+        }
+        .syscall_share_per_mille(),
+        0
+    );
+}
+
+/// Compressed points one proof puts on the wire, as `(G1, G2)`.
+///
+/// Restated from the proof system rather than read back from the contract, so
+/// a per-row literal in the contract fails here.
+fn wire_points(row: RowId, column: ColumnId) -> (u32, u32) {
+    let n = row.proof_count();
+    match (column, row.is_groth16()) {
+        // Recursion puts one committed outer Groth16 proof on the wire whatever
+        // the row holds. A, C, the BSB22 commitment and its proof of knowledge
+        // are G1, and B is the only G2.
+        (ColumnId::RecursionB5, _) => (4, 1),
+        (_, true) => (n.saturating_mul(2), n),
+        (_, false) => (n.saturating_mul(9), 0),
+    }
+}
+
+/// Proofs reach the chain compressed, so decompression is verification work in
+/// every cell. It was missing from all thirty, which made the absolute numbers
+/// incomparable to a real transaction.
+#[test]
+fn every_cell_decompresses_the_points_its_wire_format_carries() {
+    for row in RowId::ALL {
+        for column in ColumnId::ALL {
+            let trace = expected_trace(row, column);
+            let (g1, g2) = wire_points(row, column);
+            assert_eq!(
+                (trace.g1_decompressions, trace.g2_decompressions),
+                (g1, g2),
+                "{row:?}/{column:?}"
+            );
+            assert!(
+                trace.g1_decompressions > 0,
+                "{row:?}/{column:?}: no proof reaches the chain without a G1 point"
+            );
+        }
+    }
+}
+
+/// The count is a property of the proof system and the proof count, not of the
+/// verification strategy. Only recursion may break the scaling, because it
+/// replaces the wire proofs with one outer proof.
+#[test]
+fn decompression_scales_with_the_proof_count_and_the_proof_system() {
+    for column in ColumnId::ALL {
+        if column == ColumnId::RecursionB5 {
+            continue;
+        }
+        for row in RowId::ALL {
+            let trace = expected_trace(row, column);
+            let n = row.proof_count();
+            let per_proof = if row.is_groth16() { (2, 1) } else { (9, 0) };
+            assert_eq!(
+                (trace.g1_decompressions, trace.g2_decompressions),
+                (per_proof.0 * n, per_proof.1 * n),
+                "{row:?}/{column:?}"
+            );
+        }
+    }
+
+    let shapes: BTreeSet<_> = RowId::ALL
+        .into_iter()
+        .map(|row| {
+            let trace = expected_trace(row, ColumnId::RecursionB5);
+            (trace.g1_decompressions, trace.g2_decompressions)
+        })
+        .collect();
+    assert_eq!(
+        shapes.len(),
+        1,
+        "recursion puts one outer proof on the wire on every row: {shapes:?}"
+    );
+}
+
+/// Priced from the runtime's own fields, and from the compression syscall's own
+/// charge rather than the group op's. That syscall adds `syscall_base_cost` to
+/// the per-point price and the group op does not.
+#[test]
+fn decompression_is_priced_from_the_runtime_budget() {
+    use solana_bn254_decision_bench::{syscall_cu, syscall_families};
+
+    let cost = SVMTransactionExecutionCost::default();
+    for row in RowId::ALL {
+        for column in ColumnId::ALL {
+            let trace = expected_trace(row, column);
+            let (g1, g2) = wire_points(row, column);
+            let expected = cost
+                .syscall_base_cost
+                .saturating_add(cost.alt_bn128_g1_decompress)
+                .saturating_mul(u64::from(g1))
+                .saturating_add(
+                    cost.syscall_base_cost
+                        .saturating_add(cost.alt_bn128_g2_decompress)
+                        .saturating_mul(u64::from(g2)),
+                );
+            let families = syscall_families(&cost, column, &trace);
+            assert_eq!(families.decompress, expected, "{row:?}/{column:?}");
+            assert!(
+                families.total() >= families.decompress,
+                "{row:?}/{column:?}: the family must reach the cell total"
+            );
+            assert_eq!(
+                syscall_cu(&cost, column, &trace),
+                families.total(),
+                "{row:?}/{column:?}"
+            );
+        }
+    }
+}
+
+/// The derived charge against the one independent measurement of it. A solo
+/// zolana transact under LiteSVM meters 18,880 CU in its non-pairing BN254
+/// bucket over five calls, of which decompressing one Groth16 proof is 14,706
+/// and the single G2 point alone is 13,710. The remaining 4,174 is the one
+/// stock G1 multiplication and the one stock G1 addition that build the
+/// public-input commitment, neither of which pays a syscall base.
+#[test]
+fn one_groth16_proof_costs_what_the_zolana_pool_was_metered() {
+    use solana_bn254_decision_bench::syscall_families;
+
+    let cost = SVMTransactionExecutionCost::default();
+    let mut trace = OperationTrace {
+        g1_decompressions: 2,
+        g2_decompressions: 1,
+        ..OperationTrace::default()
+    };
+    assert_eq!(
+        syscall_families(&cost, ColumnId::Current, &trace).decompress,
+        14_706
+    );
+
+    trace.g1_decompressions = 0;
+    assert_eq!(
+        syscall_families(&cost, ColumnId::Current, &trace).decompress,
+        13_710
+    );
+
+    let stock_g1 = cost
+        .alt_bn128_g1_multiplication_cost
+        .saturating_add(cost.alt_bn128_g1_addition_cost);
+    assert_eq!(stock_g1.saturating_add(14_706), 18_880);
+}
+
+/// Every published cell's syscall CU must come from the shared pricing
+/// function, so the transaction table and the structure table cannot disagree
+/// about what a column costs.
+#[test]
+fn both_tables_price_a_cell_identically() {
+    use solana_bn254_decision_bench::{cost_split, syscall_cu};
+    use solana_program_runtime::execution_budget::SVMTransactionExecutionCost;
+
+    let cost = SVMTransactionExecutionCost::default();
+    for row in RowId::ALL {
+        for column in ColumnId::ALL {
+            let direct = syscall_cu(&cost, column, &expected_trace(row, column));
+            assert_eq!(
+                cost_split(&cost, row, column, 0).syscall,
+                direct,
+                "{row:?}/{column:?}"
+            );
+        }
+    }
 }

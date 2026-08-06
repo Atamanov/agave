@@ -38,6 +38,14 @@ event_storage!(
     REGISTERED_NONIDENTITY,
 );
 event_storage!(GT_CALLS, GT_OVERFLOW, GT_TARGETS, GT_NONTRIVIAL,);
+event_storage!(FR_LINCOMB_CALLS, FR_LINCOMB_OVERFLOW, FR_LINCOMB_TERMS);
+event_storage!(
+    PLONK_REDUCE_CALLS,
+    PLONK_REDUCE_OVERFLOW,
+    PLONK_REDUCE_CONTEXTS,
+    PLONK_REDUCE_PROOFS,
+    PLONK_REDUCE_PUBLICS,
+);
 
 static REGISTRY_INIT_G2: AtomicU64 = AtomicU64::new(0);
 static REGISTRY_INIT_GT: AtomicU64 = AtomicU64::new(0);
@@ -68,6 +76,20 @@ pub fn reset() {
         &[&REGISTERED_FULL, &REGISTERED_IDS, &REGISTERED_NONIDENTITY],
     );
     reset_stream(&GT_CALLS, &GT_OVERFLOW, &[&GT_TARGETS, &GT_NONTRIVIAL]);
+    reset_stream(
+        &FR_LINCOMB_CALLS,
+        &FR_LINCOMB_OVERFLOW,
+        &[&FR_LINCOMB_TERMS],
+    );
+    reset_stream(
+        &PLONK_REDUCE_CALLS,
+        &PLONK_REDUCE_OVERFLOW,
+        &[
+            &PLONK_REDUCE_CONTEXTS,
+            &PLONK_REDUCE_PROOFS,
+            &PLONK_REDUCE_PUBLICS,
+        ],
+    );
     REGISTRY_INIT_G2.store(0, Ordering::SeqCst);
     REGISTRY_INIT_GT.store(0, Ordering::SeqCst);
     REGISTRY_G2_SUBGROUP_PREPARES.store(0, Ordering::SeqCst);
@@ -204,6 +226,33 @@ pub fn observed_gt_multiexp_shape() -> Option<(u64, u64)> {
     observed_gt_multiexp_shapes().last().copied()
 }
 
+/// Shapes of every atomic multi-VK PLONK reduction, as (contexts, proofs, publics).
+pub fn observed_snarkjs_plonk_multi_vk_shapes() -> Vec<(u64, u64, u64)> {
+    (0..event_count(
+        &PLONK_REDUCE_CALLS,
+        &PLONK_REDUCE_OVERFLOW,
+        "PLONK multi-VK reduce",
+    ))
+        .map(|index| {
+            (
+                PLONK_REDUCE_CONTEXTS[index].load(Ordering::SeqCst),
+                PLONK_REDUCE_PROOFS[index].load(Ordering::SeqCst),
+                PLONK_REDUCE_PUBLICS[index].load(Ordering::SeqCst),
+            )
+        })
+        .collect()
+}
+
+pub fn observed_fr_lincomb_term_counts() -> Vec<u64> {
+    (0..event_count(&FR_LINCOMB_CALLS, &FR_LINCOMB_OVERFLOW, "Fr lincomb"))
+        .map(|index| {
+            let value = FR_LINCOMB_TERMS[index].load(Ordering::SeqCst);
+            assert_ne!(value, NONE, "missing Fr lincomb observer event");
+            value
+        })
+        .collect()
+}
+
 pub fn observed_standalone_probe_calls() -> (u64, u64) {
     (
         SUBGROUP_PROBES.load(Ordering::SeqCst),
@@ -242,6 +291,24 @@ fn reserve(count: &AtomicU64, overflow: &AtomicBool) -> Option<usize> {
 pub(crate) fn record_msm(points: usize) {
     if let Some(index) = reserve(&MSM_CALLS, &MSM_OVERFLOW) {
         MSM_POINTS[index].store(points as u64, Ordering::SeqCst);
+    }
+}
+
+// Hash syscalls are deliberately absent here. This observer sees only calls the
+// guest makes into this crate; `sol_keccak256` and `sol_sha256` go straight to
+// the runtime, so they are observed from the VM register trace instead.
+
+pub(crate) fn record_fr_lincomb(terms: usize) {
+    if let Some(index) = reserve(&FR_LINCOMB_CALLS, &FR_LINCOMB_OVERFLOW) {
+        FR_LINCOMB_TERMS[index].store(terms as u64, Ordering::SeqCst);
+    }
+}
+
+pub(crate) fn record_snarkjs_plonk_multi_vk_reduce(contexts: usize, proofs: usize, publics: usize) {
+    if let Some(index) = reserve(&PLONK_REDUCE_CALLS, &PLONK_REDUCE_OVERFLOW) {
+        PLONK_REDUCE_CONTEXTS[index].store(contexts as u64, Ordering::SeqCst);
+        PLONK_REDUCE_PROOFS[index].store(proofs as u64, Ordering::SeqCst);
+        PLONK_REDUCE_PUBLICS[index].store(publics as u64, Ordering::SeqCst);
     }
 }
 

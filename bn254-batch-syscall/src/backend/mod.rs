@@ -91,15 +91,14 @@ pub use b3::{
     not(feature = "backend-b3-mcl")
 ))]
 pub use helius::{
-    FinalExponentiationProbe, FinalExponentiationResult, G2SubgroupProbe, PreparedG2,
-    RegisteredG2, RegisteredG2Pair, TrustedGt, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb,
-    alt_bn128_g1_msm, alt_bn128_pairing_check, alt_bn128_pairing_map,
-    encode_final_exponentiation_result, g2_prepare, pairing_check_prepared,
-    pairing_check_prepared_vs_target, pairing_check_registered, pairing_map_prepared,
-    prepare_final_exponentiation_probe, prepare_g2_subgroup_probe, prepared_g2_from_wire,
-    registered_g2_from_authenticated_bytes, run_final_exponentiation_probe, run_g2_subgroup_probe,
-    trusted_gt_from_authenticated_bytes, trusted_gt_from_pair, trusted_gt_multiexp,
-    trusted_gt_to_bytes, validate_registered_g2,
+    FinalExponentiationProbe, FinalExponentiationResult, G2SubgroupProbe, PreparedG2, RegisteredG2,
+    RegisteredG2Pair, TrustedGt, alt_bn128_fr_batch_invert, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
+    alt_bn128_pairing_check, alt_bn128_pairing_map, encode_final_exponentiation_result, g2_prepare,
+    pairing_check_prepared, pairing_check_prepared_vs_target, pairing_check_registered,
+    pairing_map_prepared, prepare_final_exponentiation_probe, prepare_g2_subgroup_probe,
+    prepared_g2_from_wire, registered_g2_from_authenticated_bytes, run_final_exponentiation_probe,
+    run_g2_subgroup_probe, trusted_gt_from_authenticated_bytes, trusted_gt_from_pair,
+    trusted_gt_multiexp, trusted_gt_to_bytes, validate_registered_g2,
 };
 
 #[cfg(test)]

@@ -33,9 +33,9 @@ pub fn pairing_check_prepared_blobs(
     let handles = restore_blobs(prepared)?;
     let refs = prepared_refs(prepared, &handles);
     match target {
-        Some(target) => solana_bn254_batch_syscall::pairing_check_prepared_vs_target(
-            full, &refs, target,
-        ),
+        Some(target) => {
+            solana_bn254_batch_syscall::pairing_check_prepared_vs_target(full, &refs, target)
+        }
         None => solana_bn254_batch_syscall::pairing_check_prepared(full, &refs),
     }
 }
@@ -50,9 +50,7 @@ pub fn pairing_map_prepared_blobs(
     solana_bn254_batch_syscall::pairing_map_prepared(full, &refs)
 }
 
-fn restore_blobs(
-    prepared: &[(PodG1Point, &[u8])],
-) -> Result<Vec<PreparedG2>, AltBn128BatchError> {
+fn restore_blobs(prepared: &[(PodG1Point, &[u8])]) -> Result<Vec<PreparedG2>, AltBn128BatchError> {
     prepared
         .iter()
         .map(|(_, blob)| prepared_g2_from_wire(blob))

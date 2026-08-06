@@ -1,7 +1,7 @@
 #[cfg(not(target_os = "solana"))]
 use ark_ec::AffineRepr;
 use {
-    crate::Groth16BatchError,
+    crate::{Groth16BatchError, verify::all_zero},
     solana_bn254_batch_syscall::{PodG1Point, PodG2Point},
     solana_keccak_hasher::hashv,
 };
@@ -44,6 +44,7 @@ impl VerifyingKey {
     /// Shape, no-infinity, and digest checks only. For compile-time constant
     /// keys on SBF where full curve checks are not available (host should still
     /// prefer [`Self::validate`]).
+    #[inline]
     pub fn trust(self) -> Result<ValidatedVerifyingKey, Groth16BatchError> {
         self.validate_shape()?;
         self.validate_no_infinities()?;
@@ -68,6 +69,7 @@ impl VerifyingKey {
         Ok(ValidatedVerifyingKey { key: self, digest })
     }
 
+    #[inline]
     fn validate_shape(&self) -> Result<(), Groth16BatchError> {
         if self.ic.is_empty() {
             return Err(Groth16BatchError::InvalidVerifyingKey(
@@ -80,6 +82,7 @@ impl VerifyingKey {
         Ok(())
     }
 
+    #[inline]
     fn validate_no_infinities(&self) -> Result<(), Groth16BatchError> {
         reject_infinity_g1(&self.alpha_g1, "alpha_g1")?;
         for ic in &self.ic {
@@ -108,6 +111,7 @@ impl ValidatedVerifyingKey {
     }
 }
 
+#[inline]
 fn digest(key: &VerifyingKey) -> [u8; 32] {
     // the tag byte fixes the committed-vs-vanilla layout so two rails can
     // never serialize to one byte string
@@ -130,15 +134,17 @@ fn digest(key: &VerifyingKey) -> [u8; 32] {
     hashv(&parts).to_bytes()
 }
 
+#[inline]
 fn reject_infinity_g1(point: &PodG1Point, what: &'static str) -> Result<(), Groth16BatchError> {
-    if point.0 == [0u8; 64] {
+    if all_zero(&point.0) {
         return Err(Groth16BatchError::InvalidVerifyingKey(what));
     }
     Ok(())
 }
 
+#[inline]
 fn reject_infinity_g2(point: &PodG2Point, what: &'static str) -> Result<(), Groth16BatchError> {
-    if point.0 == [0u8; 128] {
+    if all_zero(&point.0) {
         return Err(Groth16BatchError::InvalidVerifyingKey(what));
     }
     Ok(())

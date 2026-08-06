@@ -1,8 +1,9 @@
 //! Direct PLONK fixture program for the BN254 decision grid.
 //!
-//! Only the three byte-exact, committed Zolana snarkjs mul1/mul2/mul3 test
-//! exceptions are admitted. They are explicitly test fixtures, not fresh or
-//! production Zolana proofs. They share one authenticated SRS. The optimized
+//! Only the three byte-exact committed snarkjs fixtures are admitted. They are
+//! shaped like zolana transact, one public signal over a Poseidon chain at
+//! (nIn, nOut) of 1_1, 2_2 and 2_3, and they are test fixtures, not production
+//! proofs. They carry distinct keys over one authenticated SRS. The optimized
 //! paths preserve the audited `023-neg-scalars` transcript/scalar kernel and
 //! concatenate exactly `2n` and `18n` G1 terms into two MSMs. Tags mirror the
 //! Groth16 guest: 0 current, 2 B5, 3 B5 registry, 4 B5+Fp12, 5 registry init,
@@ -18,8 +19,11 @@ use {
         Fr as OptimizedFr, G1 as OptimizedG1, G2 as OptimizedG2, Proof as OptimizedProof,
         VerificationKey as OptimizedVerifyingKey,
     },
+    solana_bn254::compression::prelude::{alt_bn128_g1_compress_be, alt_bn128_g1_decompress_be},
     solana_bn254_batch_syscall::{
         PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair, PodG2Point, PodScalar,
+        PodSnarkjsPlonkMultiVkContext, PodSnarkjsPlonkMultiVkInput,
+        PodSnarkjsPlonkReductionContext, PodSnarkjsPlonkReductionInput,
     },
     solana_keccak_hasher::hashv,
 };
@@ -83,6 +87,13 @@ pub mod layout {
     pub const OPAQUE_G2_ID_BYTES: usize = 32;
     pub const REGISTRY_HOT_INSTRUCTION_BYTES: usize = 1 + 2 * OPAQUE_G2_ID_BYTES;
     pub const REGISTERED_PAIR_BYTES: usize = 64 + OPAQUE_G2_ID_BYTES;
+    /// This branch's prepared-G2 wire size. It is not the format the stateless
+    /// prepare syscalls emit, which `bn254-batch-syscall::prepared_abi` pins at
+    /// `PREPARED_G2_WIRE_BYTES = 16_712` on `local/bn254-prepared-stateless`.
+    /// Two formats exist because the two branches grew apart; converging them
+    /// changes every sealed registry digest, so it is a deliberate change and
+    /// not a constant to quietly retune. `registry_account_size_is_pinned`
+    /// fails if this moves untracked.
     pub const G2_PREPARED_BYTES: usize = 37_584;
     pub const REGISTRY_ENTRY_BYTES: usize =
         OPAQUE_G2_ID_BYTES + REGISTRY_SOURCE_BYTES + G2_PREPARED_BYTES;
@@ -96,99 +107,214 @@ const REGISTRY_V3_KEYSET_DOMAIN: &[u8] = b"agave:bn254:b5:keyset:v3";
 // Registry initialization independently recomputes and checks this value.
 #[cfg(any(target_os = "solana", test))]
 const AUTHENTICATED_REGISTRY_KEYSET_DIGEST_V3: [u8; 32] = [
-    0xbd, 0xc5, 0xc0, 0xab, 0xa5, 0xdd, 0xe4, 0xa6, 0x1f, 0x01, 0xef, 0x74, 0x2c, 0x4e, 0x7c, 0xbd,
-    0x4f, 0xc6, 0xbb, 0xc3, 0xde, 0x71, 0x60, 0xe9, 0xc1, 0x9b, 0x34, 0xf3, 0x53, 0x89, 0x1d, 0x99,
+    0xfc, 0xd7, 0x36, 0xe3, 0x1b, 0x14, 0x8a, 0xaf, 0xd7, 0x34, 0xbf, 0x34, 0x17, 0xb5, 0xc8, 0xdb,
+    0xfc, 0x97, 0x77, 0x92, 0xf6, 0xa6, 0x90, 0x01, 0x99, 0x55, 0x24, 0x1f, 0xac, 0x84, 0x43, 0x05,
 ];
+/// Consumer both pinned address tables are derived under. A guest loaded at
+/// any other program id must reject: the pinned addresses would not be
+/// program-derived addresses of the running program.
+#[cfg(any(target_os = "solana", test))]
+const REGISTRY_V3_CONSUMER: [u8; 32] = [42u8; 32];
+
+/// `(keyset digest, registry PDA)` for every keyset the grid runs, standing in
+/// for what a real consumer emits at codegen time. The address is
+/// `find_program_address([REGISTRY_PDA_SEED, digest], REGISTRY_V3_CONSUMER)`
+/// and `pinned_registry_addresses_derive` re-runs that derivation. Lookup is
+/// keyed by the digest the guest recomputes from the account, so a fixture
+/// cannot present another keyset's registry account.
+#[cfg(any(target_os = "solana", test))]
+const REGISTRY_V3_PINNED: [([u8; 32], [u8; 32]); 1] = [(
+    AUTHENTICATED_REGISTRY_KEYSET_DIGEST_V3,
+    [
+        0x89, 0xcd, 0x12, 0x7c, 0x74, 0xb2, 0x75, 0x6a, 0xb1, 0x78, 0xc4, 0x2a, 0x84, 0x77, 0x22,
+        0x20, 0x9a, 0x90, 0x57, 0x29, 0x5c, 0x89, 0x8f, 0xb3, 0xcb, 0x13, 0x48, 0x55, 0x08, 0xa8,
+        0xaa, 0xbe,
+    ],
+)];
+
 #[cfg(not(target_os = "solana"))]
 const OPAQUE_G2_ID_DOMAIN: &[u8] = b"agave:bn254:b5:g2-registry:v3";
 const KEYSET_DIGEST_VERSION: u8 = 1;
 const POLICY_KEYSET_DIGESTS: [[u8; 32]; 5] = [
+    // transact_1_1 alone
     [
-        0xec, 0x0c, 0xc4, 0x79, 0xcf, 0x76, 0xcb, 0xa9, 0x5f, 0xca, 0xa3, 0x50, 0x33, 0x44, 0x09,
-        0x3d, 0x39, 0x3a, 0xa7, 0xa8, 0xe5, 0x27, 0xf8, 0xf0, 0xb8, 0x95, 0x97, 0x38, 0x2b, 0x3c,
-        0x5a, 0x83,
+        0x20, 0x0f, 0x96, 0xba, 0xbc, 0x80, 0x40, 0x91, 0x1e, 0xa3, 0x9f, 0xdd, 0xc4, 0xe6, 0x31,
+        0x66, 0x1a, 0x59, 0xec, 0x86, 0x4a, 0x5b, 0xd8, 0x60, 0x72, 0x71, 0x27, 0xa7, 0xfb, 0x92,
+        0x9d, 0x4d,
     ],
+    // transact_2_2 alone
     [
-        0xc1, 0x22, 0x61, 0x08, 0x7b, 0xf6, 0x4e, 0xc9, 0xa3, 0xed, 0x9f, 0x28, 0x94, 0xe8, 0x32,
-        0x0a, 0xf3, 0x1c, 0x38, 0x67, 0xa0, 0x8b, 0x51, 0x06, 0xa7, 0xff, 0xec, 0x74, 0x9f, 0x5a,
-        0x3b, 0x4d,
+        0x31, 0x30, 0x3f, 0x56, 0xd8, 0x63, 0x9a, 0x1e, 0xea, 0xb2, 0x1c, 0x6d, 0xc9, 0xbc, 0x4a,
+        0xbe, 0x23, 0x76, 0x01, 0x0c, 0x8f, 0x9d, 0xdc, 0xef, 0x16, 0x91, 0x1d, 0xe1, 0x46, 0x2d,
+        0x3f, 0x31,
     ],
+    // transact_2_3 alone
     [
-        0x63, 0x75, 0x4b, 0x29, 0x2d, 0x89, 0x4f, 0x81, 0xe8, 0x54, 0xa9, 0x44, 0x50, 0x72, 0xee,
-        0xac, 0x29, 0xae, 0xd7, 0x84, 0xf1, 0x10, 0x2a, 0x12, 0x07, 0x06, 0xe0, 0x9d, 0x6c, 0x3d,
-        0x2e, 0x1e,
+        0xf9, 0x8c, 0x1f, 0x36, 0xeb, 0x5a, 0xc1, 0x56, 0x75, 0xae, 0x69, 0xd8, 0x82, 0xc7, 0xde,
+        0xc1, 0x11, 0x6e, 0x73, 0x1a, 0xab, 0x88, 0x23, 0x5c, 0xfb, 0x70, 0x92, 0x75, 0x13, 0x9c,
+        0x83, 0xe2,
     ],
+    // row n2
     [
-        0x08, 0x4f, 0x33, 0x96, 0x33, 0xf8, 0xa9, 0xc2, 0xf2, 0x2a, 0x05, 0x56, 0x4e, 0xb7, 0x8f,
-        0x9b, 0x4d, 0x43, 0x71, 0xa0, 0x54, 0x76, 0x0e, 0x72, 0x62, 0x6b, 0x76, 0x61, 0x76, 0x36,
-        0x85, 0x97,
+        0x8b, 0x96, 0x5f, 0x9a, 0x42, 0x16, 0x05, 0xe6, 0xc6, 0x6e, 0x43, 0x5f, 0x4a, 0xaa, 0x7d,
+        0x04, 0x43, 0x45, 0x72, 0x33, 0x50, 0x84, 0xb2, 0x74, 0xae, 0xaf, 0xd4, 0x53, 0x00, 0x5b,
+        0xaf, 0x4b,
     ],
+    // row n3
     [
-        0x17, 0x13, 0xc6, 0x4b, 0xd9, 0x09, 0x02, 0xc6, 0x11, 0xf6, 0x10, 0x5f, 0x19, 0xf9, 0x68,
-        0xcf, 0xef, 0x2c, 0x11, 0x5c, 0xa2, 0xdb, 0x3f, 0xb3, 0x80, 0x5a, 0x5b, 0x00, 0x93, 0xf4,
-        0xe0, 0x27,
+        0x4c, 0x9d, 0xa2, 0x24, 0x2e, 0x41, 0x6b, 0x52, 0x8b, 0x92, 0x3e, 0x76, 0x32, 0x6b, 0x1b,
+        0xc5, 0xd3, 0xe0, 0xe6, 0x14, 0xd6, 0x24, 0x38, 0x4a, 0xfe, 0xe6, 0x30, 0xf7, 0x34, 0x6a,
+        0x6b, 0xb1,
     ],
 ];
 
-const MUL1_KEY_DIGEST: [u8; 32] = [
-    0x6b, 0x37, 0x6b, 0x8d, 0xb1, 0x9c, 0x8c, 0x21, 0xe7, 0xe0, 0x96, 0xee, 0xf4, 0x33, 0x31, 0x34,
-    0x24, 0xeb, 0x27, 0x74, 0x6d, 0x68, 0x4e, 0x14, 0x28, 0x0b, 0x57, 0xac, 0xc6, 0xf0, 0xf2, 0x1d,
-];
-const MUL2_KEY_DIGEST: [u8; 32] = [
-    0x97, 0xd0, 0xd3, 0x51, 0xc7, 0x8a, 0xb5, 0xad, 0x01, 0xb5, 0xcd, 0xb2, 0x1d, 0xef, 0xd4, 0x19,
-    0x7c, 0x3a, 0xb6, 0x69, 0xf4, 0x64, 0xb0, 0x65, 0x6e, 0xf4, 0xef, 0x44, 0x99, 0xca, 0xdc, 0xa4,
-];
-const MUL3_KEY_DIGEST: [u8; 32] = [
-    0x65, 0x73, 0xca, 0x8d, 0xb0, 0x19, 0x12, 0x59, 0x00, 0x8f, 0x56, 0x7f, 0xec, 0x3a, 0xc3, 0x48,
-    0xab, 0x73, 0x4f, 0xd9, 0x44, 0xb1, 0xea, 0x81, 0xe3, 0x5f, 0xe6, 0x5d, 0xd4, 0x6f, 0xe6, 0x5a,
+/// Input-account PDA of each allowlisted keyset, index-aligned with
+/// [`POLICY_KEYSET_DIGESTS`], standing in for what a real consumer emits at
+/// codegen time. Each entry is
+/// `find_program_address([INPUT_PDA_SEED, digest], REGISTRY_V3_CONSUMER)` and
+/// `pinned_input_addresses_derive` re-runs that derivation. Membership in this
+/// table is the keyset allowlist, so a keyset outside the policy has no
+/// address and cannot reach a verifier.
+#[cfg(any(target_os = "solana", test))]
+const POLICY_INPUT_ADDRESSES: [[u8; 32]; POLICY_KEYSET_DIGESTS.len()] = [
+    // transact_1_1 alone
+    [
+        0x4f, 0xe3, 0x1f, 0x3c, 0xd0, 0xe0, 0x82, 0x87, 0x0f, 0xa1, 0xfb, 0x63, 0x1c, 0x41, 0xbe,
+        0xdc, 0xfb, 0x52, 0xc5, 0x2d, 0x08, 0x31, 0x7e, 0x6c, 0x78, 0x96, 0x11, 0xf2, 0x2a, 0xe1,
+        0x0b, 0xfc,
+    ],
+    // transact_2_2 alone
+    [
+        0x9e, 0x46, 0xf4, 0x4b, 0x62, 0x62, 0xe1, 0x2d, 0x05, 0xed, 0x37, 0x13, 0xa4, 0xd2, 0xa7,
+        0x41, 0x59, 0x05, 0x2b, 0xd0, 0x26, 0x78, 0x10, 0x0a, 0x45, 0xfd, 0x6f, 0x84, 0xdb, 0x44,
+        0xe5, 0x61,
+    ],
+    // transact_2_3 alone
+    [
+        0x1f, 0xe4, 0xb9, 0xd8, 0xa1, 0x0d, 0x9c, 0xff, 0xde, 0xed, 0x92, 0x9b, 0x69, 0x81, 0x02,
+        0xc9, 0x28, 0x2b, 0x4b, 0x0c, 0x66, 0x4e, 0x04, 0xd3, 0xee, 0xbd, 0xda, 0x05, 0x97, 0x64,
+        0xc0, 0x0c,
+    ],
+    // row n2
+    [
+        0x07, 0x2c, 0x47, 0x46, 0xe2, 0xa0, 0xb6, 0x4e, 0xa8, 0xc3, 0x0d, 0xc8, 0x4a, 0x31, 0xc1,
+        0x1c, 0x85, 0x99, 0x28, 0x4b, 0x2e, 0x99, 0xb8, 0xae, 0x6e, 0xf7, 0x3f, 0x63, 0x62, 0x5b,
+        0x91, 0xb6,
+    ],
+    // row n3
+    [
+        0x90, 0xfa, 0xfc, 0x74, 0xa7, 0xbb, 0xe0, 0x21, 0xec, 0xdf, 0x3e, 0x26, 0x70, 0x53, 0x8e,
+        0x6f, 0x7c, 0x83, 0x70, 0x0b, 0x2e, 0x2a, 0x07, 0x80, 0xa4, 0x53, 0x90, 0xa0, 0x56, 0x5a,
+        0xe6, 0xd8,
+    ],
 ];
 
-// Canonical snarkjs omega for the authenticated power-3 fixture keys.
-const AUTHENTICATED_OMEGA: [u8; 32] = [
-    0x2b, 0x33, 0x7d, 0xe1, 0xc8, 0xc1, 0x4f, 0x22, 0xec, 0x9b, 0x9e, 0x2f, 0x96, 0xaf, 0xef, 0x36,
-    0x52, 0x62, 0x73, 0x66, 0xf8, 0x17, 0x0a, 0x0a, 0x94, 0x8d, 0xad, 0x4a, 0xc1, 0xbd, 0x5e, 0x80,
+const TRANSACT_1_1_KEY_DIGEST: [u8; 32] = [
+    0x1e, 0xc1, 0xa5, 0x4b, 0x3a, 0xad, 0xea, 0x2a, 0x30, 0x8e, 0xf1, 0x77, 0xcd, 0xec, 0x6a, 0x89,
+    0x8c, 0xd0, 0xab, 0x21, 0x53, 0xb5, 0x21, 0x70, 0x66, 0x7d, 0x94, 0x81, 0x36, 0x38, 0x15, 0x16,
 ];
 
-struct Group {
-    vk: VerifyingKey,
+const TRANSACT_2_2_KEY_DIGEST: [u8; 32] = [
+    0x67, 0x6b, 0x3a, 0xdd, 0xca, 0xe8, 0x3d, 0x1d, 0xcd, 0x70, 0x2d, 0x5a, 0xa6, 0x37, 0xcf, 0x2e,
+    0xd4, 0x1f, 0xd0, 0x8f, 0x36, 0x87, 0x61, 0x23, 0x18, 0xdb, 0xa0, 0xfb, 0xae, 0x90, 0xbf, 0xf2,
+];
+
+const TRANSACT_2_3_KEY_DIGEST: [u8; 32] = [
+    0x8d, 0x59, 0x14, 0xd5, 0x88, 0xd0, 0x82, 0xeb, 0x87, 0xb7, 0x1d, 0xbb, 0x7a, 0x17, 0x71, 0x9e,
+    0xe7, 0xc4, 0xd6, 0x87, 0x5a, 0xed, 0x7d, 0x2c, 0x49, 0xe0, 0xfa, 0x28, 0xeb, 0x56, 0x09, 0xff,
+];
+
+/// Canonical snarkjs roots of unity, by domain power. A verifying key does not
+/// carry omega on the wire, so it is derived from the domain size the key does
+/// carry, and a wrong entry would evaluate the vanishing polynomial on the wrong
+/// domain. `authenticated_omega_matches_every_fixture` checks the table against
+/// the `w` each fixture key declares.
+const AUTHENTICATED_OMEGA_BY_POWER: [(u32, [u8; 32]); 2] = [
+    (
+        13,
+        [
+            0x00, 0x6f, 0xab, 0x49, 0xb8, 0x69, 0xae, 0x62, 0x00, 0x1d, 0xea, 0xc8, 0x78, 0xb2,
+            0x66, 0x7b, 0xd3, 0x1b, 0xf3, 0xe2, 0x8e, 0x3a, 0x2d, 0x76, 0x4a, 0xa4, 0x9b, 0x8d,
+            0x9b, 0xbd, 0xd3, 0x10,
+        ],
+    ),
+    (
+        14,
+        [
+            0x2d, 0x96, 0x56, 0x51, 0xcd, 0xd9, 0xe4, 0x81, 0x1f, 0x4e, 0x51, 0xb8, 0x0d, 0xdc,
+            0xa8, 0xa8, 0xb4, 0xa9, 0x3e, 0xe1, 0x74, 0x20, 0xaa, 0xe6, 0xad, 0xaa, 0x01, 0xc2,
+            0x61, 0x7c, 0x6e, 0x85,
+        ],
+    ),
+];
+
+fn authenticated_omega(domain_size: u64) -> Option<[u8; 32]> {
+    if !domain_size.is_power_of_two() {
+        return None;
+    }
+    let power = domain_size.trailing_zeros();
+    AUTHENTICATED_OMEGA_BY_POWER
+        .iter()
+        .find_map(|(candidate, omega)| (*candidate == power).then_some(*omega))
+}
+
+/// Invariant, established by [`parse_vk`] and relied on by [`validate_group`]
+/// and [`keyset_digest`]: `vk_digest` is `authenticated_vk_digest` over this
+/// key's canonical account bytes and `application_context` is
+/// `registry_context(&vk_digest)`. A key outside the fixture allowlist has no
+/// context and never becomes a `Group`.
+/// `parse_account_binds_every_group_to_its_key` pins this.
+struct Group<'a> {
+    vk: VerifyingKey<'a>,
     vk_digest: [u8; 32],
     application_context: [u8; 32],
-    proofs: Vec<Proof>,
+    proofs: Vec<Proof<'a>>,
 }
 
-struct VerifyingKey {
+/// Every field is a view into the transaction's account mapping. The account
+/// is readonly and outlives the instruction, and no handler mutates a key or a
+/// proof, so a group costs pointers instead of a kilobyte of copies.
+struct VerifyingKey<'a> {
     domain_size: u64,
     num_public_inputs: u32,
-    q_m: PodG1Point,
-    q_l: PodG1Point,
-    q_r: PodG1Point,
-    q_o: PodG1Point,
-    q_c: PodG1Point,
-    s_sigma: [PodG1Point; 3],
-    k1: PodScalar,
-    k2: PodScalar,
-    g2_gen: PodG2Point,
-    g2_tau: PodG2Point,
+    q_m: &'a PodG1Point,
+    q_l: &'a PodG1Point,
+    q_r: &'a PodG1Point,
+    q_o: &'a PodG1Point,
+    q_c: &'a PodG1Point,
+    s_sigma: [&'a PodG1Point; 3],
+    k1: &'a PodScalar,
+    k2: &'a PodScalar,
+    g2_gen: &'a PodG2Point,
+    g2_tau: &'a PodG2Point,
 }
 
-struct Evaluations {
-    a: PodScalar,
-    b: PodScalar,
-    c: PodScalar,
-    s_sigma1: PodScalar,
-    s_sigma2: PodScalar,
-    z_omega: PodScalar,
+struct Evaluations<'a> {
+    a: &'a PodScalar,
+    b: &'a PodScalar,
+    c: &'a PodScalar,
+    s_sigma1: &'a PodScalar,
+    s_sigma2: &'a PodScalar,
+    z_omega: &'a PodScalar,
 }
 
-struct Proof {
-    wire_commitments: [PodG1Point; 3],
-    grand_product: PodG1Point,
-    quotient: [PodG1Point; 3],
-    opening: PodG1Point,
-    shifted_opening: PodG1Point,
-    evaluations: Evaluations,
-    public_inputs: Vec<PodScalar>,
+struct Proof<'a> {
+    wire_commitments: [&'a PodG1Point; 3],
+    grand_product: &'a PodG1Point,
+    quotient: [&'a PodG1Point; 3],
+    opening: &'a PodG1Point,
+    shifted_opening: &'a PodG1Point,
+    evaluations: Evaluations<'a>,
+    public_inputs: &'a [PodScalar],
 }
+
+/// Borrowing an account field is only sound while these carry no alignment
+/// requirement: the account layout packs them at arbitrary byte offsets.
+const _: () = assert!(
+    core::mem::align_of::<PodG1Point>() == 1
+        && core::mem::align_of::<PodG2Point>() == 1
+        && core::mem::align_of::<PodScalar>() == 1
+);
 
 fn read<const N: usize>(data: &[u8], offset: &mut usize) -> Option<[u8; N]> {
     let bytes = data.get(*offset..offset.checked_add(N)?)?;
@@ -198,11 +324,18 @@ fn read<const N: usize>(data: &[u8], offset: &mut usize) -> Option<[u8; N]> {
     Some(output)
 }
 
+/// Advance past one packed field and return a view of it.
+fn view<'a, T: bytemuck::Pod>(data: &'a [u8], offset: &mut usize) -> Option<&'a T> {
+    let bytes = data.get(*offset..offset.checked_add(core::mem::size_of::<T>())?)?;
+    *offset += core::mem::size_of::<T>();
+    bytemuck::try_from_bytes(bytes).ok()
+}
+
 fn registry_context(digest: &[u8; 32]) -> Option<[u8; 32]> {
     let ordinal = match *digest {
-        MUL1_KEY_DIGEST => 0usize,
-        MUL2_KEY_DIGEST => 1usize,
-        MUL3_KEY_DIGEST => 2usize,
+        TRANSACT_1_1_KEY_DIGEST => 0usize,
+        TRANSACT_2_2_KEY_DIGEST => 1usize,
+        TRANSACT_2_3_KEY_DIGEST => 2usize,
         _ => return None,
     };
     // The custom-recursion circuit commits to these zero-based fixture
@@ -210,77 +343,66 @@ fn registry_context(digest: &[u8; 32]) -> Option<[u8; 32]> {
     Some(application_context(ordinal))
 }
 
-fn authenticated_vk_digest(key: &VerifyingKey) -> [u8; 32] {
-    hashv(&[
-        &key.domain_size.to_be_bytes(),
-        &key.num_public_inputs.to_be_bytes(),
-        &key.q_m.0,
-        &key.q_l.0,
-        &key.q_r.0,
-        &key.q_o.0,
-        &key.q_c.0,
-        &key.s_sigma[0].0,
-        &key.s_sigma[1].0,
-        &key.s_sigma[2].0,
-        &key.k1.0,
-        &key.k2.0,
-        &key.g2_gen.0,
-        &key.g2_tau.0,
-    ])
-    .to_bytes()
+/// Keccak over the exact canonical VK block. The account stores those fields
+/// contiguously and in this order with no padding, so hashing the block is the
+/// same statement as hashing the fields one by one, which is what the pinned
+/// `TRANSACT_*_KEY_DIGEST` constants were sealed against.
+/// `vk_digest_is_the_canonical_vk_block` pins the two spellings together.
+fn authenticated_vk_digest(vk_bytes: &[u8]) -> [u8; 32] {
+    hashv(&[vk_bytes]).to_bytes()
 }
 
 #[inline(never)]
-fn parse_vk(data: &[u8], offset: &mut usize) -> Option<(VerifyingKey, [u8; 32], [u8; 32])> {
+fn parse_vk<'a>(
+    data: &'a [u8],
+    offset: &mut usize,
+) -> Option<(VerifyingKey<'a>, [u8; 32], [u8; 32])> {
+    let vk_bytes = data.get(*offset..offset.checked_add(layout::VK_BYTES)?)?;
     let key = VerifyingKey {
         domain_size: u64::from_be_bytes(read::<8>(data, offset)?),
         num_public_inputs: u32::from_be_bytes(read::<4>(data, offset)?),
-        q_m: PodG1Point(read::<64>(data, offset)?),
-        q_l: PodG1Point(read::<64>(data, offset)?),
-        q_r: PodG1Point(read::<64>(data, offset)?),
-        q_o: PodG1Point(read::<64>(data, offset)?),
-        q_c: PodG1Point(read::<64>(data, offset)?),
+        q_m: view(data, offset)?,
+        q_l: view(data, offset)?,
+        q_r: view(data, offset)?,
+        q_o: view(data, offset)?,
+        q_c: view(data, offset)?,
         s_sigma: [
-            PodG1Point(read::<64>(data, offset)?),
-            PodG1Point(read::<64>(data, offset)?),
-            PodG1Point(read::<64>(data, offset)?),
+            view(data, offset)?,
+            view(data, offset)?,
+            view(data, offset)?,
         ],
-        k1: PodScalar(read::<32>(data, offset)?),
-        k2: PodScalar(read::<32>(data, offset)?),
-        g2_gen: PodG2Point(read::<128>(data, offset)?),
-        g2_tau: PodG2Point(read::<128>(data, offset)?),
+        k1: view(data, offset)?,
+        k2: view(data, offset)?,
+        g2_gen: view(data, offset)?,
+        g2_tau: view(data, offset)?,
     };
-    // These authenticated snarkjs fixtures spell the unused Qr and Qc
-    // selectors as canonical projective infinity. That exception is confined
-    // to the allowlisted keys: all other commitments and both SRS points must
-    // remain finite. The ordinary untrusted VerifyingKey::validate path is not
-    // weakened.
-    // Qr and Qc are infinity only when the circuit never uses those selectors,
-    // which the multiplier fixtures did and no real circuit does. Both spellings
-    // are admitted, and a finite one is validated like every other commitment.
-    let mut finite_g1_points = Vec::with_capacity(8);
-    finite_g1_points.extend_from_slice(&[
-        &key.q_m,
-        &key.q_l,
-        &key.q_o,
-        &key.s_sigma[0],
-        &key.s_sigma[1],
-        &key.s_sigma[2],
-    ]);
-    if key.q_r.0 != [0u8; 64] {
-        finite_g1_points.push(&key.q_r);
-    }
-    if key.q_c.0 != [0u8; 64] {
-        finite_g1_points.push(&key.q_c);
-    }
-    if key.g2_gen.0 == [0u8; 128]
-        || key.g2_tau.0 == [0u8; 128]
-    {
+    if key.g2_gen.0 == [0u8; 128] || key.g2_tau.0 == [0u8; 128] {
         return None;
     }
+    // Qr and Qc are canonical projective infinity only when the circuit never
+    // uses those selectors. Both spellings are admitted; a finite one is
+    // validated like every other commitment, and every other commitment plus
+    // both SRS points must stay finite either way. The decompression this
+    // needs has no sBPF form, so the target enforces it through the validating
+    // MSM and pairing syscalls that consume every admitted point instead.
     #[cfg(not(target_os = "solana"))]
     {
         use ark_ec::AffineRepr;
+        let mut finite_g1_points = Vec::with_capacity(8);
+        finite_g1_points.extend_from_slice(&[
+            &key.q_m,
+            &key.q_l,
+            &key.q_o,
+            &key.s_sigma[0],
+            &key.s_sigma[1],
+            &key.s_sigma[2],
+        ]);
+        if key.q_r.0 != [0u8; 64] {
+            finite_g1_points.push(&key.q_r);
+        }
+        if key.q_c.0 != [0u8; 64] {
+            finite_g1_points.push(&key.q_c);
+        }
         for point in &finite_g1_points {
             if point.to_affine().ok()?.is_zero() {
                 return None;
@@ -295,40 +417,37 @@ fn parse_vk(data: &[u8], offset: &mut usize) -> Option<(VerifyingKey, [u8; 32], 
     // redo three large coset exponentiations for every already trusted key on
     // every transaction. All admitted points are subsequently consumed by a
     // validating G1/MSM or pairing syscall.
-    let digest = authenticated_vk_digest(&key);
+    let digest = authenticated_vk_digest(vk_bytes);
     let context = registry_context(&digest)?;
     Some((key, digest, context))
 }
 
 #[inline(never)]
-fn parse_proof(data: &[u8], offset: &mut usize, inputs: usize) -> Option<Proof> {
-    let point = |data: &[u8], offset: &mut usize| read::<64>(data, offset).map(PodG1Point);
-    let scalar = |data: &[u8], offset: &mut usize| read::<32>(data, offset).map(PodScalar);
+fn parse_proof<'a>(data: &'a [u8], offset: &mut usize, inputs: usize) -> Option<Proof<'a>> {
     let wire_commitments = [
-        point(data, offset)?,
-        point(data, offset)?,
-        point(data, offset)?,
+        view(data, offset)?,
+        view(data, offset)?,
+        view(data, offset)?,
     ];
-    let grand_product = point(data, offset)?;
+    let grand_product = view(data, offset)?;
     let quotient = [
-        point(data, offset)?,
-        point(data, offset)?,
-        point(data, offset)?,
+        view(data, offset)?,
+        view(data, offset)?,
+        view(data, offset)?,
     ];
-    let opening = point(data, offset)?;
-    let shifted_opening = point(data, offset)?;
+    let opening = view(data, offset)?;
+    let shifted_opening = view(data, offset)?;
     let evaluations = Evaluations {
-        a: scalar(data, offset)?,
-        b: scalar(data, offset)?,
-        c: scalar(data, offset)?,
-        s_sigma1: scalar(data, offset)?,
-        s_sigma2: scalar(data, offset)?,
-        z_omega: scalar(data, offset)?,
+        a: view(data, offset)?,
+        b: view(data, offset)?,
+        c: view(data, offset)?,
+        s_sigma1: view(data, offset)?,
+        s_sigma2: view(data, offset)?,
+        z_omega: view(data, offset)?,
     };
-    let mut public_inputs = Vec::with_capacity(inputs);
-    for _ in 0..inputs {
-        public_inputs.push(scalar(data, offset)?);
-    }
+    let public_bytes = data.get(*offset..offset.checked_add(inputs.checked_mul(32)?)?)?;
+    *offset += public_bytes.len();
+    let public_inputs = bytemuck::try_cast_slice(public_bytes).ok()?;
     Some(Proof {
         wire_commitments,
         grand_product,
@@ -341,7 +460,7 @@ fn parse_proof(data: &[u8], offset: &mut usize, inputs: usize) -> Option<Proof> 
 }
 
 #[inline(never)]
-fn parse_account(data: &[u8]) -> Option<Vec<Group>> {
+fn parse_account(data: &[u8]) -> Option<Vec<Group<'_>>> {
     let mut offset = 0usize;
     if &read::<8>(data, &mut offset)? != layout::MAGIC {
         return None;
@@ -415,6 +534,18 @@ fn policy_allows_keyset(digest: &[u8; 32]) -> bool {
         .any(|allowed| allowed == digest)
 }
 
+/// Pinned input-account address of an allowlisted keyset. A keyset outside the
+/// policy has no address and the caller must reject. One scan answers both
+/// questions; deriving the address here instead would charge
+/// `create_program_address` per bump attempt on every measured column.
+#[cfg(any(target_os = "solana", test))]
+fn pinned_input_address(digest: &[u8; 32]) -> Option<&'static [u8; 32]> {
+    let index = POLICY_KEYSET_DIGESTS
+        .iter()
+        .position(|allowed| allowed == digest)?;
+    POLICY_INPUT_ADDRESSES.get(index)
+}
+
 /// Common identity policy for every measured PLONK column. Account metadata
 /// is enforced by the SBF entrypoint; this helper authenticates the exact
 /// ordered full-VK set admitted at that address.
@@ -423,7 +554,7 @@ fn authenticated_input_digest(groups: &[Group]) -> Option<[u8; 32]> {
     policy_allows_keyset(&digest).then_some(digest)
 }
 
-fn shared_srs(groups: &[Group]) -> Option<[PodG2Point; layout::REGISTRY_SOURCE_COUNT]> {
+fn shared_srs<'a>(groups: &[Group<'a>]) -> Option<[&'a PodG2Point; layout::REGISTRY_SOURCE_COUNT]> {
     let first = &groups.first()?.vk;
     groups
         .iter()
@@ -462,6 +593,17 @@ fn sealed_registry_keyset_digest_v3(groups: &[Group]) -> Option<[u8; 32]> {
         return None;
     }
     Some(AUTHENTICATED_REGISTRY_KEYSET_DIGEST_V3)
+}
+
+/// Pinned registry address for a recomputed keyset digest. An unknown digest
+/// has no pinned address and the caller must reject; deriving one here would
+/// re-introduce the per-bump hashing this guest exists to keep out of the
+/// measurement.
+#[cfg(any(target_os = "solana", test))]
+fn pinned_registry_address(digest: &[u8; 32]) -> Option<&'static [u8; 32]> {
+    REGISTRY_V3_PINNED
+        .iter()
+        .find_map(|(pinned, address)| (pinned == digest).then_some(address))
 }
 
 /// One-pass frozen-header authentication and ordered opaque-ID extraction.
@@ -614,7 +756,7 @@ fn initialize_g2_registry_groups(
     {
         return None;
     }
-    let sources = shared_srs(groups)?;
+    let sources = shared_srs(groups)?.map(|source| *source);
     alt_bn128_vk_registry_init(SyscallVersion::V0, 0, &sources, &[], digest, output).ok()
 }
 
@@ -672,15 +814,13 @@ fn optimized_fr(value: &PodScalar) -> Option<OptimizedFr> {
 
 fn optimized_vk(group: &Group) -> Option<OptimizedVerifyingKey> {
     let key = &group.vk;
-    if key.domain_size != 8 || key.domain_size.trailing_zeros() != 3 {
-        return None;
-    }
+    let omega = authenticated_omega(key.domain_size)?;
     Some(OptimizedVerifyingKey {
         n_public: key.num_public_inputs,
         power: key.domain_size.trailing_zeros(),
-        k1: optimized_fr(&key.k1)?,
-        k2: optimized_fr(&key.k2)?,
-        w: OptimizedFr::from_be_bytes(&AUTHENTICATED_OMEGA)?,
+        k1: optimized_fr(key.k1)?,
+        k2: optimized_fr(key.k2)?,
+        w: OptimizedFr::from_be_bytes(&omega)?,
         qm: OptimizedG1(key.q_m.0),
         ql: OptimizedG1(key.q_l.0),
         qr: OptimizedG1(key.q_r.0),
@@ -704,19 +844,32 @@ fn optimized_proof(proof: &Proof) -> Option<OptimizedProof> {
         t3: OptimizedG1(proof.quotient[2].0),
         wxi: OptimizedG1(proof.opening.0),
         wxiw: OptimizedG1(proof.shifted_opening.0),
-        eval_a: optimized_fr(&proof.evaluations.a)?,
-        eval_b: optimized_fr(&proof.evaluations.b)?,
-        eval_c: optimized_fr(&proof.evaluations.c)?,
-        eval_s1: optimized_fr(&proof.evaluations.s_sigma1)?,
-        eval_s2: optimized_fr(&proof.evaluations.s_sigma2)?,
-        eval_zw: optimized_fr(&proof.evaluations.z_omega)?,
+        eval_a: optimized_fr(proof.evaluations.a)?,
+        eval_b: optimized_fr(proof.evaluations.b)?,
+        eval_c: optimized_fr(proof.evaluations.c)?,
+        eval_s1: optimized_fr(proof.evaluations.s_sigma1)?,
+        eval_s2: optimized_fr(proof.evaluations.s_sigma2)?,
+        eval_zw: optimized_fr(proof.evaluations.z_omega)?,
     })
 }
 
+/// Structural checks only. Each path rejects a scalar at or above the modulus
+/// where it consumes it, and that rejection fails the whole verification.
+///
+/// The in-guest verifiers reject an evaluation in `optimized_fr` and a public
+/// input in `Raw::from_be_bytes`. The multi-VK path copies raw bytes into the
+/// syscall buffer, so the runtime reducer rejects both in `PodScalar::to_fr`
+/// before it hashes the transcript or inverts a denominator.
+///
+/// Key authentication is not repeated either. [`parse_account`] is the only
+/// constructor of a [`Group`], and it sets `vk_digest` from the key bytes and
+/// `application_context` from that digest, so comparing them here can only
+/// ever hash the same key a second time and find the same answer.
+///
+/// Every measured tag passes this gate exactly once per proof, which is why
+/// the wire cost below is charged here and cannot be charged twice.
 fn validate_group(group: &Group) -> Option<()> {
     if group.proofs.is_empty()
-        || authenticated_vk_digest(&group.vk) != group.vk_digest
-        || registry_context(&group.vk_digest)? != group.application_context
         || !group.vk.domain_size.is_power_of_two()
         || !(4..=(1 << 28)).contains(&group.vk.domain_size)
         || u64::from(group.vk.num_public_inputs) >= group.vk.domain_size
@@ -724,36 +877,63 @@ fn validate_group(group: &Group) -> Option<()> {
         return None;
     }
     for proof in &group.proofs {
+        let commitments = [
+            &proof.wire_commitments[0],
+            &proof.wire_commitments[1],
+            &proof.wire_commitments[2],
+            &proof.grand_product,
+            &proof.quotient[0],
+            &proof.quotient[1],
+            &proof.quotient[2],
+            &proof.opening,
+            &proof.shifted_opening,
+        ];
         if proof.public_inputs.len() != group.vk.num_public_inputs as usize
-            || [
-                &proof.wire_commitments[0],
-                &proof.wire_commitments[1],
-                &proof.wire_commitments[2],
-                &proof.grand_product,
-                &proof.quotient[0],
-                &proof.quotient[1],
-                &proof.quotient[2],
-                &proof.opening,
-                &proof.shifted_opening,
-            ]
-            .iter()
-            .any(|point| point.0 == [0u8; 64])
-            || [
-                &proof.evaluations.a,
-                &proof.evaluations.b,
-                &proof.evaluations.c,
-                &proof.evaluations.s_sigma1,
-                &proof.evaluations.s_sigma2,
-                &proof.evaluations.z_omega,
-            ]
-            .into_iter()
-            .chain(proof.public_inputs.iter())
-            .any(|scalar| optimized_fr(scalar).is_none())
+            || commitments.iter().any(|point| point.0 == [0u8; 64])
         {
             return None;
         }
+        // A snarkjs proof reaches the chain as nine compressed G1 commitments
+        // and keeps its only G2 in the verifying key, so a deployment
+        // decompresses nine points before any pairing. The fixture is sealed
+        // uncompressed, so the guest re-creates the encoding the sender
+        // transmitted and decompresses that. The round trip must return the
+        // same point, which is what binds the metered decompression to the
+        // point the reducer then reads.
+        for point in commitments {
+            if alt_bn128_g1_decompress_be(&alt_bn128_g1_compress_be(&point.0).ok()?).ok()?
+                != point.0
+            {
+                return None;
+            }
+        }
     }
     Some(())
+}
+
+/// Everything a batch must satisfy before any handler may reduce it, and the
+/// total proof count it commits to. This is the whole admission decision that
+/// [`atomic_batch_digest`] used to carry: strict context ordering, per-group
+/// structure, an authenticated omega for every declared domain, and a bounded
+/// nonzero proof count. Rejecting exactly here keeps the batch handlers from
+/// paying for a transcript none of them reads.
+/// `validate_batch_rejects_what_the_transcript_rejected` pins the two against
+/// each other.
+#[inline(never)]
+fn validate_batch(groups: &[Group]) -> Option<usize> {
+    if groups.is_empty()
+        || groups
+            .windows(2)
+            .any(|pair| pair[0].application_context >= pair[1].application_context)
+    {
+        return None;
+    }
+    let total = groups.iter().try_fold(0usize, |count, group| {
+        validate_group(group)?;
+        authenticated_omega(group.vk.domain_size)?;
+        count.checked_add(group.proofs.len())
+    })?;
+    (total != 0 && total <= layout::MAX_TOTAL_PROOFS).then_some(total)
 }
 
 struct DigestContext {
@@ -775,20 +955,7 @@ struct DigestProof {
 #[inline(never)]
 fn atomic_batch_digest(groups: &[Group]) -> Option<[u8; 32]> {
     const DOMAIN: &[u8] = b"solana-snarkjs-plonk-multi-vk-batch:v1:independent";
-    if groups.is_empty()
-        || groups
-            .windows(2)
-            .any(|pair| pair[0].application_context >= pair[1].application_context)
-    {
-        return None;
-    }
-    let total = groups.iter().try_fold(0usize, |count, group| {
-        validate_group(group)?;
-        count.checked_add(group.proofs.len())
-    })?;
-    if total == 0 || total > layout::MAX_TOTAL_PROOFS {
-        return None;
-    }
+    let total = validate_batch(groups)?;
 
     let context_frames: Vec<DigestContext> = groups
         .iter()
@@ -799,7 +966,7 @@ fn atomic_batch_digest(groups: &[Group]) -> Option<[u8; 32]> {
                 index: u32::try_from(index).ok()?.to_be_bytes(),
                 domain_size: key.domain_size.to_be_bytes(),
                 public_count: key.num_public_inputs.to_be_bytes(),
-                omega: (key.domain_size == 8).then_some(AUTHENTICATED_OMEGA)?,
+                omega: authenticated_omega(key.domain_size)?,
             })
         })
         .collect::<Option<_>>()?;
@@ -853,7 +1020,7 @@ fn atomic_batch_digest(groups: &[Group]) -> Option<[u8; 32]> {
             let frame = proof_frames.get(proof_index)?;
             parts.push(&frame.proof_index);
             parts.push(&frame.context_index);
-            for public in &proof.public_inputs {
+            for public in proof.public_inputs {
                 parts.push(&public.0);
             }
             for point in [
@@ -928,6 +1095,9 @@ impl PairingContributionSink for ContributionVectors<'_> {
 /// independently derived rho into K, and concatenate their fully expanded
 /// source terms into exactly two MSM calls. No proof-local G1 operation is
 /// performed. All final handlers consume these same two pairs.
+/// Retained as the independent host oracle for [`campaign_replay_witness`].
+/// The measured batch columns reduce through [`reduced_pairs_multi_vk`].
+#[cfg(not(target_os = "solana"))]
 #[inline(never)]
 fn optimized_reduced_pairs(groups: &[Group]) -> Option<Vec<PodG1G2Pair>> {
     use solana_bn254_batch_syscall::{Version, alt_bn128_g1_msm};
@@ -975,8 +1145,229 @@ fn optimized_reduced_pairs(groups: &[Group]) -> Option<Vec<PodG1G2Pair>> {
     let p = alt_bn128_g1_msm(Version::V0, &p_points, &p_scalars).ok()?;
     let q = alt_bn128_g1_msm(Version::V0, &q_points, &q_scalars).ok()?;
     Some(vec![
-        PodG1G2Pair { g1: p, g2: srs[1] },
-        PodG1G2Pair { g1: q, g2: srs[0] },
+        PodG1G2Pair { g1: p, g2: *srs[1] },
+        PodG1G2Pair { g1: q, g2: *srs[0] },
+    ])
+}
+
+/// Coefficients the runtime multi-VK reducer returns per context, and per
+/// proof of which the first two are the P stream.
+///
+/// The reducer folds the eight verifying-key coefficients and the context
+/// generator once per context, so its Q stream is `9*contexts + 9*proofs`
+/// where the in-guest kernel emits `18*proofs`. Those agree only while every
+/// context carries exactly one proof, which is true of every measured row.
+/// Point a batch with several proofs per key at this path and the MSM shape
+/// changes even though the verdict does not.
+const REDUCER_CONTEXT_TERMS: usize = 9;
+const REDUCER_ROW_TERMS: usize = 11;
+const REDUCER_ROW_P_TERMS: usize = 2;
+
+/// Both reducer records are close to a kilobyte, so every one of these
+/// helpers writes through a reference into heap storage. Returning one by
+/// value, or building the point arrays as literals, materializes it in the
+/// caller's frame and overflows the 4 KiB SBF stack.
+#[inline(never)]
+fn zeroed_contexts(count: usize) -> Vec<PodSnarkjsPlonkMultiVkContext> {
+    vec![
+        PodSnarkjsPlonkMultiVkContext {
+            context_index_be: [0u8; 4],
+            reserved: [0u8; 4],
+            application_context: [0u8; 32],
+            reduction: PodSnarkjsPlonkReductionContext {
+                domain_size_be: [0u8; 8],
+                num_public_inputs_be: [0u8; 4],
+                reserved: [0u8; 4],
+                omega: PodScalar([0u8; 32]),
+                k1: PodScalar([0u8; 32]),
+                k2: PodScalar([0u8; 32]),
+                transcript_vk_points: [PodG1Point([0u8; 64]); 8],
+                x_2: PodG2Point([0u8; 128]),
+            },
+            g2_gen: PodG2Point([0u8; 128]),
+        };
+        count
+    ]
+}
+
+#[inline(never)]
+fn zeroed_inputs(count: usize) -> Vec<PodSnarkjsPlonkMultiVkInput> {
+    vec![
+        PodSnarkjsPlonkMultiVkInput {
+            proof_index_be: [0u8; 4],
+            context_index_be: [0u8; 4],
+            proof: PodSnarkjsPlonkReductionInput {
+                transcript_points: [PodG1Point([0u8; 64]); 9],
+                evaluations: [PodScalar([0u8; 32]); 6],
+            },
+        };
+        count
+    ]
+}
+
+#[inline(never)]
+fn fill_multi_vk_context(
+    slot: &mut PodSnarkjsPlonkMultiVkContext,
+    index: usize,
+    group: &Group,
+) -> Option<()> {
+    let key = &group.vk;
+    slot.context_index_be = u32::try_from(index).ok()?.to_be_bytes();
+    slot.application_context = group.application_context;
+    slot.reduction.domain_size_be = key.domain_size.to_be_bytes();
+    slot.reduction.num_public_inputs_be = key.num_public_inputs.to_be_bytes();
+    slot.reduction.omega = PodScalar(authenticated_omega(key.domain_size)?);
+    slot.reduction.k1 = *key.k1;
+    slot.reduction.k2 = *key.k2;
+    // Canonical snarkjs transcript order (Qm,Ql,Qr,Qo,Qc,S1,S2,S3); the
+    // returned shared coefficients arrive in this same order.
+    let points = &mut slot.reduction.transcript_vk_points;
+    points[0] = *key.q_m;
+    points[1] = *key.q_l;
+    points[2] = *key.q_r;
+    points[3] = *key.q_o;
+    points[4] = *key.q_c;
+    points[5] = *key.s_sigma[0];
+    points[6] = *key.s_sigma[1];
+    points[7] = *key.s_sigma[2];
+    slot.reduction.x_2 = *key.g2_tau;
+    slot.g2_gen = *key.g2_gen;
+    Some(())
+}
+
+#[inline(never)]
+fn fill_multi_vk_input(
+    slot: &mut PodSnarkjsPlonkMultiVkInput,
+    proof_index: usize,
+    context_index: usize,
+    proof: &Proof,
+) -> Option<()> {
+    slot.proof_index_be = u32::try_from(proof_index).ok()?.to_be_bytes();
+    slot.context_index_be = u32::try_from(context_index).ok()?.to_be_bytes();
+    // Canonical snarkjs order (A,B,C,Z,T1,T2,T3,Wxi,Wxiw).
+    let points = &mut slot.proof.transcript_points;
+    points[0] = *proof.wire_commitments[0];
+    points[1] = *proof.wire_commitments[1];
+    points[2] = *proof.wire_commitments[2];
+    points[3] = *proof.grand_product;
+    points[4] = *proof.quotient[0];
+    points[5] = *proof.quotient[1];
+    points[6] = *proof.quotient[2];
+    points[7] = *proof.opening;
+    points[8] = *proof.shifted_opening;
+    let evaluations = &mut slot.proof.evaluations;
+    evaluations[0] = *proof.evaluations.a;
+    evaluations[1] = *proof.evaluations.b;
+    evaluations[2] = *proof.evaluations.c;
+    evaluations[3] = *proof.evaluations.s_sigma1;
+    evaluations[4] = *proof.evaluations.s_sigma2;
+    evaluations[5] = *proof.evaluations.z_omega;
+    Some(())
+}
+
+/// Reduce every proof equation through the runtime multi-VK reducer and
+/// splice the returned coefficients onto the verifier-owned points.
+///
+/// Output is `9*contexts` shared coefficients followed by one eleven-slot row
+/// per proof whose first two slots belong to the P stream, so neither MSM
+/// receives a contiguous slice.
+///
+/// The reducer inverts the Lagrange denominators, while the in-guest kernel
+/// instead scales the whole equation by their product to avoid the inversion.
+/// Both operands therefore differ from [`optimized_reduced_pairs`] by one
+/// nonzero field factor. The pairing equation is homogeneous, so the verdict
+/// is identical while the G1 bytes are not.
+#[inline(never)]
+fn reduced_pairs_multi_vk(groups: &[Group]) -> Option<Vec<PodG1G2Pair>> {
+    use solana_bn254_batch_syscall::{
+        Version, alt_bn128_g1_msm, alt_bn128_snarkjs_plonk_multi_vk_batch_reduce,
+    };
+
+    let srs = shared_srs(groups)?;
+    if srs[0].0 != G2_GENERATOR_BE {
+        return None;
+    }
+    // Key authentication, structural validation and strict context ordering
+    // stay in the guest. The transcript itself does not: the reducer derives
+    // its own seed over the same contexts, inputs and public signals that the
+    // marshalling below hands it, and nothing here ever reads a guest-side
+    // seed. Hashing it again only reproduced a value that was then dropped.
+    let total = validate_batch(groups)?;
+    let mut contexts = zeroed_contexts(groups.len());
+    let mut inputs = zeroed_inputs(total);
+    let mut publics = Vec::new();
+    let mut proof_index = 0usize;
+    for (index, group) in groups.iter().enumerate() {
+        fill_multi_vk_context(contexts.get_mut(index)?, index, group)?;
+        for proof in &group.proofs {
+            fill_multi_vk_input(inputs.get_mut(proof_index)?, proof_index, index, proof)?;
+            publics.extend_from_slice(proof.public_inputs);
+            proof_index += 1;
+        }
+    }
+    if proof_index != total {
+        return None;
+    }
+    let coefficients =
+        alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(Version::V0, &contexts, &inputs, &publics)
+            .ok()?;
+
+    let shared_len = REDUCER_CONTEXT_TERMS.checked_mul(groups.len())?;
+    let shared = coefficients.get(..shared_len)?;
+    let rows = coefficients.get(shared_len..)?;
+    if rows.len() != REDUCER_ROW_TERMS.checked_mul(total)? {
+        return None;
+    }
+
+    let q_terms = shared_len
+        .checked_add(total.checked_mul(REDUCER_ROW_TERMS.checked_sub(REDUCER_ROW_P_TERMS)?)?)?;
+    let p_terms = total.checked_mul(REDUCER_ROW_P_TERMS)?;
+    let mut p_points = Vec::with_capacity(p_terms);
+    let mut p_scalars = Vec::with_capacity(p_terms);
+    let mut q_points = Vec::with_capacity(q_terms);
+    let mut q_scalars = Vec::with_capacity(q_terms);
+
+    // Both MSMs consume the points the reducer was handed, not a second read
+    // of the account, so an operand cannot drift from the record its
+    // coefficient was derived for. Both records already hold them in canonical
+    // snarkjs order, which lets whole runs move as slices.
+    for (context, shared_row) in contexts
+        .iter()
+        .zip(shared.chunks_exact(REDUCER_CONTEXT_TERMS))
+    {
+        q_points.extend_from_slice(&context.reduction.transcript_vk_points);
+        q_points.push(PodG1Point(OptimizedG1::GENERATOR.0));
+        q_scalars.extend_from_slice(shared_row);
+    }
+
+    let mut proof_rows = rows.chunks_exact(REDUCER_ROW_TERMS);
+    for input in &inputs {
+        let row = proof_rows.next()?;
+        // Records hold (A,B,C,Z,T1,T2,T3,Wxi,Wxiw). The P stream is the two
+        // openings, and the Q coefficients arrive as (Z,T1,T2,T3,A,B,C) then
+        // the same two openings.
+        let points = &input.proof.transcript_points;
+        p_points.extend_from_slice(points.get(7..9)?);
+        p_scalars.extend_from_slice(row.get(..REDUCER_ROW_P_TERMS)?);
+        q_points.extend_from_slice(points.get(3..7)?);
+        q_points.extend_from_slice(points.get(0..3)?);
+        q_points.extend_from_slice(points.get(7..9)?);
+        q_scalars.extend_from_slice(row.get(REDUCER_ROW_P_TERMS..)?);
+    }
+    if proof_rows.next().is_some()
+        || p_points.len() != p_terms
+        || q_points.len() != q_terms
+        || p_scalars.len() != p_terms
+        || q_scalars.len() != q_terms
+    {
+        return None;
+    }
+
+    let p = alt_bn128_g1_msm(Version::V0, &p_points, &p_scalars).ok()?;
+    let q = alt_bn128_g1_msm(Version::V0, &q_points, &q_scalars).ok()?;
+    Some(vec![
+        PodG1G2Pair { g1: p, g2: *srs[1] },
+        PodG1G2Pair { g1: q, g2: *srs[0] },
     ])
 }
 
@@ -1098,7 +1489,7 @@ fn verify_groups_registered_hot(
     groups: &[Group],
     ids: &[[u8; 32]; layout::REGISTRY_SOURCE_COUNT],
 ) -> Option<bool> {
-    let pairs = optimized_reduced_pairs(groups)?;
+    let pairs = reduced_pairs_multi_vk(groups)?;
     let registered = ordered_registered_pairs(&pairs, ids)?;
     registered_pairing_check(&registered)
 }
@@ -1125,7 +1516,7 @@ fn verify_groups_registered(
             return None;
         }
     }
-    let pairs = optimized_reduced_pairs(groups)?;
+    let pairs = reduced_pairs_multi_vk(groups)?;
     if pairs.len() != 2 {
         return None;
     }
@@ -1173,8 +1564,12 @@ pub fn verify_account_registered(
 /// Current: verify every committed fixture independently. Each proof performs
 /// the original 20 G1 multiplications, 18 G1 additions, and one stock two-pair
 /// check. No aggregate MSM is used.
+///
+/// Caller-authenticated: every `verify_groups_*` handler requires its caller to
+/// have admitted the keyset already, which the entrypoint does by looking the
+/// recomputed digest up in [`pinned_input_address`] and the host wrappers do
+/// through [`authenticated_input_digest`].
 fn verify_groups_current(groups: &[Group]) -> Option<bool> {
-    authenticated_input_digest(groups)?;
     let srs = shared_srs(groups)?;
     if srs[0].0 != G2_GENERATOR_BE {
         return None;
@@ -1203,6 +1598,7 @@ fn verify_groups_current(groups: &[Group]) -> Option<bool> {
 /// callers use [`tag::CURRENT`], which also enforces owner/PDA/readonly state.
 pub fn verify_account_current(data: &[u8]) -> Option<bool> {
     let groups = parse_account(data)?;
+    authenticated_input_digest(&groups)?;
     verify_groups_current(&groups)
 }
 
@@ -1210,7 +1606,6 @@ pub fn verify_account_current(data: &[u8]) -> Option<bool> {
 /// end each proof in an independent two-pair map and identity comparison.
 /// This deliberately performs no G1 MSM.
 fn verify_groups_current_fp12(groups: &[Group]) -> Option<bool> {
-    authenticated_input_digest(groups)?;
     let srs = shared_srs(groups)?;
     if srs[0].0 != G2_GENERATOR_BE {
         return None;
@@ -1230,11 +1625,11 @@ fn verify_groups_current_fp12(groups: &[Group]) -> Option<bool> {
             let pairs = [
                 PodG1G2Pair {
                     g1: PodG1Point(operands.neg_a1().0),
-                    g2: srs[1],
+                    g2: *srs[1],
                 },
                 PodG1G2Pair {
                     g1: PodG1Point(operands.b1().0),
-                    g2: srs[0],
+                    g2: *srs[0],
                 },
             ];
             if pairing_map(&pairs)? != identity_bytes() {
@@ -1247,20 +1642,19 @@ fn verify_groups_current_fp12(groups: &[Group]) -> Option<bool> {
 
 pub fn verify_account_current_fp12(data: &[u8]) -> Option<bool> {
     let groups = parse_account(data)?;
+    authenticated_input_digest(&groups)?;
     verify_groups_current_fp12(&groups)
 }
 
 fn verify_groups_map(groups: &[Group]) -> Option<bool> {
-    authenticated_input_digest(groups)?;
-    let pairs = optimized_reduced_pairs(groups)?;
+    let pairs = reduced_pairs_multi_vk(groups)?;
     Some(pairing_map(&pairs)? == identity_bytes())
 }
 
 fn verify_groups_boolean(groups: &[Group]) -> Option<bool> {
     use solana_bn254_batch_syscall::{Version, alt_bn128_pairing_check};
 
-    authenticated_input_digest(groups)?;
-    let pairs = optimized_reduced_pairs(groups)?;
+    let pairs = reduced_pairs_multi_vk(groups)?;
     alt_bn128_pairing_check(Version::V0, &pairs).ok()
 }
 
@@ -1269,6 +1663,7 @@ fn verify_groups_boolean(groups: &[Group]) -> Option<bool> {
 /// and syscall succeeded but the complete 384-byte GT value was not the identity.
 pub fn verify_account(data: &[u8]) -> Option<bool> {
     let groups = parse_account(data)?;
+    authenticated_input_digest(&groups)?;
     verify_groups_map(&groups)
 }
 
@@ -1276,6 +1671,7 @@ pub fn verify_account(data: &[u8]) -> Option<bool> {
 /// [`verify_account`], ending in the existing boolean pairing-check syscall.
 pub fn verify_account_boolean(data: &[u8]) -> Option<bool> {
     let groups = parse_account(data)?;
+    authenticated_input_digest(&groups)?;
     verify_groups_boolean(&groups)
 }
 
@@ -1512,9 +1908,14 @@ pub struct PlonkCampaignFixtureBytes {
     pub shared_srs: Vec<u8>,
 }
 
+/// Fixture directory names, in the order the rows compose them: row `n2` is the
+/// first two, row `n3` all three. Order is part of the keyset digest.
+#[cfg(not(target_os = "solana"))]
+pub const PLONK_SOURCE_IDS: [&str; 3] = ["transact_1_1", "transact_2_2", "transact_2_3"];
+
 /// The only source surface accepted by the native campaign exporter. Callers
-/// provide the three clean snarkjs JSON triples in the fixed mul1/mul2/mul3
-/// order; binary account encodings are always constructed by this crate.
+/// provide the three clean snarkjs JSON triples in `PLONK_SOURCE_IDS` order;
+/// binary account encodings are always constructed by this crate.
 #[cfg(not(target_os = "solana"))]
 pub struct CanonicalPlonkSourceInput<'a> {
     pub source_id: &'a str,
@@ -1541,11 +1942,11 @@ pub struct CanonicalPlonkSourceIdentity {
 pub struct CanonicalPlonkRowExport {
     pub source_set_sha256: String,
     pub sources: Vec<CanonicalPlonkSourceIdentity>,
-    /// Exact atomic one-group/one-proof accounts in mul1,mul2,mul3 order.
+    /// Exact atomic one-group/one-proof accounts in `PLONK_SOURCE_IDS` order.
     pub singleton_accounts: Vec<Vec<u8>>,
-    /// Exact ordered mul1,mul2 combined account.
+    /// Exact ordered two-key combined account, row n2.
     pub n2_combined_account: Vec<u8>,
-    /// Exact ordered mul1,mul2,mul3 combined account.
+    /// Exact ordered three-key combined account, row n3.
     pub n3_combined_account: Vec<u8>,
 }
 
@@ -1614,9 +2015,12 @@ struct ExportRawProof {
 }
 
 #[cfg(not(target_os = "solana"))]
+/// Canonical account bytes, not parsed objects. The exporter's product is the
+/// encoding, and encoding once here keeps the authenticated VK digest and the
+/// serialized account derived from the same bytes.
 struct ExportFixture {
-    key: VerifyingKey,
-    proof: Proof,
+    vk_bytes: Vec<u8>,
+    proof_bytes: Vec<u8>,
 }
 
 #[cfg(not(target_os = "solana"))]
@@ -1634,34 +2038,34 @@ struct ExportExpectedSource {
 #[cfg(not(target_os = "solana"))]
 const EXPORT_EXPECTED_SOURCES: [ExportExpectedSource; 3] = [
     ExportExpectedSource {
-        source_id: "mul1",
-        verification_key_file_sha256: "28c03da271eb07571213fc9847dacb07843dfe4ed6901e4517fb57dd263694b5",
-        proof_file_sha256: "e83bf34c9ee7d9c150a69d28b9cf37ce17a534c04ac8413e8e617e8142116670",
-        public_file_sha256: "16e83046941abbbe3196719fedd9cac00ce22a33e7c593cea3910c1bb25d9ac1",
-        verification_key_payload_sha256: "34749fdf28225b7bd6131b89437087a628485848820a0ef494fdda7997dc4ea7",
-        proof_payload_sha256: "5c9a83928f71e02eea3f0aca91285c2fcf953a4fadef15d41be398fbc6c9fa1e",
-        public_payload_sha256: "68104caf9db5c74fc58f69a349ce3b1149634489c6d9917e206ef7b6184d4870",
-        authenticated_vk_keccak: "6b376b8db19c8c21e7e096eef433313424eb27746d684e14280b57acc6f0f21d",
+        source_id: "transact_1_1",
+        verification_key_file_sha256: "13e54542f5aa2a207b1cd5b0111f47ce234c17aa82d40cc41d3ab1152bd3a799",
+        proof_file_sha256: "f7da7009f8c1608c3778e7bd9167c4b0b99ab8a72b939c609000cdf14400a29d",
+        public_file_sha256: "d53bdf69a99370845befb77ad6c3ff53d33ccb381ee0bf6eb217e76417007807",
+        verification_key_payload_sha256: "13e54542f5aa2a207b1cd5b0111f47ce234c17aa82d40cc41d3ab1152bd3a799",
+        proof_payload_sha256: "f7da7009f8c1608c3778e7bd9167c4b0b99ab8a72b939c609000cdf14400a29d",
+        public_payload_sha256: "d53bdf69a99370845befb77ad6c3ff53d33ccb381ee0bf6eb217e76417007807",
+        authenticated_vk_keccak: "1ec1a54b3aadea2a308ef177cdec6a898cd0ab2153b52170667d948136381516",
     },
     ExportExpectedSource {
-        source_id: "mul2",
-        verification_key_file_sha256: "3deeb70be57ccb3b370bbc0bf43a19990fcbc9d965afeadfcab4b0fda2e224a6",
-        proof_file_sha256: "910d8ca382f845ed6137128572a27c2249a6299759999e2eaab4befdb087e9d3",
-        public_file_sha256: "b37e80d45f207decb1dd683675d1ed8186dd9b1a9db4028cbff63c96c2fd972d",
-        verification_key_payload_sha256: "c31ac08db74bdd3ec71547020004fe04490210704bc43104a2f29f9d9bc63946",
-        proof_payload_sha256: "16b9fb1451a8264c9c1d2ae422a254b797260013133d15e987bd7f1768f3e599",
-        public_payload_sha256: "e0387a81b91ed432b83ecce6aa9be25d71081694620d8794b363ade7faedc06d",
-        authenticated_vk_keccak: "97d0d351c78ab5ad01b5cdb21defd4197c3ab669f464b0656ef4ef4499cadca4",
+        source_id: "transact_2_2",
+        verification_key_file_sha256: "5da364238a7184be8343db9e99057877fbd00039cf5e2b3abda52a676ea02e60",
+        proof_file_sha256: "0e33f73c3f5f3af6c091fb76c9125ffadc74248a3c1e9bdf69d496c653b9d0d3",
+        public_file_sha256: "65e81829706fe938af3c27cb6e42a55569ec76336d5c0fff9d6f7561d1caee06",
+        verification_key_payload_sha256: "5da364238a7184be8343db9e99057877fbd00039cf5e2b3abda52a676ea02e60",
+        proof_payload_sha256: "0e33f73c3f5f3af6c091fb76c9125ffadc74248a3c1e9bdf69d496c653b9d0d3",
+        public_payload_sha256: "65e81829706fe938af3c27cb6e42a55569ec76336d5c0fff9d6f7561d1caee06",
+        authenticated_vk_keccak: "676b3addcae83d1dcd702d5aa637cf2ed41fd08f3687612318dba0fbae90bff2",
     },
     ExportExpectedSource {
-        source_id: "mul3",
-        verification_key_file_sha256: "cf5443a8d764dedacd2a3bc22d1ac9c0ab2425d10da849112ed0663ea0d1269d",
-        proof_file_sha256: "0f62952f0144f62be1c26d4a0ea56a2ff63430eb67e94cc956586206535aed55",
-        public_file_sha256: "8348e0afaed33f7d5d4258af4535a9bc8ce44ee8b4eb7ead909b958fce366b35",
-        verification_key_payload_sha256: "ebd109f570a720b5cb10d5aa36a29c931f52249f15a45590e6776dde905968a6",
-        proof_payload_sha256: "00bdbaf0249300758b667c17bc4c3bde5d2d59959d85d5b56c01b1f63b724bce",
-        public_payload_sha256: "6af68d696f015f6b154d3ccd5787e98cd09872f2a366d9e8d078d9581f0fa1a4",
-        authenticated_vk_keccak: "6573ca8db0191259008f567fec3ac348ab734fd944b1ea81e35fe65dd46fe65a",
+        source_id: "transact_2_3",
+        verification_key_file_sha256: "83d7704fb23de72f1400b0f9972ee96a61cfc6873faeb244f9198ad40aa365c3",
+        proof_file_sha256: "0b71de486acbb3781b6b7d395eec99227f78e8b4575fc8260bf6615fe076feac",
+        public_file_sha256: "8a59522f8f89affc9e183d5adaa4e64f9a214e6a0e10bfefcda6ef481494935c",
+        verification_key_payload_sha256: "83d7704fb23de72f1400b0f9972ee96a61cfc6873faeb244f9198ad40aa365c3",
+        proof_payload_sha256: "0b71de486acbb3781b6b7d395eec99227f78e8b4575fc8260bf6615fe076feac",
+        public_payload_sha256: "8a59522f8f89affc9e183d5adaa4e64f9a214e6a0e10bfefcda6ef481494935c",
+        authenticated_vk_keccak: "8d5914d588d082eb87b71dbb7a17719ee7c4d6875aed7d2c49e0fa28eb5609ff",
     },
 ];
 
@@ -1814,9 +2218,14 @@ fn export_source_set_sha256(sources: &[CanonicalPlonkSourceInput<'_>]) -> Result
 }
 
 #[cfg(not(target_os = "solana"))]
+/// `expected` is `None` only when resealing, which recomputes the pinned table
+/// from the files on disk. Every structural and curve check below runs either
+/// way; what a reseal skips is the comparison against the previous seal, which
+/// is the thing being replaced.
+#[cfg(not(target_os = "solana"))]
 fn export_load_fixture(
     source: &CanonicalPlonkSourceInput<'_>,
-    expected: &ExportExpectedSource,
+    expected: Option<&ExportExpectedSource>,
 ) -> Result<(ExportFixture, CanonicalPlonkSourceIdentity), String> {
     use {
         ark_bn254::{Fr, G2Affine},
@@ -1824,7 +2233,8 @@ fn export_load_fixture(
         ark_ff::FftField,
     };
 
-    if source.source_id != expected.source_id {
+    if expected.is_some_and(|expected| source.source_id != expected.source_id) {
+        let expected = expected.expect("checked above");
         return Err(format!(
             "PLONK source order changed: expected {}, got {}",
             expected.source_id, source.source_id
@@ -1833,7 +2243,7 @@ fn export_load_fixture(
     let vk_payload = export_json_payload(source.verification_key_json, "PLONK VK JSON")?;
     let proof_payload = export_json_payload(source.proof_json, "PLONK proof JSON")?;
     let public_payload = export_json_payload(source.public_json, "PLONK public JSON")?;
-    let identity = CanonicalPlonkSourceIdentity {
+    let mut identity = CanonicalPlonkSourceIdentity {
         source_id: source.source_id.into(),
         verification_key_file_sha256: export_sha256(source.verification_key_json),
         proof_file_sha256: export_sha256(source.proof_json),
@@ -1841,15 +2251,16 @@ fn export_load_fixture(
         verification_key_payload_sha256: export_sha256(vk_payload),
         proof_payload_sha256: export_sha256(proof_payload),
         public_payload_sha256: export_sha256(public_payload),
-        authenticated_vk_keccak: expected.authenticated_vk_keccak.into(),
+        authenticated_vk_keccak: String::new(),
     };
-    if identity.verification_key_file_sha256 != expected.verification_key_file_sha256
-        || identity.proof_file_sha256 != expected.proof_file_sha256
-        || identity.public_file_sha256 != expected.public_file_sha256
-        || identity.verification_key_payload_sha256 != expected.verification_key_payload_sha256
-        || identity.proof_payload_sha256 != expected.proof_payload_sha256
-        || identity.public_payload_sha256 != expected.public_payload_sha256
-    {
+    if expected.is_some_and(|expected| {
+        identity.verification_key_file_sha256 != expected.verification_key_file_sha256
+            || identity.proof_file_sha256 != expected.proof_file_sha256
+            || identity.public_file_sha256 != expected.public_file_sha256
+            || identity.verification_key_payload_sha256 != expected.verification_key_payload_sha256
+            || identity.proof_payload_sha256 != expected.proof_payload_sha256
+            || identity.public_payload_sha256 != expected.public_payload_sha256
+    }) {
         return Err(format!(
             "{} source JSON differs from the pinned clean canonical bytes",
             source.source_id
@@ -1875,25 +2286,32 @@ fn export_load_fixture(
     let domain_size = 1u64
         .checked_shl(raw_vk.power)
         .ok_or("PLONK domain power exceeds u64")?;
-    let key = VerifyingKey {
-        domain_size,
-        num_public_inputs: raw_vk.num_public_inputs,
-        q_m: export_g1(&raw_vk.q_m, "Qm", false)?,
-        q_l: export_g1(&raw_vk.q_l, "Ql", false)?,
-        q_r: export_g1(&raw_vk.q_r, "Qr", true)?,
-        q_o: export_g1(&raw_vk.q_o, "Qo", false)?,
-        q_c: export_g1(&raw_vk.q_c, "Qc", true)?,
-        s_sigma: [
-            export_g1(&raw_vk.s_1, "S1", false)?,
-            export_g1(&raw_vk.s_2, "S2", false)?,
-            export_g1(&raw_vk.s_3, "S3", false)?,
-        ],
-        k1: export_scalar(&raw_vk.k1, "k1")?,
-        k2: export_scalar(&raw_vk.k2, "k2")?,
-        g2_gen: export_g2_bytes(&G2Affine::generator())?,
-        g2_tau: export_g2(&raw_vk.x_2, "X_2")?,
-    };
-    if export_hex(&authenticated_vk_digest(&key)) != expected.authenticated_vk_keccak {
+    let mut vk_bytes = Vec::with_capacity(layout::VK_BYTES);
+    vk_bytes.extend_from_slice(&domain_size.to_be_bytes());
+    vk_bytes.extend_from_slice(&raw_vk.num_public_inputs.to_be_bytes());
+    for point in [
+        export_g1(&raw_vk.q_m, "Qm", false)?,
+        export_g1(&raw_vk.q_l, "Ql", false)?,
+        export_g1(&raw_vk.q_r, "Qr", true)?,
+        export_g1(&raw_vk.q_o, "Qo", false)?,
+        export_g1(&raw_vk.q_c, "Qc", true)?,
+        export_g1(&raw_vk.s_1, "S1", false)?,
+        export_g1(&raw_vk.s_2, "S2", false)?,
+        export_g1(&raw_vk.s_3, "S3", false)?,
+    ] {
+        vk_bytes.extend_from_slice(&point.0);
+    }
+    vk_bytes.extend_from_slice(&export_scalar(&raw_vk.k1, "k1")?.0);
+    vk_bytes.extend_from_slice(&export_scalar(&raw_vk.k2, "k2")?.0);
+    vk_bytes.extend_from_slice(&export_g2_bytes(&G2Affine::generator())?.0);
+    vk_bytes.extend_from_slice(&export_g2(&raw_vk.x_2, "X_2")?.0);
+    if vk_bytes.len() != layout::VK_BYTES {
+        return Err(format!("{} VK encoding length changed", source.source_id));
+    }
+    identity.authenticated_vk_keccak = export_hex(&authenticated_vk_digest(&vk_bytes));
+    if expected.is_some_and(|expected| {
+        identity.authenticated_vk_keccak != expected.authenticated_vk_keccak
+    }) {
         return Err(format!(
             "{} binary VK authentication changed",
             source.source_id
@@ -1905,77 +2323,40 @@ fn export_load_fixture(
     if expected_omega != PodScalar::from(&derived_omega) {
         return Err(format!("{} omega differs from domain", source.source_id));
     }
-    let proof = Proof {
-        wire_commitments: [
-            export_g1(&raw_proof.a, "proof A", false)?,
-            export_g1(&raw_proof.b, "proof B", false)?,
-            export_g1(&raw_proof.c, "proof C", false)?,
-        ],
-        grand_product: export_g1(&raw_proof.z, "proof Z", false)?,
-        quotient: [
-            export_g1(&raw_proof.t_1, "proof T1", false)?,
-            export_g1(&raw_proof.t_2, "proof T2", false)?,
-            export_g1(&raw_proof.t_3, "proof T3", false)?,
-        ],
-        opening: export_g1(&raw_proof.w_xi, "proof Wxi", false)?,
-        shifted_opening: export_g1(&raw_proof.w_xiw, "proof Wxiw", false)?,
-        evaluations: Evaluations {
-            a: export_scalar(&raw_proof.eval_a, "eval_a")?,
-            b: export_scalar(&raw_proof.eval_b, "eval_b")?,
-            c: export_scalar(&raw_proof.eval_c, "eval_c")?,
-            s_sigma1: export_scalar(&raw_proof.eval_s1, "eval_s1")?,
-            s_sigma2: export_scalar(&raw_proof.eval_s2, "eval_s2")?,
-            z_omega: export_scalar(&raw_proof.eval_zw, "eval_zw")?,
-        },
-        public_inputs: public
-            .iter()
-            .enumerate()
-            .map(|(index, value)| export_scalar(value, &format!("public input {index}")))
-            .collect::<Result<Vec<_>, _>>()?,
-    };
-    Ok((ExportFixture { key, proof }, identity))
-}
-
-#[cfg(not(target_os = "solana"))]
-fn export_append_vk(output: &mut Vec<u8>, key: &VerifyingKey) {
-    output.extend_from_slice(&key.domain_size.to_be_bytes());
-    output.extend_from_slice(&key.num_public_inputs.to_be_bytes());
-    for point in [&key.q_m, &key.q_l, &key.q_r, &key.q_o, &key.q_c] {
-        output.extend_from_slice(&point.0);
-    }
-    for point in &key.s_sigma {
-        output.extend_from_slice(&point.0);
-    }
-    output.extend_from_slice(&key.k1.0);
-    output.extend_from_slice(&key.k2.0);
-    output.extend_from_slice(&key.g2_gen.0);
-    output.extend_from_slice(&key.g2_tau.0);
-}
-
-#[cfg(not(target_os = "solana"))]
-fn export_append_proof(output: &mut Vec<u8>, proof: &Proof) {
-    for point in &proof.wire_commitments {
-        output.extend_from_slice(&point.0);
-    }
-    output.extend_from_slice(&proof.grand_product.0);
-    for point in &proof.quotient {
-        output.extend_from_slice(&point.0);
-    }
-    output.extend_from_slice(&proof.opening.0);
-    output.extend_from_slice(&proof.shifted_opening.0);
-    for scalar in [
-        &proof.evaluations.a,
-        &proof.evaluations.b,
-        &proof.evaluations.c,
-        &proof.evaluations.s_sigma1,
-        &proof.evaluations.s_sigma2,
-        &proof.evaluations.z_omega,
+    let mut proof_bytes = Vec::with_capacity(layout::PROOF_BASE_BYTES + public.len() * 32);
+    for point in [
+        export_g1(&raw_proof.a, "proof A", false)?,
+        export_g1(&raw_proof.b, "proof B", false)?,
+        export_g1(&raw_proof.c, "proof C", false)?,
+        export_g1(&raw_proof.z, "proof Z", false)?,
+        export_g1(&raw_proof.t_1, "proof T1", false)?,
+        export_g1(&raw_proof.t_2, "proof T2", false)?,
+        export_g1(&raw_proof.t_3, "proof T3", false)?,
+        export_g1(&raw_proof.w_xi, "proof Wxi", false)?,
+        export_g1(&raw_proof.w_xiw, "proof Wxiw", false)?,
     ] {
-        output.extend_from_slice(&scalar.0);
+        proof_bytes.extend_from_slice(&point.0);
     }
-    for public in &proof.public_inputs {
-        output.extend_from_slice(&public.0);
+    for (value, label) in [
+        (&raw_proof.eval_a, "eval_a"),
+        (&raw_proof.eval_b, "eval_b"),
+        (&raw_proof.eval_c, "eval_c"),
+        (&raw_proof.eval_s1, "eval_s1"),
+        (&raw_proof.eval_s2, "eval_s2"),
+        (&raw_proof.eval_zw, "eval_zw"),
+    ] {
+        proof_bytes.extend_from_slice(&export_scalar(value, label)?.0);
     }
+    for (index, value) in public.iter().enumerate() {
+        proof_bytes.extend_from_slice(&export_scalar(value, &format!("public input {index}"))?.0);
+    }
+    Ok((
+        ExportFixture {
+            vk_bytes,
+            proof_bytes,
+        },
+        identity,
+    ))
 }
 
 #[cfg(not(target_os = "solana"))]
@@ -1991,8 +2372,8 @@ fn export_serialize(fixtures: &[ExportFixture]) -> Result<Vec<u8>, String> {
     for fixture in fixtures {
         output.extend_from_slice(&1u16.to_be_bytes());
         output.extend_from_slice(&[0; 2]);
-        export_append_vk(&mut output, &fixture.key);
-        export_append_proof(&mut output, &fixture.proof);
+        output.extend_from_slice(&fixture.vk_bytes);
+        output.extend_from_slice(&fixture.proof_bytes);
     }
     Ok(output)
 }
@@ -2057,7 +2438,7 @@ fn validate_exported_rows(export: &CanonicalPlonkRowExport) -> Result<(), String
     Ok(())
 }
 
-/// Parse and authenticate the exact clean mul1/mul2/mul3 JSON source set,
+/// Parse and authenticate the exact clean transact JSON source set,
 /// then emit the only binary singleton/n2/n3 account encodings accepted by
 /// the production campaign.
 #[cfg(not(target_os = "solana"))]
@@ -2065,13 +2446,13 @@ pub fn export_canonical_plonk_rows(
     sources: &[CanonicalPlonkSourceInput<'_>],
 ) -> Result<CanonicalPlonkRowExport, String> {
     if sources.len() != EXPORT_EXPECTED_SOURCES.len() {
-        return Err("canonical PLONK exporter requires exactly mul1,mul2,mul3".into());
+        return Err("canonical PLONK exporter requires exactly the three transact shapes".into());
     }
     let source_set_sha256 = export_source_set_sha256(sources)?;
     let loaded = sources
         .iter()
         .zip(&EXPORT_EXPECTED_SOURCES)
-        .map(|(source, expected)| export_load_fixture(source, expected))
+        .map(|(source, expected)| export_load_fixture(source, Some(expected)))
         .collect::<Result<Vec<_>, _>>()?;
     let identities = loaded
         .iter()
@@ -2094,6 +2475,130 @@ pub fn export_canonical_plonk_rows(
     };
     validate_exported_rows(&output)?;
     Ok(output)
+}
+
+/// Recomputes the pinned source table, the three VK digests and the two keyset
+/// digests from the files on disk. This is how a fixture-set replacement is
+/// resealed: run it, paste the output into the constants, then the ordinary
+/// sealed path must reproduce the same bytes. It writes nothing.
+#[cfg(not(target_os = "solana"))]
+pub fn plonk_reseal_report(sources: &[CanonicalPlonkSourceInput<'_>]) -> Result<String, String> {
+    use core::fmt::Write;
+
+    let loaded = sources
+        .iter()
+        .map(|source| export_load_fixture(source, None))
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut report = String::new();
+    writeln!(
+        report,
+        "source_set_sha256: {}",
+        export_source_set_sha256(sources)?
+    )
+    .ok();
+    for (_, identity) in &loaded {
+        writeln!(
+            report,
+            "    ExportExpectedSource {{\n\
+             \x20       source_id: {:?},\n\
+             \x20       verification_key_file_sha256: {:?},\n\
+             \x20       proof_file_sha256: {:?},\n\
+             \x20       public_file_sha256: {:?},\n\
+             \x20       verification_key_payload_sha256: {:?},\n\
+             \x20       proof_payload_sha256: {:?},\n\
+             \x20       public_payload_sha256: {:?},\n\
+             \x20       authenticated_vk_keccak: {:?},\n\
+             \x20   }},",
+            identity.source_id,
+            identity.verification_key_file_sha256,
+            identity.proof_file_sha256,
+            identity.public_file_sha256,
+            identity.verification_key_payload_sha256,
+            identity.proof_payload_sha256,
+            identity.public_payload_sha256,
+            identity.authenticated_vk_keccak,
+        )
+        .ok();
+    }
+    // The keyset digests bind the ordered VK set, so each row has its own. They
+    // are the values POLICY_KEYSET_DIGESTS must admit.
+    let fixtures = loaded
+        .into_iter()
+        .map(|(fixture, _)| fixture)
+        .collect::<Vec<_>>();
+    let singletons = (0..fixtures.len())
+        .map(|index| (PLONK_SOURCE_IDS[index], &fixtures[index..=index]))
+        .collect::<Vec<_>>();
+    for (label, slice) in singletons
+        .into_iter()
+        .chain([("n2", &fixtures[..2]), ("n3", &fixtures[..])])
+    {
+        let bytes = export_serialize(slice)?;
+        let groups = reseal_groups(&bytes)?;
+        writeln!(
+            report,
+            "{label}: length {} keyset {} registry_v3 {}",
+            bytes.len(),
+            export_hex(&keyset_digest(&groups).ok_or("keyset digest")?),
+            export_hex(&registry_keyset_digest_v3(&groups).ok_or("registry v3 digest")?),
+        )
+        .ok();
+    }
+    Ok(report)
+}
+
+/// `parse_account` refuses a VK whose digest is not yet allowlisted, which is
+/// exactly the state a reseal starts from, so the groups are rebuilt here
+/// without that gate. Nothing this returns is trusted: it is printed, and the
+/// sealed path re-derives it under the full gate afterwards.
+#[cfg(not(target_os = "solana"))]
+fn reseal_groups(data: &[u8]) -> Result<Vec<Group<'_>>, String> {
+    let mut offset = layout::HEADER_BYTES;
+    let group_count = usize::from(data[9]);
+    let mut groups = Vec::with_capacity(group_count);
+    for index in 0..group_count {
+        let proof_count = usize::from(u16::from_be_bytes([data[offset], data[offset + 1]]));
+        offset += layout::GROUP_HEADER_BYTES;
+        let mut cursor = offset;
+        let (key, vk_digest) = reseal_vk(data, &mut cursor).ok_or("reseal VK parse")?;
+        let inputs = key.num_public_inputs as usize;
+        let mut proofs = Vec::with_capacity(proof_count);
+        for _ in 0..proof_count {
+            proofs.push(parse_proof(data, &mut cursor, inputs).ok_or("reseal proof parse")?);
+        }
+        offset = cursor;
+        groups.push(Group {
+            vk: key,
+            vk_digest,
+            application_context: application_context(index),
+            proofs,
+        });
+    }
+    Ok(groups)
+}
+
+#[cfg(not(target_os = "solana"))]
+fn reseal_vk<'a>(data: &'a [u8], offset: &mut usize) -> Option<(VerifyingKey<'a>, [u8; 32])> {
+    let vk_bytes = data.get(*offset..offset.checked_add(layout::VK_BYTES)?)?;
+    let key = VerifyingKey {
+        domain_size: u64::from_be_bytes(read::<8>(data, offset)?),
+        num_public_inputs: u32::from_be_bytes(read::<4>(data, offset)?),
+        q_m: view(data, offset)?,
+        q_l: view(data, offset)?,
+        q_r: view(data, offset)?,
+        q_o: view(data, offset)?,
+        q_c: view(data, offset)?,
+        s_sigma: [
+            view(data, offset)?,
+            view(data, offset)?,
+            view(data, offset)?,
+        ],
+        k1: view(data, offset)?,
+        k2: view(data, offset)?,
+        g2_gen: view(data, offset)?,
+        g2_tau: view(data, offset)?,
+    };
+    Some((key, authenticated_vk_digest(vk_bytes)))
 }
 
 /// Hostile validation hook used by the create-new exporter before publish.
@@ -2237,6 +2742,12 @@ mod entrypoint {
                 fixtures.first().ok_or(ProgramError::NotEnoughAccountKeys)?,
             )
         };
+        // Both pinned address tables are derived under this consumer, so a
+        // guest loaded at any other program id must reject rather than compare
+        // against addresses that are not its own PDAs.
+        if program_id.as_array() != &super::REGISTRY_V3_CONSUMER {
+            return Err(ProgramError::IncorrectProgramId);
+        }
         if !batch.owned_by(program_id) || batch.is_writable() {
             return Err(ProgramError::InvalidAccountData);
         }
@@ -2244,13 +2755,13 @@ mod entrypoint {
             .try_borrow()
             .map_err(|_| ProgramError::AccountBorrowFailed)?;
         let groups = super::parse_account(&data).ok_or(ProgramError::InvalidAccountData)?;
-        let input_digest =
-            super::authenticated_input_digest(&groups).ok_or(ProgramError::InvalidAccountData)?;
-        let (expected_batch, _) = Address::find_program_address(
-            &[super::layout::INPUT_PDA_SEED, &input_digest],
-            program_id,
-        );
-        if batch.address() != &expected_batch {
+        // The keyset digest is recomputed from the account on every column, so
+        // the account still commits to its exact ordered key set. Only the
+        // bump search is pinned.
+        let input_digest = super::keyset_digest(&groups).ok_or(ProgramError::InvalidAccountData)?;
+        let expected_batch =
+            super::pinned_input_address(&input_digest).ok_or(ProgramError::InvalidSeeds)?;
+        if batch.address().as_array() != expected_batch {
             return Err(ProgramError::InvalidSeeds);
         }
 
@@ -2267,11 +2778,9 @@ mod entrypoint {
         let registry = registry.ok_or(ProgramError::NotEnoughAccountKeys)?;
         let registry_digest = super::sealed_registry_keyset_digest_v3(&groups)
             .ok_or(ProgramError::InvalidAccountData)?;
-        let (expected_registry, _) = Address::find_program_address(
-            &[super::layout::REGISTRY_PDA_SEED, &registry_digest],
-            program_id,
-        );
-        if registry.address() != &expected_registry || !registry.owned_by(program_id) {
+        let expected_registry =
+            super::pinned_registry_address(&registry_digest).ok_or(ProgramError::InvalidSeeds)?;
+        if registry.address().as_array() != expected_registry || !registry.owned_by(program_id) {
             return Err(ProgramError::InvalidAccountOwner);
         }
         if registry.data_len()
@@ -2316,6 +2825,75 @@ mod entrypoint {
     }
 }
 #[cfg(all(test, not(target_os = "solana")))]
+mod registry_pin_tests {
+    use super::*;
+    use solana_address::Address;
+
+    #[test]
+    fn pinned_registry_addresses_derive() {
+        for (digest, address) in REGISTRY_V3_PINNED {
+            let (derived, _) = Address::find_program_address(
+                &[layout::REGISTRY_PDA_SEED, &digest],
+                &Address::new_from_array(REGISTRY_V3_CONSUMER),
+            );
+            assert_eq!(
+                derived.to_bytes(),
+                address,
+                "pinned address is not the PDA of its digest"
+            );
+        }
+    }
+
+    #[test]
+    fn pinned_digests_are_distinct() {
+        for (index, (digest, _)) in REGISTRY_V3_PINNED.iter().enumerate() {
+            assert!(
+                pinned_registry_address(digest).is_some(),
+                "entry {index} is not reachable by lookup"
+            );
+            assert_eq!(
+                REGISTRY_V3_PINNED
+                    .iter()
+                    .filter(|(other, _)| other == digest)
+                    .count(),
+                1,
+                "entry {index} shares its digest with another row"
+            );
+        }
+    }
+
+    #[test]
+    fn unpinned_digest_has_no_address() {
+        assert!(pinned_registry_address(&[0u8; 32]).is_none());
+    }
+
+    #[test]
+    fn pinned_input_addresses_derive() {
+        for (index, digest) in POLICY_KEYSET_DIGESTS.iter().enumerate() {
+            let (derived, _) = Address::find_program_address(
+                &[layout::INPUT_PDA_SEED, digest],
+                &Address::new_from_array(REGISTRY_V3_CONSUMER),
+            );
+            assert_eq!(
+                derived.to_bytes(),
+                POLICY_INPUT_ADDRESSES[index],
+                "pinned input address {index} is not the PDA of its keyset digest"
+            );
+            assert_eq!(
+                pinned_input_address(digest),
+                Some(&POLICY_INPUT_ADDRESSES[index]),
+                "allowlisted keyset {index} is not reachable by lookup"
+            );
+        }
+    }
+
+    #[test]
+    fn unpinned_keyset_has_no_input_address() {
+        assert!(pinned_input_address(&[0u8; 32]).is_none());
+    }
+}
+
+#[cfg(all(test, not(target_os = "solana")))]
 mod exporter_tests {
     use super::*;
     use std::sync::Mutex;
@@ -2324,40 +2902,28 @@ mod exporter_tests {
 
     const SOURCE_BYTES: [(&str, &[u8], &[u8], &[u8]); 3] = [
         (
-            "mul1",
+            "transact_1_1",
             include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul1/verification_key.json"
+                "../../../plonk-fixtures/zolana-shapes/transact_1_1/verification_key.json"
             ),
-            include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul1/proof.json"
-            ),
-            include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul1/public.json"
-            ),
+            include_bytes!("../../../plonk-fixtures/zolana-shapes/transact_1_1/proof.json"),
+            include_bytes!("../../../plonk-fixtures/zolana-shapes/transact_1_1/public.json"),
         ),
         (
-            "mul2",
+            "transact_2_2",
             include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul2/verification_key.json"
+                "../../../plonk-fixtures/zolana-shapes/transact_2_2/verification_key.json"
             ),
-            include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul2/proof.json"
-            ),
-            include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul2/public.json"
-            ),
+            include_bytes!("../../../plonk-fixtures/zolana-shapes/transact_2_2/proof.json"),
+            include_bytes!("../../../plonk-fixtures/zolana-shapes/transact_2_2/public.json"),
         ),
         (
-            "mul3",
+            "transact_2_3",
             include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul3/verification_key.json"
+                "../../../plonk-fixtures/zolana-shapes/transact_2_3/verification_key.json"
             ),
-            include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul3/proof.json"
-            ),
-            include_bytes!(
-                "../../../../research/bn254-decision-table-v2-20260804/fixtures-v3/plonk-test-exceptions/mul3/public.json"
-            ),
+            include_bytes!("../../../plonk-fixtures/zolana-shapes/transact_2_3/proof.json"),
+            include_bytes!("../../../plonk-fixtures/zolana-shapes/transact_2_3/public.json"),
         ),
     ];
 
@@ -2377,6 +2943,39 @@ mod exporter_tests {
             .collect()
     }
 
+    /// A verifying key carries its domain size but not its omega, so the guest
+    /// derives one from the other. A wrong entry would evaluate the vanishing
+    /// polynomial on the wrong domain and the proof would still parse.
+    /// The registry account size the collector installs. It is derived, so it
+    /// moves silently when the prepared-blob size does, and the collector then
+    /// measures a registry that no fork would accept. Pinned here so the
+    /// divergence from `PREPARED_G2_WIRE_BYTES = 16_712` stays one tracked
+    /// number in one place.
+    #[test]
+    fn registry_account_size_is_pinned() {
+        assert_eq!(layout::G2_PREPARED_BYTES, 37_584);
+        assert_eq!(layout::REGISTRY_ENTRY_BYTES, 37_744);
+        assert_eq!(layout::REGISTRY_BYTES, 75_568);
+    }
+
+    #[test]
+    fn authenticated_omega_matches_every_fixture() {
+        use {ark_bn254::Fr, ark_ff::FftField};
+
+        for (power, omega) in AUTHENTICATED_OMEGA_BY_POWER {
+            let canonical = Fr::get_root_of_unity(1u64 << power).expect("canonical root");
+            assert_eq!(PodScalar::from(&canonical).0, omega, "power {power}");
+        }
+        for (_, vk_json, _, _) in SOURCE_BYTES {
+            let raw: ExportRawVerificationKey =
+                serde_json::from_slice(vk_json.strip_suffix(b"\n").unwrap_or(vk_json))
+                    .expect("fixture VK JSON");
+            let declared = export_scalar(&raw.w, "w").expect("fixture omega");
+            let table = authenticated_omega(1u64 << raw.power).expect("power is in the table");
+            assert_eq!(declared.0, table, "power {}", raw.power);
+        }
+    }
+
     #[test]
     fn canonical_export_replays_exact_singleton_n2_n3_rows() {
         let _guard = OBSERVER_LOCK.lock().expect("observer lock");
@@ -2390,7 +2989,7 @@ mod exporter_tests {
                 .iter()
                 .map(|source| source.source_id.as_str())
                 .collect::<Vec<_>>(),
-            ["mul1", "mul2", "mul3"]
+            ["transact_1_1", "transact_2_2", "transact_2_3"]
         );
         assert!(validate_canonical_plonk_row_export(&sources, &export).is_ok());
     }
@@ -2468,6 +3067,100 @@ mod exporter_tests {
         }
     }
 
+    /// Reduce each canonical account and return the runtime coefficients
+    /// beside the seed the in-guest kernel derives for the same account.
+    fn reducer_coefficients(account: &[u8]) -> (Vec<Group<'_>>, [u8; 32], Vec<PodScalar>) {
+        use solana_bn254_batch_syscall::{Version, alt_bn128_snarkjs_plonk_multi_vk_batch_reduce};
+
+        let groups = parse_account(account).expect("canonical account");
+        let seed = atomic_batch_digest(&groups).expect("batch digest");
+        let total = groups.iter().map(|group| group.proofs.len()).sum();
+        let mut contexts = zeroed_contexts(groups.len());
+        let mut inputs = zeroed_inputs(total);
+        let mut publics = Vec::new();
+        let mut proof_index = 0usize;
+        for (index, group) in groups.iter().enumerate() {
+            fill_multi_vk_context(&mut contexts[index], index, group).expect("context");
+            for proof in &group.proofs {
+                fill_multi_vk_input(&mut inputs[proof_index], proof_index, index, proof)
+                    .expect("input");
+                publics.extend_from_slice(proof.public_inputs);
+                proof_index += 1;
+            }
+        }
+        let coefficients = alt_bn128_snarkjs_plonk_multi_vk_batch_reduce(
+            Version::V0,
+            &contexts,
+            &inputs,
+            &publics,
+        )
+        .expect("multi-VK reduce");
+        (groups, seed, coefficients)
+    }
+
+    /// Pin the transcript, the outer randomizer and the sign of both streams
+    /// against the in-guest kernel instead of arguing them.
+    ///
+    /// P slot 0 is the bare randomizer and the shared Qc coefficient is its
+    /// negation, so an equal value on one stream and an equal magnitude with
+    /// opposite sign on the other fixes the reducer's seed, its rho
+    /// derivation, the slot order and the relative sign in one comparison.
+    #[test]
+    fn reducer_seed_rho_and_stream_signs_match_the_in_guest_kernel() {
+        use ark_ff::PrimeField;
+
+        let _guard = OBSERVER_LOCK.lock().expect("observer lock");
+        let export = export_canonical_plonk_rows(&sources([0, 1, 2])).unwrap();
+        let field = |scalar: &PodScalar| ark_bn254::Fr::from_be_bytes_mod_order(&scalar.0);
+        for account in [
+            export.n2_combined_account.as_slice(),
+            export.n3_combined_account.as_slice(),
+        ] {
+            let (groups, seed, coefficients) = reducer_coefficients(account);
+            let shared_len = REDUCER_CONTEXT_TERMS * groups.len();
+            let (shared, rows) = coefficients.split_at(shared_len);
+            assert!(groups.iter().all(|group| group.proofs.len() == 1));
+
+            for (index, row) in rows.chunks_exact(REDUCER_ROW_TERMS).enumerate() {
+                let rho = field(&PodScalar(outer_batch_scalar_bytes(&seed, index)));
+                assert_ne!(rho, ark_bn254::Fr::from(0u64));
+                assert_eq!(field(&row[0]), rho, "P slot 0 is rho at proof {index}");
+                // Qc carries the constant one, so with one proof per context
+                // the whole shared slot is the negated randomizer.
+                let qc = &shared[REDUCER_CONTEXT_TERMS * index + 4];
+                assert_eq!(field(qc), -rho, "shared Qc is -rho at context {index}");
+            }
+        }
+    }
+
+    /// The reducer's Q stream is `9*contexts + 9*proofs` against the kernel's
+    /// `18*proofs`. Every measured row holds exactly one proof per context,
+    /// which is the only reason the pinned MSM shape survives the swap. Point
+    /// this path at a same-VK batch and the observed trace changes silently,
+    /// so the equality is asserted together with that precondition.
+    #[test]
+    fn reducer_msm_shape_matches_the_kernel_only_at_one_proof_per_context() {
+        let _guard = OBSERVER_LOCK.lock().expect("observer lock");
+        let export = export_canonical_plonk_rows(&sources([0, 1, 2])).unwrap();
+        for (n, account) in [
+            (2usize, export.n2_combined_account.as_slice()),
+            (3usize, export.n3_combined_account.as_slice()),
+        ] {
+            let groups = parse_account(account).expect("canonical account");
+            let proofs = groups.iter().map(|group| group.proofs.len()).sum::<usize>();
+            assert_eq!((groups.len(), proofs), (n, n));
+
+            let q_terms = REDUCER_CONTEXT_TERMS * groups.len()
+                + (REDUCER_ROW_TERMS - REDUCER_ROW_P_TERMS) * proofs;
+            assert_eq!(q_terms, Q_CONTRIBUTIONS * proofs);
+            assert_eq!(REDUCER_ROW_P_TERMS * proofs, P_CONTRIBUTIONS * proofs);
+
+            // One context holding every proof reduces the Q stream instead.
+            let folded = REDUCER_CONTEXT_TERMS + (REDUCER_ROW_TERMS - REDUCER_ROW_P_TERMS) * proofs;
+            assert_ne!(folded, Q_CONTRIBUTIONS * proofs);
+        }
+    }
+
     #[test]
     fn fp12_tags_are_fixture_only_and_registry_is_exclusive_to_tag_three_and_init() {
         assert_eq!(expected_account_count(tag::CURRENT), Some(1));
@@ -2477,6 +3170,124 @@ mod exporter_tests {
         assert_eq!(expected_account_count(tag::REGISTRY_B5), Some(2));
         assert_eq!(expected_account_count(tag::REGISTRY_INIT), Some(2));
         assert_eq!(expected_account_count(1), None);
+    }
+
+    /// The pre-existing spelling of the authenticated VK digest, field by
+    /// field, kept only so the block hash can be checked against it.
+    fn field_wise_vk_digest(key: &VerifyingKey) -> [u8; 32] {
+        hashv(&[
+            &key.domain_size.to_be_bytes(),
+            &key.num_public_inputs.to_be_bytes(),
+            &key.q_m.0,
+            &key.q_l.0,
+            &key.q_r.0,
+            &key.q_o.0,
+            &key.q_c.0,
+            &key.s_sigma[0].0,
+            &key.s_sigma[1].0,
+            &key.s_sigma[2].0,
+            &key.k1.0,
+            &key.k2.0,
+            &key.g2_gen.0,
+            &key.g2_tau.0,
+        ])
+        .to_bytes()
+    }
+
+    fn every_canonical_account() -> Vec<Vec<u8>> {
+        let export = export_canonical_plonk_rows(&sources([0, 1, 2])).unwrap();
+        let mut accounts = export.singleton_accounts.clone();
+        accounts.push(export.n2_combined_account.clone());
+        accounts.push(export.n3_combined_account.clone());
+        accounts
+    }
+
+    /// Hashing the canonical VK block is the same statement as hashing its
+    /// fields in order. If the layout ever grows a gap the two diverge, and the
+    /// sealed `TRANSACT_*_KEY_DIGEST` constants would no longer mean what they
+    /// were derived from.
+    #[test]
+    fn vk_digest_is_the_canonical_vk_block() {
+        for account in every_canonical_account() {
+            for group in parse_account(&account).expect("canonical account") {
+                assert_eq!(field_wise_vk_digest(&group.vk), group.vk_digest);
+            }
+        }
+    }
+
+    /// `validate_group` no longer re-hashes the key it was handed, because
+    /// `parse_vk` is the only thing that ever fills these two fields and it
+    /// fills them from the same bytes. Pin that postcondition on every account
+    /// the grid runs, so the dropped comparison stays unable to fire.
+    #[test]
+    fn parse_account_binds_every_group_to_its_key() {
+        for account in every_canonical_account() {
+            for group in parse_account(&account).expect("canonical account") {
+                assert_eq!(field_wise_vk_digest(&group.vk), group.vk_digest);
+                assert_eq!(
+                    registry_context(&group.vk_digest),
+                    Some(group.application_context)
+                );
+            }
+        }
+    }
+
+    /// The batch handlers now admit through `validate_batch` instead of
+    /// building a transcript they never read. Both must accept and reject the
+    /// same batches: every sub-slice of every canonical account in both
+    /// orders, plus each structural field the batch gate owns.
+    #[test]
+    fn validate_batch_rejects_what_the_transcript_rejected() {
+        let export = export_canonical_plonk_rows(&sources([0, 1, 2])).unwrap();
+        for account in [
+            export.n2_combined_account.as_slice(),
+            export.n3_combined_account.as_slice(),
+        ] {
+            let mut groups = parse_account(account).expect("canonical account");
+            for reversed in [false, true] {
+                if reversed {
+                    groups.reverse();
+                }
+                for start in 0..=groups.len() {
+                    for end in start..=groups.len() {
+                        let slice = &groups[start..end];
+                        assert_eq!(
+                            validate_batch(slice).is_some(),
+                            atomic_batch_digest(slice).is_some(),
+                            "reversed={reversed} range={start}..{end}"
+                        );
+                    }
+                }
+            }
+            groups.reverse();
+            assert!(validate_batch(&groups).is_some());
+
+            let domain = groups[0].vk.domain_size;
+            for broken in [0u64, 2, 3, domain + 1, 1 << 29] {
+                groups[0].vk.domain_size = broken;
+                assert!(validate_batch(&groups).is_none(), "domain {broken}");
+                assert!(atomic_batch_digest(&groups).is_none(), "domain {broken}");
+            }
+            groups[0].vk.domain_size = domain;
+
+            let publics = groups[0].vk.num_public_inputs;
+            groups[0].vk.num_public_inputs = publics + 1;
+            assert!(validate_batch(&groups).is_none());
+            assert!(atomic_batch_digest(&groups).is_none());
+            groups[0].vk.num_public_inputs = publics;
+
+            let proofs = core::mem::take(&mut groups[0].proofs);
+            assert!(validate_batch(&groups).is_none());
+            assert!(atomic_batch_digest(&groups).is_none());
+            groups[0].proofs = proofs;
+
+            let context = groups[0].application_context;
+            groups[0].application_context = groups[1].application_context;
+            assert!(validate_batch(&groups).is_none());
+            assert!(atomic_batch_digest(&groups).is_none());
+            groups[0].application_context = context;
+            assert!(validate_batch(&groups).is_some());
+        }
     }
 
     fn registry_fixture(

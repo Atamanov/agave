@@ -6,6 +6,67 @@ use {
 pub const SCHEMA_PREFIX: &str = "helius.bn254-decision-table-v3";
 pub const MAX_TRANSACTION_CU: u64 = 1_400_000;
 
+/// The current-basis charge for one `alt_bn128_pairing_map` call.
+///
+/// The Fp12 finalizer is not the stock precompile - no stock op returns an Fp12
+/// element - so the Current + Fp12 column cannot be priced at the stock
+/// `group_op` rate. This is the price LiteSVM meters and the price the residual
+/// subtracts; using anything else makes the cell reconstruct to a number the
+/// runtime never charged.
+pub fn current_pairing_map_cu(pairs: u64) -> u64 {
+    const BASE: u64 = 17_246;
+    const PER_PAIR: u64 = 5_741;
+    const SUBGROUP: u64 = 3_595;
+    BASE.saturating_add(PER_PAIR.saturating_add(SUBGROUP).saturating_mul(pairs))
+}
+
+/// The stock `alt_bn128_group_op` pairing charge, which is consensus today and
+/// not part of the batch schedule.
+///
+/// The per-pair terms are not the whole charge: the syscall also adds
+/// `sha256_base_cost`, the input byte count and the output size. The residual
+/// subtractor once omitted those three, so they stayed inside the residual
+/// while the renderer added them again, overstating every Current cell by
+/// between 1,002 and 4,425 CU. One definition now serves both.
+pub const HASH_BASE_CU: u64 = 85;
+pub const HASH_BYTE_COST: u64 = 1;
+pub const MEM_OP_BASE_CU: u64 = 10;
+
+/// What `SyscallHash` charges: `sha256_base_cost` per call plus, per slice,
+/// `max(mem_op_base_cost, sha256_byte_cost * len / 2)`. `sol_keccak256`,
+/// `sol_sha256`, `sol_blake3` and `sol_sha512` all read the same three
+/// constants, so one formula prices the whole class.
+///
+/// Split as base, floor and excess because that is what can be measured:
+/// `calls` and `slices` come from the VM register trace, `byte_cu` from the
+/// metered difference between two runs whose `sha256_byte_cost` differs.
+pub fn hash_syscall_cu(calls: u64, slices: u64, byte_cu: u64) -> u64 {
+    HASH_BASE_CU
+        .saturating_mul(calls)
+        .saturating_add(MEM_OP_BASE_CU.saturating_mul(slices))
+        .saturating_add(byte_cu)
+}
+
+/// The excess one slice adds over the `mem_op_base_cost` floor.
+pub fn hash_slice_excess_cu(len: u64) -> u64 {
+    HASH_BYTE_COST
+        .saturating_mul(len.saturating_div(2))
+        .saturating_sub(MEM_OP_BASE_CU)
+}
+
+pub fn stock_group_op_pairing_cu(pairs: u64) -> u64 {
+    const FIRST: u64 = 36_364;
+    const OTHER: u64 = 12_121;
+    const SHA256_BASE: u64 = 85;
+    const ELEMENT_BYTES: u64 = 192;
+    const OUTPUT_BYTES: u64 = 32;
+    FIRST
+        .saturating_add(OTHER.saturating_mul(pairs.saturating_sub(1)))
+        .saturating_add(SHA256_BASE)
+        .saturating_add(ELEMENT_BYTES.saturating_mul(pairs))
+        .saturating_add(OUTPUT_BYTES)
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RowId {
@@ -31,10 +92,10 @@ impl RowId {
             Self::Groth16N2DistinctVk => "2 real Zolana Groth16 proofs — distinct VKs",
             Self::Groth16N3DistinctVk => "3 real Zolana Groth16 proofs — distinct VKs",
             Self::PlonkN2DistinctVkSharedSrs => {
-                "2 PLONK canonical committed test exceptions — distinct VKs, shared SRS"
+                "2 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS"
             }
             Self::PlonkN3DistinctVkSharedSrs => {
-                "3 PLONK canonical committed test exceptions — distinct VKs, shared SRS"
+                "3 PLONK proofs, zolana transact shapes — distinct VKs, shared SRS"
             }
         }
     }
@@ -167,6 +228,51 @@ pub struct MsmCall {
     pub calls: u32,
 }
 
+/// One `alt_bn128_fr_lincomb` call. The scalar syscalls were priced long before
+/// any guest reached them; this is the first that does.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrLincombCall {
+    pub terms: u32,
+    pub calls: u32,
+}
+
+/// Every `SyscallHash` call of one cell, summed.
+///
+/// One aggregate rather than a list of calls, because the per-call charge is
+/// unobservable. It turns on the byte length of each slice; those lengths sit
+/// in guest memory, LiteSVM 0.12 cannot install an observing `sol_keccak256`
+/// over the builtin, and the VM register trace carries registers only. What is
+/// left is a metered difference across two `sha256_byte_cost` settings, which
+/// is one number per transaction. A future attempt to make this per-call will
+/// hit the same wall.
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(deny_unknown_fields)]
+pub struct HashSyscallTotals {
+    pub calls: u32,
+    pub slices: u32,
+    pub byte_cu: u32,
+}
+
+/// One atomic multi-VK snarkjs PLONK reduction. The runtime replays the whole
+/// transcript and returns the MSM coefficients, so the guest does none of it.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlonkMultiVkReduceCall {
+    pub contexts: u32,
+    pub proofs: u32,
+    pub public_inputs: u32,
+    pub calls: u32,
+}
+
+impl FrLincombCall {
+    pub const fn one(terms: u32) -> Self {
+        Self { terms, calls: 1 }
+    }
+}
+
 impl MsmCall {
     pub const fn one(points: u32) -> Self {
         Self { points, calls: 1 }
@@ -190,6 +296,32 @@ pub struct OperationTrace {
     pub gt_target_multiexp_calls: Vec<GtTargetMultiexpCall>,
     pub final_exponentiations: u32,
     pub g2_subgroup_checks: u32,
+    /// Stock `alt_bn128_group_op` G1 additions, used by the unbatched path to
+    /// build the public-input commitment. The residual subtracts them, so the
+    /// table has to charge them or the baseline is short by their whole cost.
+    #[serde(default)]
+    pub stock_g1_additions: u32,
+    /// Stock `alt_bn128_group_op` G1 multiplications, same reason.
+    #[serde(default)]
+    pub stock_g1_multiplications: u32,
+    /// Scalar inner products moved off the guest and into the runtime.
+    #[serde(default)]
+    pub fr_lincomb_calls: Vec<FrLincombCall>,
+    /// The whole PLONK verifier reduction, moved into the runtime.
+    #[serde(default)]
+    pub plonk_multi_vk_reduce_calls: Vec<PlonkMultiVkReduceCall>,
+    /// Transcript hashing. Metered by the runtime like any other syscall, and
+    /// counted as guest software until it was.
+    #[serde(default)]
+    pub hash_syscalls: HashSyscallTotals,
+    /// G1 proof points that arrive compressed and are decompressed before any
+    /// pairing. The wire format belongs to the deployment and not to the
+    /// verification strategy, so every column pays this.
+    #[serde(default)]
+    pub g1_decompressions: u32,
+    /// The same in G2.
+    #[serde(default)]
+    pub g2_decompressions: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -423,6 +555,12 @@ pub struct ResidualCell {
     pub column_id: ColumnId,
     pub observed_trace: OperationTrace,
     pub non_core_transaction_cu: u64,
+    /// Everything LiteSVM metered for the transaction, before any syscall
+    /// charge was subtracted. For the stock-priced columns
+    /// `syscall_cu + non_core_transaction_cu` must equal this exactly; a
+    /// mismatch means the split double counts a charge or drops one.
+    #[serde(default)]
+    pub transaction_cu: u64,
     pub source: String,
     pub sample_count: u64,
     pub program_sha256: String,
@@ -493,4 +631,45 @@ pub struct ColumnDescriptor {
     pub label: String,
     pub backend_id: String,
     pub pricing_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The floor and the byte term cross at 20 bytes, and every slice is
+    /// charged on its own length.
+    #[test]
+    fn a_slice_is_charged_on_its_own_length() {
+        assert_eq!(hash_slice_excess_cu(1), 0);
+        assert_eq!(hash_slice_excess_cu(20), 0);
+        assert_eq!(hash_slice_excess_cu(21), 0);
+        assert_eq!(hash_slice_excess_cu(22), 1);
+        assert_eq!(hash_slice_excess_cu(64), 22);
+        assert_eq!(hash_slice_excess_cu(128), 54);
+    }
+
+    /// `derive_seed`'s framing, which mixes a domain tag, two-byte counters, a
+    /// key digest, G1 and G2 points and a public input in one call.
+    ///
+    /// Pinned on a mixed shape on purpose. Averaging the total over the slice
+    /// count, as this once did, prices the same call at 265, and a
+    /// uniform-slice case cannot tell the two apart.
+    #[test]
+    fn a_mixed_call_is_not_priced_on_its_average_slice() {
+        let slices = [41u64, 2, 32, 8, 2, 64, 128, 64, 32];
+        let byte_cu: u64 = slices.iter().copied().map(hash_slice_excess_cu).sum();
+        assert_eq!(byte_cu, 120);
+        assert_eq!(hash_syscall_cu(1, slices.len() as u64, byte_cu), 295);
+    }
+
+    /// The base is charged once per call, not once per cell. The shape is the
+    /// five-proof same-VK registry cell: one key digest, one batch seed and
+    /// five randomizer draws.
+    #[test]
+    fn the_base_is_charged_once_per_call() {
+        assert_eq!(hash_syscall_cu(7, 47, 794), 1_859);
+        assert_eq!(hash_syscall_cu(1, 47, 794), 1_349);
+        assert_eq!(hash_syscall_cu(0, 0, 0), 0);
+    }
 }

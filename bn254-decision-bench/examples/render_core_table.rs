@@ -7,7 +7,7 @@
 //! bound on the transaction, and the full table adds the residual per cell.
 
 use {
-    solana_bn254_decision_bench::{ColumnId, OperationTrace, RowId, expected_trace},
+    solana_bn254_decision_bench::{ColumnId, RowId, expected_trace, syscall_cu},
     solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
     std::{collections::BTreeMap, path::PathBuf},
 };
@@ -49,52 +49,12 @@ fn key(row: RowId, column: ColumnId) -> String {
     format!("{}/{}", snake(&r), snake(&c))
 }
 
-/// The stock `alt_bn128_group_op` pairing charge, which is consensus today and
-/// not part of the batch schedule.
-fn stock_pairing(pairs: u64) -> u64 {
-    36_364 + 12_121 * pairs.saturating_sub(1) + 85 + 192 * pairs + 32
-}
-
-fn batch_pairing(cost: &SVMTransactionExecutionCost, full: u64, registered: u64) -> u64 {
-    let pairs = full + registered;
-    cost.alt_bn128_pairing_check_base_cost
-        + cost.alt_bn128_pairing_check_lane_cost * (pairs / 8)
-        + cost.alt_bn128_pairing_check_per_pair_cost * (pairs % 8)
-        - cost.alt_bn128_g2_subgroup_check_cost * registered
-}
-
-fn core_cu(cost: &SVMTransactionExecutionCost, column: ColumnId, trace: &OperationTrace) -> u64 {
-    let stock = matches!(column, ColumnId::Current | ColumnId::CurrentFp12);
-    let mut cu = 0u64;
-    for call in trace.pairing_checks.iter().chain(&trace.pairing_maps) {
-        let each = if stock {
-            stock_pairing(call.pairs.into())
-        } else {
-            batch_pairing(cost, call.full_pairs.into(), call.registered_pairs.into())
-        };
-        cu += u64::from(call.calls) * each;
-    }
-    for call in &trace.msm_calls {
-        cu += u64::from(call.calls)
-            * (cost.alt_bn128_g1_msm_base_cost
-                + cost.alt_bn128_g1_msm_per_point_cost * u64::from(call.points));
-    }
-    for call in &trace.gt_target_multiexp_calls {
-        cu += u64::from(call.calls)
-            * (cost.alt_bn128_gt_multiexp_base_cost
-                + cost.alt_bn128_gt_multiexp_per_target_cost * u64::from(call.targets));
-    }
-    cu
-}
-
 fn main() {
     let cost = SVMTransactionExecutionCost::default();
     let residual = residuals();
     println!("# BN254 decision table, transaction CU\n");
     println!("Syscall core from the committed runtime schedule, plus the measured");
     println!("guest-side sBPF residual. Core is a tariff and is identical on every host.\n");
-    println!("A cell shown as `N +?` has no residual measurement and is core only, so it");
-    println!("is a lower bound. See CAPTURE-HOST-REQUIREMENTS.md for why.\n");
     print!("| Scenario |");
     for column in ColumnId::ALL {
         print!(" {} |", column.label());
@@ -103,9 +63,9 @@ fn main() {
     for row in RowId::ALL {
         print!("| {} |", row.label());
         for column in ColumnId::ALL {
-            let core = core_cu(&cost, column, &expected_trace(row, column));
+            let core = syscall_cu(&cost, column, &expected_trace(row, column));
             match residual.get(&key(row, column)) {
-                Some(r) => print!(" {} |", core + r),
+                Some(r) => print!(" {} |", core.saturating_add(*r)),
                 None => print!(" {core} +? |"),
             }
         }
@@ -118,7 +78,8 @@ fn main() {
         .count();
     println!("\n{measured} of 30 cells carry a measured residual.");
     println!(
-        "GT multiexp is provisional at {} + {}t and inflates the fold-all column on multi-key rows.",
-        cost.alt_bn128_gt_multiexp_base_cost, cost.alt_bn128_gt_multiexp_per_target_cost
+        "The batch columns price the AVX-512 IFMA kernel. A validator without \
+         avx512ifma cannot reach these charges, so adopting them raises the \
+         hardware floor above docs/src/operations/requirements.md."
     );
 }

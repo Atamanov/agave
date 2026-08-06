@@ -25,9 +25,16 @@ case "$model" in
     *) check "retail part" "$model" pass ;;
 esac
 
-# Base clock, not current: a scaled-down core reports low here under an idle
-# governor, which is exactly the case that ruined the previous capture.
-mhz=$(grep -m1 'cpu MHz' /proc/cpuinfo | awk '{printf "%d", $4}')
+# What the part can sustain, not what an idle core happens to report. Under a
+# powersave governor core 0 sits near 600 MHz on a 4.4 GHz chip, so reading one
+# core's current frequency rejects healthy hosts. Prefer the kernel's advertised
+# maximum and fall back to the fastest core currently running.
+mhz=$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null)
+if [ -n "$mhz" ]; then
+    mhz=$((mhz / 1000))
+else
+    mhz=$(awk '/cpu MHz/ { if ($4 > m) m = $4 } END { printf "%d", m }' /proc/cpuinfo)
+fi
 if [ "${mhz:-0}" -ge 2800 ]; then
     check "clock >= 2.8 GHz" "${mhz} MHz" pass
 else

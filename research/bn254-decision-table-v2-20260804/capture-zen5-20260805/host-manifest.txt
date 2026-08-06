@@ -1,0 +1,15 @@
+captured_utc	2026-08-05T17:16:35Z
+cpu_model	AMD Ryzen 9 9900X 12-Core Processor
+cpu_max_mhz	5250
+logical_cpus	24
+avx512ifma	24
+loadavg_start	1.65
+rustflags	-C target-cpu=native -C target-feature=+avx512f,+avx512ifma
+rustc	rustc 1.95.0 (59807616e 2026-04-14)
+features	agave-unstable-api,metrics,require-ifma
+ns_per_cu	33
+benchmark_cpu	4
+bench_bin	target/release/deps/alt_bn128_batch-4ebf9df3d1c9bb43
+bench_sha256	105dd5d0b70323ff309fac94d8215395b5c37a907aff48c9290ec9679b381c5d
+loadavg_end_run1 1.07
+loadavg_end_run2 1.01
