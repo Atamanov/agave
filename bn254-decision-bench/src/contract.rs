@@ -34,8 +34,172 @@ fn trace(
         stock_g1_multiplications: 0,
         fr_lincomb_calls: Vec::new(),
         plonk_multi_vk_reduce_calls: Vec::new(),
-        keccak_calls: Vec::new(),
+        hash_syscalls: HashSyscallTotals::default(),
     }
+}
+
+/// Slice byte lengths of the operands a protocol step hashes.
+type HashCall = Vec<u32>;
+
+const FR: u32 = 32;
+const G1: u32 = 64;
+const G2: u32 = 128;
+const GT: u32 = 384;
+/// Big-endian `u64` counters and lengths the transcripts frame with.
+const BE64: u32 = 8;
+
+fn with_hash_syscalls(mut trace: OperationTrace, calls: Vec<HashCall>) -> OperationTrace {
+    trace.hash_syscalls = HashSyscallTotals {
+        calls: calls.len() as u32,
+        slices: calls.iter().map(|call| call.len() as u32).sum(),
+        byte_cu: calls
+            .iter()
+            .flatten()
+            .map(|len| hash_slice_excess_cu(u64::from(*len)) as u32)
+            .sum(),
+    };
+    trace
+}
+
+/// `vk::digest`: the committed-or-vanilla tag, alpha, the three fixed G2
+/// points, the IC length, one G1 per IC entry, and the Pedersen pair.
+fn groth16_vk_digest(ic_entries: u32, committed: bool) -> HashCall {
+    let mut parts = vec![1, G1, G2, G2, G2, 2];
+    parts.extend(core::iter::repeat_n(G1, ic_entries as usize));
+    if committed {
+        parts.extend([G2, G2]);
+    }
+    parts
+}
+
+/// `derive_seed`: the mode's domain tag, the key count and every key digest,
+/// the proof count, then per proof its key index, A, B, C, the commitment pair
+/// when the key is committed, and one slice per public input.
+fn groth16_seed(keys: u32, proofs: u32, public_inputs: u32, committed: bool) -> HashCall {
+    // b"solana-bn254-groth16-batch:v1:independent"
+    const INDEPENDENT_DOMAIN: u32 = 41;
+    let mut parts = vec![INDEPENDENT_DOMAIN, 2];
+    parts.extend(core::iter::repeat_n(FR, keys as usize));
+    parts.push(BE64);
+    for _ in 0..proofs {
+        parts.extend([2, G1, G2, G1]);
+        if committed {
+            parts.extend([G1, G1]);
+        }
+        parts.extend(core::iter::repeat_n(FR, public_inputs as usize));
+    }
+    parts
+}
+
+/// `draw_scalar`, once per verification equation. A committed proof carries two.
+fn groth16_randomizer_draw() -> HashCall {
+    vec![FR, BE64]
+}
+
+/// `same_vk_transcript_seed`, then one `tail_draw` per tail position.
+fn same_vk_target_seed() -> HashCall {
+    // b"solana-bn254-groth16-same-vk-target:v1:affine-sum-one"
+    const TARGET_DOMAIN: u32 = 53;
+    vec![TARGET_DOMAIN, FR, FR, GT]
+}
+
+fn same_vk_tail_draw() -> HashCall {
+    // b"coef"
+    const COEFFICIENT_DOMAIN: u32 = 4;
+    vec![FR, COEFFICIENT_DOMAIN, BE64]
+}
+
+/// `authenticated_vk_digest` over the canonical PLONK verifying-key block.
+fn plonk_vk_block_digest() -> HashCall {
+    // layout::VK_BYTES = 8 + 4 + 5 * 64 + 3 * 64 + 2 * 32 + 2 * 128
+    const VK_BLOCK: u32 = 844;
+    vec![VK_BLOCK]
+}
+
+/// `keyset_digest`: the domain, the layout version, the group count and every
+/// group's verifying-key digest.
+fn plonk_keyset_digest(keys: u32) -> HashCall {
+    // b"zolana:bn254:plonk:g2-registry-keyset:v1"
+    const KEYSET_DOMAIN: u32 = 40;
+    let mut parts = vec![KEYSET_DOMAIN, 1, BE64];
+    parts.extend(core::iter::repeat_n(FR, keys as usize));
+    parts
+}
+
+/// The snarkjs Fiat-Shamir rounds one direct PLONK proof runs: beta over the
+/// eight selectors, the publics and the round-one commitments; gamma over
+/// beta; alpha over beta, gamma and Z; xi over alpha and the quotient parts;
+/// v1 over xi and the six evaluations; u over the two opening proofs.
+fn plonk_challenges(public_inputs: u32) -> Vec<HashCall> {
+    let mut beta = vec![G1; 8];
+    beta.extend(core::iter::repeat_n(FR, public_inputs as usize));
+    beta.extend([G1, G1, G1]);
+    vec![
+        beta,
+        vec![FR],
+        vec![FR, FR, G1],
+        vec![FR, G1, G1, G1],
+        vec![FR; 7],
+        vec![G1, G1],
+    ]
+}
+
+/// `expand_message_xmd_sha256_l48` for the BSB22 wire: b0 over a zero block,
+/// the commitment, the output length, a zero byte and the length-tagged DST;
+/// then b1 and b2 over a 32-byte block, a counter byte and the same tag.
+/// These are `sol_sha256`, which the runtime prices exactly like `sol_keccak256`.
+fn bsb22_hash_to_field() -> Vec<HashCall> {
+    const DST: u32 = 16 + 1; // b"bsb22-commitment" plus its length byte
+    const COMMITMENT: u32 = G1;
+    const R_IN_BYTES: u32 = 64;
+    const B_IN_BYTES: u32 = 32;
+    vec![
+        vec![R_IN_BYTES + COMMITMENT + 2 + 1 + DST],
+        vec![B_IN_BYTES + 1 + DST],
+        vec![B_IN_BYTES + 1 + DST],
+    ]
+}
+
+/// Public inputs the outer recursive circuit declares, from the recursion
+/// guests' `layout` constants. The verifier appends the BSB22 wire, so the
+/// proof carries one more scalar than this and the key one more IC entry.
+const fn recursion_public_inputs(row: RowId) -> u32 {
+    match row {
+        RowId::Groth16N2DistinctVk => 3,
+        RowId::Groth16N3DistinctVk | RowId::PlonkN2DistinctVkSharedSrs => 4,
+        RowId::Groth16N5SameVk => 6,
+        RowId::PlonkN3DistinctVkSharedSrs => 7,
+    }
+}
+
+/// One outer proof over a committed key, verified as a one-proof batch.
+fn recursion_hash_calls(row: RowId) -> Vec<HashCall> {
+    let declared = recursion_public_inputs(row);
+    let mut calls = vec![
+        groth16_vk_digest(declared.saturating_add(2), true),
+        groth16_seed(1, 1, declared.saturating_add(1), true),
+    ];
+    // A committed proof has two verification equations, the Groth16 one and
+    // the proof of knowledge, so the transcript draws two randomizers.
+    calls.extend(core::iter::repeat_n(groth16_randomizer_draw(), 2));
+    calls.extend(bsb22_hash_to_field());
+    calls
+}
+
+/// Every zolana verifying key declares one public input, so its IC has two
+/// entries.
+const ZOLANA_PUBLIC_INPUTS: u32 = 1;
+const ZOLANA_IC_ENTRIES: u32 = ZOLANA_PUBLIC_INPUTS + 1;
+
+/// The batched Groth16 fold: one digest per key, the batch seed, one
+/// randomizer draw per proof.
+fn groth16_fold_hash_calls(proofs: u32, keys: u32) -> Vec<HashCall> {
+    let mut calls: Vec<HashCall> = core::iter::repeat_n(keys, keys as usize)
+        .map(|_| groth16_vk_digest(ZOLANA_IC_ENTRIES, false))
+        .collect();
+    calls.push(groth16_seed(keys, proofs, ZOLANA_PUBLIC_INPUTS, false));
+    calls.extend(core::iter::repeat_n(groth16_randomizer_draw(), proofs as usize));
+    calls
 }
 
 /// The batch columns hand the whole reduction to the runtime. One call per
@@ -158,46 +322,65 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
         let n = row.proof_count();
         let k = row.vk_count();
         return match column {
+            // The unbatched verifier binds nothing: no key digest, no batch
+            // seed, no randomizer, so it hashes nothing.
             ColumnId::Current => with_stock_g1(
                 trace(vec![PairingCall::full(4, n)], vec![], vec![], vec![]),
                 n,
                 n,
             ),
-            ColumnId::BatchB5 => with_fold_lincombs(
-                trace(
-                    vec![PairingCall::full(
-                        n.saturating_add(3u32.saturating_mul(k)),
-                        1,
-                    )],
+            ColumnId::BatchB5 => with_hash_syscalls(
+                with_fold_lincombs(
+                    trace(
+                        vec![PairingCall::full(
+                            n.saturating_add(3u32.saturating_mul(k)),
+                            1,
+                        )],
+                        vec![],
+                        groth_msm(row, column),
+                        vec![],
+                    ),
+                    n,
+                    k,
+                ),
+                groth16_fold_hash_calls(n, k),
+            ),
+            // The registry replaces the fixed-G2 suffix at the pairing
+            // boundary and leaves the transcript alone.
+            ColumnId::RegistryB5 => with_hash_syscalls(
+                with_fold_lincombs(
+                    trace(
+                        vec![PairingCall::registered(n, 3u32.saturating_mul(k))],
+                        vec![],
+                        groth_msm(row, column),
+                        vec![],
+                    ),
+                    n,
+                    k,
+                ),
+                groth16_fold_hash_calls(n, k),
+            ),
+            ColumnId::RecursionB5 => with_hash_syscalls(
+                with_bsb22_reduction(trace(
+                    vec![PairingCall::full(6, 1)],
                     vec![],
                     groth_msm(row, column),
                     vec![],
-                ),
-                n,
-                k,
+                )),
+                recursion_hash_calls(row),
             ),
-            ColumnId::RegistryB5 => with_fold_lincombs(
-                trace(
-                    vec![PairingCall::registered(n, 3u32.saturating_mul(k))],
-                    vec![],
-                    groth_msm(row, column),
-                    vec![],
-                ),
-                n,
-                k,
-            ),
-            ColumnId::RecursionB5 => with_bsb22_reduction(trace(
-                vec![PairingCall::full(6, 1)],
-                vec![],
-                groth_msm(row, column),
-                vec![],
-            )),
             // This is deliberately n independent current-verifier maps. It is
-            // not the batched FP12 fold and therefore has no MSM syscall.
-            ColumnId::CurrentFp12 => with_stock_g1(
-                trace(vec![], vec![PairingCall::full(3, n)], vec![], vec![]),
-                n,
-                n,
+            // not the batched FP12 fold and therefore has no MSM syscall. Each
+            // target names its key by digest, so the keys are still hashed.
+            ColumnId::CurrentFp12 => with_hash_syscalls(
+                with_stock_g1(
+                    trace(vec![], vec![PairingCall::full(3, n)], vec![], vec![]),
+                    n,
+                    n,
+                ),
+                core::iter::repeat_n(k, k as usize)
+                    .map(|_| groth16_vk_digest(ZOLANA_IC_ENTRIES, false))
+                    .collect(),
             ),
             ColumnId::BatchFp12B5 => {
                 let gt_target_multiexp_calls = if k > 1 {
@@ -209,18 +392,39 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
                 } else {
                     vec![]
                 };
-                with_fp12_fold_lincombs(
-                    trace(
-                        vec![],
-                        vec![PairingCall::full(
-                            n.saturating_add(2u32.saturating_mul(k)),
-                            1,
-                        )],
-                        groth_msm(row, column),
-                        gt_target_multiexp_calls,
+                // A shared key runs the same_vk fold, which binds the GT
+                // target into its own seed and then draws one coefficient per
+                // tail position instead of one randomizer per proof. Distinct
+                // keys run the guest's fp12 fold over the ordinary transcript.
+                let hash_calls = if k == 1 {
+                    let mut calls = vec![
+                        groth16_vk_digest(ZOLANA_IC_ENTRIES, false),
+                        groth16_seed(k, n, ZOLANA_PUBLIC_INPUTS, false),
+                        same_vk_target_seed(),
+                    ];
+                    calls.extend(core::iter::repeat_n(
+                        same_vk_tail_draw(),
+                        n.saturating_sub(1) as usize,
+                    ));
+                    calls
+                } else {
+                    groth16_fold_hash_calls(n, k)
+                };
+                with_hash_syscalls(
+                    with_fp12_fold_lincombs(
+                        trace(
+                            vec![],
+                            vec![PairingCall::full(
+                                n.saturating_add(2u32.saturating_mul(k)),
+                                1,
+                            )],
+                            groth_msm(row, column),
+                            gt_target_multiexp_calls,
+                        ),
+                        n,
+                        k,
                     ),
-                    n,
-                    k,
+                    hash_calls,
                 )
             }
         };
@@ -228,23 +432,53 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
 
     let n = row.proof_count();
     let folded_msm = || msm(&[2u32.saturating_mul(n), 18u32.saturating_mul(n)]);
-    match column {
-        ColumnId::Current => with_stock_g1(
-            trace(vec![PairingCall::full(2, n)], vec![], vec![], vec![]),
-            18u32.saturating_mul(n),
-            20u32.saturating_mul(n),
-        ),
-        ColumnId::BatchB5 => {
-            with_multi_vk_reduce(trace(vec![PairingCall::full(2, 1)], vec![], folded_msm(), vec![]), n)
+    // Every PLONK column authenticates each key by hashing its canonical block
+    // and then binds the set. The batch columns stop there, because the
+    // runtime replays the transcript for them.
+    let key_binding = || {
+        let mut calls: Vec<HashCall> = core::iter::repeat_n(n, n as usize)
+            .map(|_| plonk_vk_block_digest())
+            .collect();
+        calls.push(plonk_keyset_digest(n));
+        calls
+    };
+    // The unbatched column runs the whole snarkjs transcript per proof on top.
+    let direct_transcript = || {
+        let mut calls: Vec<HashCall> = Vec::new();
+        for _ in 0..n {
+            calls.push(plonk_vk_block_digest());
+            calls.extend(plonk_challenges(ZOLANA_PUBLIC_INPUTS));
         }
-        ColumnId::RegistryB5 => with_multi_vk_reduce(
-            trace(
-                vec![PairingCall::registered(0, 2)],
-                vec![],
-                folded_msm(),
-                vec![],
+        calls.push(plonk_keyset_digest(n));
+        calls
+    };
+    match column {
+        ColumnId::Current => with_hash_syscalls(
+            with_stock_g1(
+                trace(vec![PairingCall::full(2, n)], vec![], vec![], vec![]),
+                18u32.saturating_mul(n),
+                20u32.saturating_mul(n),
             ),
-            n,
+            direct_transcript(),
+        ),
+        ColumnId::BatchB5 => with_hash_syscalls(
+            with_multi_vk_reduce(
+                trace(vec![PairingCall::full(2, 1)], vec![], folded_msm(), vec![]),
+                n,
+            ),
+            key_binding(),
+        ),
+        ColumnId::RegistryB5 => with_hash_syscalls(
+            with_multi_vk_reduce(
+                trace(
+                    vec![PairingCall::registered(0, 2)],
+                    vec![],
+                    folded_msm(),
+                    vec![],
+                ),
+                n,
+            ),
+            key_binding(),
         ),
         ColumnId::RecursionB5 => {
             let outer_msm: &[u32] = match row {
@@ -252,22 +486,32 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
                 RowId::PlonkN3DistinctVkSharedSrs => &[1, 1, 10, 1, 1, 1],
                 _ => unreachable!("PLONK recursion rows are exhaustive"),
             };
-            with_bsb22_reduction(trace(
-                vec![PairingCall::full(6, 1)],
-                vec![],
-                msm(outer_msm),
-                vec![],
-            ))
+            with_hash_syscalls(
+                with_bsb22_reduction(trace(
+                    vec![PairingCall::full(6, 1)],
+                    vec![],
+                    msm(outer_msm),
+                    vec![],
+                )),
+                recursion_hash_calls(row),
+            )
         }
         // As above, preserve one independent current-verifier map per proof.
-        ColumnId::CurrentFp12 => with_stock_g1(
-            trace(vec![], vec![PairingCall::full(2, n)], vec![], vec![]),
-            18u32.saturating_mul(n),
-            20u32.saturating_mul(n),
+        ColumnId::CurrentFp12 => with_hash_syscalls(
+            with_stock_g1(
+                trace(vec![], vec![PairingCall::full(2, n)], vec![], vec![]),
+                18u32.saturating_mul(n),
+                20u32.saturating_mul(n),
+            ),
+            direct_transcript(),
         ),
-        ColumnId::BatchFp12B5 => {
-            with_multi_vk_reduce(trace(vec![], vec![PairingCall::full(2, 1)], folded_msm(), vec![]), n)
-        }
+        ColumnId::BatchFp12B5 => with_hash_syscalls(
+            with_multi_vk_reduce(
+                trace(vec![], vec![PairingCall::full(2, 1)], folded_msm(), vec![]),
+                n,
+            ),
+            key_binding(),
+        ),
     }
 }
 

@@ -23,7 +23,11 @@
         "stock_g1_multiplications": 5,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 0,
+          "slices": 0,
+          "byte_cu": 0
+        }
       }
     },
     {
@@ -109,7 +113,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 47,
+          "byte_cu": 794
+        }
       }
     },
     {
@@ -195,7 +203,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 47,
+          "byte_cu": 794
+        }
       }
     },
     {
@@ -285,7 +297,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 40,
+          "byte_cu": 774
+        }
       }
     },
     {
@@ -309,7 +325,11 @@
         "stock_g1_multiplications": 5,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 1,
+          "slices": 8,
+          "byte_cu": 228
+        }
       }
     },
     {
@@ -399,7 +419,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 53,
+          "byte_cu": 998
+        }
       }
     },
     {
@@ -423,7 +447,11 @@
         "stock_g1_multiplications": 2,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 0,
+          "slices": 0,
+          "byte_cu": 0
+        }
       }
     },
     {
@@ -497,7 +525,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 5,
+          "slices": 35,
+          "byte_cu": 698
+        }
       }
     },
     {
@@ -571,7 +603,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 5,
+          "slices": 35,
+          "byte_cu": 698
+        }
       }
     },
     {
@@ -649,7 +685,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 34,
+          "byte_cu": 690
+        }
       }
     },
     {
@@ -673,7 +713,11 @@
         "stock_g1_multiplications": 2,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 2,
+          "slices": 16,
+          "byte_cu": 456
+        }
       }
     },
     {
@@ -749,7 +793,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 5,
+          "slices": 35,
+          "byte_cu": 698
+        }
       }
     },
     {
@@ -773,7 +821,11 @@
         "stock_g1_multiplications": 3,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 0,
+          "slices": 0,
+          "byte_cu": 0
+        }
       }
     },
     {
@@ -871,7 +923,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 51,
+          "byte_cu": 1042
+        }
       }
     },
     {
@@ -969,7 +1025,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 51,
+          "byte_cu": 1042
+        }
       }
     },
     {
@@ -1051,7 +1111,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 36,
+          "byte_cu": 718
+        }
       }
     },
     {
@@ -1075,7 +1139,11 @@
         "stock_g1_multiplications": 3,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 3,
+          "slices": 24,
+          "byte_cu": 684
+        }
       }
     },
     {
@@ -1175,7 +1243,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 51,
+          "byte_cu": 1042
+        }
       }
     },
     {
@@ -1199,7 +1271,11 @@
         "stock_g1_multiplications": 40,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 15,
+          "slices": 65,
+          "byte_cu": 1738
+        }
       }
     },
     {
@@ -1239,7 +1315,11 @@
             "calls": 1
           }
         ],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 3,
+          "slices": 7,
+          "byte_cu": 846
+        }
       }
     },
     {
@@ -1279,7 +1359,11 @@
             "calls": 1
           }
         ],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 3,
+          "slices": 7,
+          "byte_cu": 846
+        }
       }
     },
     {
@@ -1361,7 +1445,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 36,
+          "byte_cu": 718
+        }
       }
     },
     {
@@ -1385,7 +1473,11 @@
         "stock_g1_multiplications": 40,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 15,
+          "slices": 65,
+          "byte_cu": 1738
+        }
       }
     },
     {
@@ -1425,7 +1517,11 @@
             "calls": 1
           }
         ],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 3,
+          "slices": 7,
+          "byte_cu": 846
+        }
       }
     },
     {
@@ -1449,7 +1545,11 @@
         "stock_g1_multiplications": 60,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 22,
+          "slices": 96,
+          "byte_cu": 2602
+        }
       }
     },
     {
@@ -1489,7 +1589,11 @@
             "calls": 1
           }
         ],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 4,
+          "slices": 9,
+          "byte_cu": 1264
+        }
       }
     },
     {
@@ -1529,7 +1633,11 @@
             "calls": 1
           }
         ],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 4,
+          "slices": 9,
+          "byte_cu": 1264
+        }
       }
     },
     {
@@ -1623,7 +1731,11 @@
           }
         ],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 7,
+          "slices": 42,
+          "byte_cu": 802
+        }
       }
     },
     {
@@ -1647,7 +1759,11 @@
         "stock_g1_multiplications": 60,
         "fr_lincomb_calls": [],
         "plonk_multi_vk_reduce_calls": [],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 22,
+          "slices": 96,
+          "byte_cu": 2602
+        }
       }
     },
     {
@@ -1687,7 +1803,11 @@
             "calls": 1
           }
         ],
-        "keccak_calls": []
+        "hash_syscalls": {
+          "calls": 4,
+          "slices": 9,
+          "byte_cu": 1264
+        }
       }
     }
   ]

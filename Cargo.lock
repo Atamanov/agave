@@ -7589,6 +7589,7 @@ dependencies = [
  "serde",
  "solana-bn254-batch-syscall",
  "solana-bn254-decision-bench",
+ "solana-compute-budget 3.1.14",
  "solana-keccak-hasher",
  "solana-program-runtime 3.1.14",
  "solana-pubkey 4.2.0",

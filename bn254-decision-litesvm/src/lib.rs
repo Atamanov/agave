@@ -7,7 +7,8 @@
 mod stock_observer;
 
 pub use stock_observer::{
-    GroupOpKind, StockGroupOpEvent, StockGroupOpObservation, StockGroupOpObserver,
+    GroupOpKind, HASH_SYSCALLS, HashSyscallEvent, StockGroupOpEvent, StockGroupOpObservation,
+    StockGroupOpObserver,
 };
 
 use {
@@ -21,6 +22,7 @@ use {
         alt_bn128_snarkjs_plonk_multi_vk_batch_reduce, research_observer as backend_observer,
         unpack_snarkjs_plonk_multi_vk_shape,
     },
+    solana_compute_budget::compute_budget::ComputeBudget,
     solana_program_runtime::{
         invoke_context::InvokeContext,
         solana_sbpf::{
@@ -56,7 +58,9 @@ pub const CURRENT_GROUP_OP_PAIRING_FIRST_CU: u64 = 36_364;
 pub const CURRENT_GROUP_OP_PAIRING_OTHER_CU: u64 = 12_121;
 pub const CURRENT_FR_LINCOMB_BASE_CU: u64 = 1;
 pub const CURRENT_FR_LINCOMB_PER_TERM_CU: u64 = 1;
-pub use solana_bn254_decision_bench::stock_group_op_pairing_cu;
+pub use solana_bn254_decision_bench::{
+    HASH_BASE_CU, MAX_TRANSACTION_CU, MEM_OP_BASE_CU, stock_group_op_pairing_cu,
+};
 
 const MSM_DISCOUNT_PER_THOUSAND: [u64; 12] =
     [1000, 636, 449, 320, 246, 199, 166, 131, 113, 98, 85, 79];
@@ -82,11 +86,24 @@ pub struct RegisteredPairingObservation {
     pub charged_cu: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct KeccakObservation {
+/// Every `SyscallHash` call of one transaction, summed.
+///
+/// Per-call totals are deliberately absent, and this is a fact about the
+/// runtime rather than a modelling shortcut. The charge depends on the length
+/// of each slice, those lengths live in guest memory, and the only two ways to
+/// reach them are both closed: LiteSVM 0.12 cannot replace the builtin
+/// `sol_keccak256` with an observing shim, and the VM register trace carries
+/// registers, not memory. `byte_cu` therefore comes from the metered
+/// difference between two runs of the same transaction whose
+/// `sha256_byte_cost` differs, which yields one number for the transaction and
+/// cannot be attributed back to individual calls. Do not try to make this
+/// per-call.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HashSyscallObservation {
+    pub calls: u64,
     pub slices: u64,
-    pub bytes: u64,
-    pub charged_cu: u64,
+    /// Sum over slices of `max(0, len / 2 - mem_op_base_cost)`.
+    pub byte_cu: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -128,7 +145,9 @@ pub struct ObserverSnapshot {
     pub registered_pairing_checks: Vec<RegisteredPairingObservation>,
     pub trusted_gt_multiexps: Vec<TrustedGtObservation>,
     pub fr_lincombs: Vec<FrLincombObservation>,
-    pub keccaks: Vec<KeccakObservation>,
+    /// `byte_cu` stays zero until a caller supplies the differential; the
+    /// register trace alone cannot fill it.
+    pub hash_syscalls: HashSyscallObservation,
     pub plonk_multi_vk_reduces: Vec<PlonkMultiVkReduceObservation>,
     /// Setup is separate so hot-path totals can exclude it without inference.
     pub registry_init: RegistryInitObservation,
@@ -196,7 +215,7 @@ pub fn current_snarkjs_plonk_multi_vk_reduce_cu(
     scalar.saturating_add(transcript)
 }
 
-pub use solana_bn254_decision_bench::keccak_cu as current_keccak_cu;
+pub use solana_bn254_decision_bench::hash_syscall_cu as current_hash_syscall_cu;
 
 pub fn current_fr_lincomb_cu(terms: u64) -> u64 {
     CURRENT_FR_LINCOMB_BASE_CU.saturating_add(CURRENT_FR_LINCOMB_PER_TERM_CU.saturating_mul(terms))
@@ -251,7 +270,11 @@ pub fn current_embedded_hot_core_cu(snapshot: &ObserverSnapshot) -> u64 {
                 .map(|event| event.charged_cu),
         )
         .chain(snapshot.fr_lincombs.iter().map(|event| event.charged_cu))
-        .chain(snapshot.keccaks.iter().map(|event| event.charged_cu))
+        .chain(core::iter::once(current_hash_syscall_cu(
+            snapshot.hash_syscalls.calls,
+            snapshot.hash_syscalls.slices,
+            snapshot.hash_syscalls.byte_cu,
+        )))
         .chain(
             snapshot
                 .plonk_multi_vk_reduces
@@ -284,6 +307,7 @@ pub fn observer_snapshot() -> ObserverSnapshot {
     let registry_preparations = backend_observer::observed_registry_g2_preparation_calls();
     let standalone = backend_observer::observed_standalone_probe_calls();
     let legacy = backend_observer::observed_legacy_group_ops();
+    let stock = stock_observer().snapshot();
     ObserverSnapshot {
         msm_calls: backend_observer::observed_g1_msm_point_count_list()
             .into_iter()
@@ -340,14 +364,15 @@ pub fn observer_snapshot() -> ObserverSnapshot {
                 ),
             })
             .collect(),
-        keccaks: backend_observer::observed_keccak_shapes()
-            .into_iter()
-            .map(|(slices, bytes)| KeccakObservation {
-                slices,
-                bytes,
-                charged_cu: current_keccak_cu(slices, bytes),
-            })
-            .collect(),
+        hash_syscalls: HashSyscallObservation {
+            calls: stock.hash_syscalls.len() as u64,
+            slices: stock
+                .hash_syscalls
+                .iter()
+                .map(|event| event.slices)
+                .fold(0u64, u64::saturating_add),
+            byte_cu: 0,
+        },
         fr_lincombs: backend_observer::observed_fr_lincomb_term_counts()
             .into_iter()
             .map(|terms| FrLincombObservation {
@@ -368,17 +393,39 @@ pub fn observer_snapshot() -> ObserverSnapshot {
         legacy_g1_additions: legacy.1,
         ifma_batch8_dispatches: backend_observer::observed_ifma_batch8_dispatches(),
         ifma_mixed_batch8_dispatches: backend_observer::observed_ifma_mixed_batch8_dispatches(),
-        stock_group_ops: stock_observer().snapshot(),
+        stock_group_ops: stock,
     }
 }
 
 /// Construct a normal LiteSVM 0.12 environment and install all decision
 /// syscalls after stock builtins and before default programs.
 pub fn new_litesvm_with_decision_syscalls() -> LiteSVM {
+    new_litesvm_charging_hash_bytes(DEFAULT_HASH_BYTE_COST)
+}
+
+/// Consensus `sha256_byte_cost`.
+pub const DEFAULT_HASH_BYTE_COST: u64 = 1;
+
+/// The same environment with `sha256_byte_cost` set explicitly.
+///
+/// That constant multiplies the per-slice half of every `SyscallHash` charge
+/// and nothing else, so two runs of one transaction that differ only in it
+/// differ by exactly `sum over slices of max(0, cost * len / 2 - 10)`. At zero
+/// each slice falls to the `mem_op_base_cost` floor, which makes the metered
+/// difference between `1` and `0` the byte half no register trace can see.
+///
+/// `the_budget_carries_the_charge_constants_the_model_prices` pins the three
+/// constants this rests on; that all 30 cells meter the same total with the
+/// budget passed explicitly as without it is checked by the collection.
+pub fn new_litesvm_charging_hash_bytes(hash_byte_cost: u64) -> LiteSVM {
     const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
     let mut svm = with_decision_syscalls(
         LiteSVM::new_debuggable(true)
             .with_mainnet_features()
+            .with_compute_budget(ComputeBudget {
+                sha256_byte_cost: hash_byte_cost,
+                ..ComputeBudget::new_with_defaults(true, true)
+            })
             .with_builtins(),
     )
     .with_lamports(1_000_000u64.wrapping_mul(LAMPORTS_PER_SOL))
@@ -906,6 +953,33 @@ mod tests {
             current_embedded_core_cu(&snapshot),
             current_registry_init_cu(1, 0)
         );
+    }
+
+    /// `hash_syscall_cu` hardcodes the runtime's hash schedule. If the budget
+    /// ever carries different constants, every cell's hash charge is wrong by
+    /// a silent amount, so read them back from the budget the shim installs.
+    #[test]
+    fn the_budget_carries_the_charge_constants_the_model_prices() {
+        let budget = ComputeBudget::new_with_defaults(true, true);
+        assert_eq!(budget.sha256_base_cost, HASH_BASE_CU);
+        assert_eq!(budget.sha256_byte_cost, DEFAULT_HASH_BYTE_COST);
+        assert_eq!(budget.mem_op_base_cost, MEM_OP_BASE_CU);
+        // The campaign's transactions request exactly this limit, so pinning
+        // the budget cannot change what they are allowed to spend.
+        assert_eq!(budget.compute_unit_limit, MAX_TRANSACTION_CU);
+    }
+
+    /// Zeroing the byte cost must leave the floor and the base alone, or the
+    /// difference between the two runs is not the byte half.
+    #[test]
+    fn the_free_byte_run_leaves_only_the_floor() {
+        let free = ComputeBudget {
+            sha256_byte_cost: 0,
+            ..ComputeBudget::new_with_defaults(true, true)
+        };
+        assert_eq!(free.sha256_base_cost, HASH_BASE_CU);
+        assert_eq!(free.mem_op_base_cost, MEM_OP_BASE_CU);
+        assert_eq!(current_hash_syscall_cu(7, 47, 0), 85 * 7 + 10 * 47);
     }
 
     #[test]

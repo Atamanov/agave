@@ -68,11 +68,11 @@ pub fn syscall_cu(
             ),
         ));
     }
-    for call in &trace.keccak_calls {
-        cu = cu.saturating_add(u64::from(call.calls).saturating_mul(
-            crate::keccak_cu(u64::from(call.slices), u64::from(call.bytes)),
-        ));
-    }
+    cu = cu.saturating_add(crate::hash_syscall_cu(
+        u64::from(trace.hash_syscalls.calls),
+        u64::from(trace.hash_syscalls.slices),
+        u64::from(trace.hash_syscalls.byte_cu),
+    ));
     for call in &trace.plonk_multi_vk_reduce_calls {
         // Same formula the runtime charges: the fitted scalar schedule plus the
         // transcript keccaks it replays on the guest's behalf.

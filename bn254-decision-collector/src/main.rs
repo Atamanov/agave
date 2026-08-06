@@ -5,14 +5,13 @@ use {
     solana_account_v3::Account,
     solana_address_v2::Address,
     solana_bn254_decision_bench::{
-        ColumnId, ExecutionRequest, FixtureManifest, FrLincombCall, GtTargetMultiexpCall, KeccakCall, MsmCall, PlonkMultiVkReduceCall,
-        OperationTrace,
-        PairingCall, ResidualCell, RowId,
+        ColumnId, ExecutionRequest, FixtureManifest, FrLincombCall, GtTargetMultiexpCall,
+        HashSyscallTotals, MsmCall, OperationTrace, PairingCall, PlonkMultiVkReduceCall,
+        ResidualCell, RowId,
     },
     solana_bn254_decision_litesvm::{
-        GroupOpKind, ObserverSnapshot, current_embedded_hot_core_cu,
-        new_litesvm_with_decision_syscalls, observer_snapshot, registry_account_len,
-        reset_observers,
+        DEFAULT_HASH_BYTE_COST, GroupOpKind, ObserverSnapshot, current_embedded_hot_core_cu,
+        new_litesvm_charging_hash_bytes, observer_snapshot, registry_account_len, reset_observers,
     },
     solana_compute_budget_interface_v3::ComputeBudgetInstruction,
     solana_instruction_v3::{Instruction, account_meta::AccountMeta},
@@ -547,19 +546,16 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let keccak_calls = snapshot
-        .keccaks
-        .iter()
-        .map(|event| {
-            Ok(KeccakCall {
-                slices: u32::try_from(event.slices).map_err(|_| "keccak slice overflow")?,
-                bytes: u32::try_from(event.bytes).map_err(|_| "keccak byte overflow")?,
-                calls: 1,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
+    let hash_syscalls = HashSyscallTotals {
+        calls: u32::try_from(snapshot.hash_syscalls.calls)
+            .map_err(|_| "hash syscall count overflow")?,
+        slices: u32::try_from(snapshot.hash_syscalls.slices)
+            .map_err(|_| "hash syscall slice overflow")?,
+        byte_cu: u32::try_from(snapshot.hash_syscalls.byte_cu)
+            .map_err(|_| "hash syscall byte CU overflow")?,
+    };
     Ok(OperationTrace {
-        keccak_calls,
+        hash_syscalls,
         plonk_multi_vk_reduce_calls,
         fr_lincomb_calls,
         stock_g1_additions,
@@ -625,7 +621,14 @@ fn require_b5_dispatch_attestation(snapshot: &ObserverSnapshot) -> Result<(), St
 /// Returns the SVM plus the registry entry IDs the hot instruction needs, in
 /// the order the guest reads them.
 fn setup_svm(case: &Case) -> Result<(LiteSVM, Vec<[u8; 32]>), String> {
-    let mut svm = new_litesvm_with_decision_syscalls();
+    setup_svm_charging_hash_bytes(case, DEFAULT_HASH_BYTE_COST)
+}
+
+fn setup_svm_charging_hash_bytes(
+    case: &Case,
+    hash_byte_cost: u64,
+) -> Result<(LiteSVM, Vec<[u8; 32]>), String> {
+    let mut svm = new_litesvm_charging_hash_bytes(hash_byte_cost);
     let program = read(&case.program_path)?;
     svm.add_program(case.program_id, &program)
         .map_err(|error| format!("load {}: {error}", case.program_path.display()))?;
@@ -706,15 +709,50 @@ fn setup_svm(case: &Case) -> Result<(LiteSVM, Vec<[u8; 32]>), String> {
     Ok((svm, hot_ids))
 }
 
+/// The byte half of the cell's hash-syscall charge, by difference.
+///
+/// `sha256_byte_cost` scales the per-slice term of every `SyscallHash` charge
+/// and touches nothing else, so running the same transaction at cost 1 and at
+/// cost 0 isolates it. At 0 each slice falls to the `mem_op_base_cost` floor,
+/// which the register trace already accounts for. The two runs must agree on
+/// the call shapes, or the difference is measuring two different executions.
+fn measure_hash_byte_cu(case: &Case) -> Result<u64, String> {
+    let mut charged = Vec::new();
+    for hash_byte_cost in [DEFAULT_HASH_BYTE_COST, 0] {
+        let (mut svm, registry_ids) = setup_svm_charging_hash_bytes(case, hash_byte_cost)?;
+        reset_observers();
+        let metadata = send(&mut svm, instruction(case, case.tag, false, &registry_ids))?;
+        let snapshot = observer_snapshot();
+        charged.push((
+            metadata.compute_units_consumed,
+            snapshot.hash_syscalls.calls,
+            snapshot.hash_syscalls.slices,
+        ));
+    }
+    let (metered, calls, slices) = charged[0];
+    let (floored, free_calls, free_slices) = charged[1];
+    if (calls, slices) != (free_calls, free_slices) {
+        return Err(format!(
+            "hash-syscall shape moved with the byte cost: {calls}/{slices} against \
+             {free_calls}/{free_slices}"
+        ));
+    }
+    metered.checked_sub(floored).ok_or_else(|| {
+        format!("free-byte run charged {floored}, more than the metered run's {metered}")
+    })
+}
+
 fn execute(cli: &Cli, request: &ExecutionRequest) -> Result<ResidualCell, String> {
     let case = build_case(cli, request)?;
     let program_bytes = read(&case.program_path)?;
+    let hash_byte_cu = measure_hash_byte_cu(&case)?;
     let (mut svm, registry_ids) = setup_svm(&case)?;
     let mut observations = Vec::new();
     for _ in 0..SAMPLE_COUNT {
         reset_observers();
         let metadata = send(&mut svm, instruction(&case, case.tag, false, &registry_ids))?;
-        let snapshot = observer_snapshot();
+        let mut snapshot = observer_snapshot();
+        snapshot.hash_syscalls.byte_cu = hash_byte_cu;
         require_b5_dispatch_attestation(&snapshot)?;
         let observed_trace = trace(&snapshot)?;
         let embedded = current_embedded_hot_core_cu(&snapshot);

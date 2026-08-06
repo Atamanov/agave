@@ -1,7 +1,11 @@
-//! Read-only observation of stock `sol_alt_bn128_group_op` calls.
+//! Read-only observation of stock `sol_alt_bn128_group_op` and hash syscalls.
 //!
 //! This callback inspects LiteSVM's SBPF register trace. It never registers,
-//! wraps, replaces, or reprices Agave's stock syscall.
+//! wraps, replaces, or reprices Agave's stock syscalls. For the hash syscalls
+//! it cannot: LiteSVM 0.12 builds its environment from
+//! `create_program_runtime_environment_v1`, and sbpf's `register_function`
+//! rejects a second entry under a name already taken, so `with_custom_syscall`
+//! panics on `sol_keccak256` rather than replacing it.
 
 use {
     litesvm::{InvocationInspectCallback, LiteSVM},
@@ -17,6 +21,10 @@ use {
 
 pub const GROUP_OP_SYSCALL: &str = "sol_alt_bn128_group_op";
 pub const MAX_GROUP_OP_EVENTS: usize = 1_024;
+
+/// Every syscall the runtime serves with `SyscallHash`. They share one charge
+/// formula and one set of constants, so the campaign meters them as one class.
+pub const HASH_SYSCALLS: [&str; 4] = ["sol_sha256", "sol_keccak256", "sol_blake3", "sol_sha512"];
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,11 +70,26 @@ pub struct StockGroupOpEvent {
     pub pairing_elements: Option<u64>,
 }
 
+/// One `SyscallHash` call as the register trace sees it.
+///
+/// The slice descriptors live in guest memory and the trace carries registers
+/// only, so the per-slice byte lengths that set the charge are not here. They
+/// are recovered from the metered difference between two runs whose
+/// `sha256_byte_cost` differs; see `new_litesvm_charging_hash_bytes`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HashSyscallEvent {
+    pub syscall: String,
+    pub instruction_trace_index: usize,
+    pub vm_pc: u64,
+    pub slices: u64,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StockGroupOpObservation {
     pub tracing_enabled: bool,
     pub vm_trace_count: usize,
     pub events: Vec<StockGroupOpEvent>,
+    pub hash_syscalls: Vec<HashSyscallEvent>,
     pub errors: Vec<String>,
 }
 
@@ -107,12 +130,22 @@ impl StockGroupOpObserver {
 }
 
 fn matching_syscall_instruction(opcode: u8, immediate: i64, static_syscalls: bool) -> bool {
+    is_syscall_to(opcode, immediate, static_syscalls, GROUP_OP_SYSCALL)
+}
+
+fn is_syscall_to(opcode: u8, immediate: i64, static_syscalls: bool, name: &str) -> bool {
     let syscall_opcode = if static_syscalls {
         opcode == ebpf::SYSCALL
     } else {
         opcode == ebpf::CALL_IMM
     };
-    syscall_opcode && immediate as u32 == ebpf::hash_symbol_name(GROUP_OP_SYSCALL.as_bytes())
+    syscall_opcode && immediate as u32 == ebpf::hash_symbol_name(name.as_bytes())
+}
+
+fn hash_syscall_name(opcode: u8, immediate: i64, static_syscalls: bool) -> Option<&'static str> {
+    HASH_SYSCALLS
+        .into_iter()
+        .find(|name| is_syscall_to(opcode, immediate, static_syscalls, name))
 }
 
 fn decode_trace(
@@ -155,6 +188,17 @@ fn decode_trace(
         }
 
         let instruction = ebpf::get_insn_unchecked(text, vm_pc as usize);
+        if let Some(syscall) = hash_syscall_name(instruction.opc, instruction.imm, static_syscalls)
+        {
+            observation.hash_syscalls.push(HashSyscallEvent {
+                syscall: syscall.to_owned(),
+                instruction_trace_index,
+                vm_pc,
+                // r2, the slice count `SyscallHash` reads as `vals_len`.
+                slices: registers[2],
+            });
+            continue;
+        }
         if !matching_syscall_instruction(instruction.opc, instruction.imm, static_syscalls) {
             continue;
         }

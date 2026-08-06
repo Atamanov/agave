@@ -28,18 +28,30 @@ pub fn current_pairing_map_cu(pairs: u64) -> u64 {
 /// subtractor once omitted those three, so they stayed inside the residual
 /// while the renderer added them again, overstating every Current cell by
 /// between 1,002 and 4,425 CU. One definition now serves both.
-/// What the runtime charges `sol_keccak256`: a base plus, per slice, the
-/// greater of the memory-op floor and the byte cost. Mirrors `SyscallHash`.
+pub const HASH_BASE_CU: u64 = 85;
+pub const HASH_BYTE_COST: u64 = 1;
+pub const MEM_OP_BASE_CU: u64 = 10;
+
+/// What `SyscallHash` charges: `sha256_base_cost` per call plus, per slice,
+/// `max(mem_op_base_cost, sha256_byte_cost * len / 2)`. `sol_keccak256`,
+/// `sol_sha256`, `sol_blake3` and `sol_sha512` all read the same three
+/// constants, so one formula prices the whole class.
 ///
-/// Nothing observed keccak until now, so a transcript's syscall charge sat
-/// inside the guest residual and made frozen hashing look like software.
-pub fn keccak_cu(slices: u64, bytes: u64) -> u64 {
-    const BASE: u64 = 85;
-    const BYTE_COST: u64 = 1;
-    const MEM_OP_BASE: u64 = 10;
-    let per_slice_bytes = bytes.checked_div(slices.max(1)).unwrap_or_default();
-    let slice_cost = MEM_OP_BASE.max(BYTE_COST.saturating_mul(per_slice_bytes.saturating_div(2)));
-    BASE.saturating_add(slice_cost.saturating_mul(slices))
+/// Split as base, floor and excess because that is what can be measured:
+/// `calls` and `slices` come from the VM register trace, `byte_cu` from the
+/// metered difference between two runs whose `sha256_byte_cost` differs.
+pub fn hash_syscall_cu(calls: u64, slices: u64, byte_cu: u64) -> u64 {
+    HASH_BASE_CU
+        .saturating_mul(calls)
+        .saturating_add(MEM_OP_BASE_CU.saturating_mul(slices))
+        .saturating_add(byte_cu)
+}
+
+/// The excess one slice adds over the `mem_op_base_cost` floor.
+pub fn hash_slice_excess_cu(len: u64) -> u64 {
+    HASH_BYTE_COST
+        .saturating_mul(len.saturating_div(2))
+        .saturating_sub(MEM_OP_BASE_CU)
 }
 
 pub fn stock_group_op_pairing_cu(pairs: u64) -> u64 {
@@ -225,16 +237,27 @@ pub struct FrLincombCall {
     pub calls: u32,
 }
 
-/// One atomic multi-VK snarkjs PLONK reduction. The runtime replays the whole
-/// transcript and returns the MSM coefficients, so the guest does none of it.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+/// Every `SyscallHash` call of one cell, summed.
+///
+/// One aggregate rather than a list of calls, because the per-call charge is
+/// unobservable. It turns on the byte length of each slice; those lengths sit
+/// in guest memory, LiteSVM 0.12 cannot install an observing `sol_keccak256`
+/// over the builtin, and the VM register trace carries registers only. What is
+/// left is a metered difference across two `sha256_byte_cost` settings, which
+/// is one number per transaction. A future attempt to make this per-call will
+/// hit the same wall.
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(deny_unknown_fields)]
-pub struct KeccakCall {
-    pub slices: u32,
-    pub bytes: u32,
+pub struct HashSyscallTotals {
     pub calls: u32,
+    pub slices: u32,
+    pub byte_cu: u32,
 }
 
+/// One atomic multi-VK snarkjs PLONK reduction. The runtime replays the whole
+/// transcript and returns the MSM coefficients, so the guest does none of it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlonkMultiVkReduceCall {
@@ -287,9 +310,10 @@ pub struct OperationTrace {
     /// The whole PLONK verifier reduction, moved into the runtime.
     #[serde(default)]
     pub plonk_multi_vk_reduce_calls: Vec<PlonkMultiVkReduceCall>,
-    /// Transcript hashing. Metered by the runtime like any other syscall.
+    /// Transcript hashing. Metered by the runtime like any other syscall, and
+    /// counted as guest software until it was.
     #[serde(default)]
-    pub keccak_calls: Vec<KeccakCall>,
+    pub hash_syscalls: HashSyscallTotals,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -599,4 +623,45 @@ pub struct ColumnDescriptor {
     pub label: String,
     pub backend_id: String,
     pub pricing_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The floor and the byte term cross at 20 bytes, and every slice is
+    /// charged on its own length.
+    #[test]
+    fn a_slice_is_charged_on_its_own_length() {
+        assert_eq!(hash_slice_excess_cu(1), 0);
+        assert_eq!(hash_slice_excess_cu(20), 0);
+        assert_eq!(hash_slice_excess_cu(21), 0);
+        assert_eq!(hash_slice_excess_cu(22), 1);
+        assert_eq!(hash_slice_excess_cu(64), 22);
+        assert_eq!(hash_slice_excess_cu(128), 54);
+    }
+
+    /// `derive_seed`'s framing, which mixes a domain tag, two-byte counters, a
+    /// key digest, G1 and G2 points and a public input in one call.
+    ///
+    /// Pinned on a mixed shape on purpose. Averaging the total over the slice
+    /// count, as this once did, prices the same call at 265, and a
+    /// uniform-slice case cannot tell the two apart.
+    #[test]
+    fn a_mixed_call_is_not_priced_on_its_average_slice() {
+        let slices = [41u64, 2, 32, 8, 2, 64, 128, 64, 32];
+        let byte_cu: u64 = slices.iter().copied().map(hash_slice_excess_cu).sum();
+        assert_eq!(byte_cu, 120);
+        assert_eq!(hash_syscall_cu(1, slices.len() as u64, byte_cu), 295);
+    }
+
+    /// The base is charged once per call, not once per cell. The shape is the
+    /// five-proof same-VK registry cell: one key digest, one batch seed and
+    /// five randomizer draws.
+    #[test]
+    fn the_base_is_charged_once_per_call() {
+        assert_eq!(hash_syscall_cu(7, 47, 794), 1_859);
+        assert_eq!(hash_syscall_cu(1, 47, 794), 1_349);
+        assert_eq!(hash_syscall_cu(0, 0, 0), 0);
+    }
 }
