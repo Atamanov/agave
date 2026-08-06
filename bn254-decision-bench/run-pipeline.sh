@@ -22,6 +22,16 @@ for guest in groth16 groth-recursion plonk-direct plonk-recursion; do
 done
 
 cargo build -p solana-bn254-decision-collector
+# The collector decides what every cell reports, so it must be newer than every
+# source that can change a count. A stale one already published a full 30-cell
+# contract from a binary built before the feature under test existed.
+COLLECTOR=${CARGO_TARGET_DIR:-$ROOT/target}/debug/solana-bn254-decision-collector
+newer=$(find bn254-decision-collector/src bn254-decision-litesvm/src bn254-decision-bench/src \
+    -name '*.rs' -newer "$COLLECTOR" -print -quit)
+if [ -n "$newer" ]; then
+    echo "FAIL: $COLLECTOR is older than $newer" >&2
+    exit 1
+fi
 bash bn254-decision-bench/collect-residuals.sh
 
 # A null cell means a collector run failed. Rendering it produces a core-only

@@ -18,6 +18,14 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 RESEARCH=research/bn254-decision-table-v2-20260804
 PROGS=${PROGS:-$ROOT/target/decision-guests}
+# Cargo writes to CARGO_TARGET_DIR when it is set, so a hardcoded ./target path
+# silently runs whatever binary was left there. That once published a 30-cell
+# contract from a collector built before the feature under test existed.
+COLLECTOR=${CARGO_TARGET_DIR:-$ROOT/target}/debug/solana-bn254-decision-collector
+if [ ! -x "$COLLECTOR" ]; then
+    echo "FAIL: no collector at $COLLECTOR" >&2
+    exit 1
+fi
 OUT=$RESEARCH/residuals.json
 TRACES=$RESEARCH/observed-traces.json
 CELLS=$(mktemp -d)
@@ -76,7 +84,7 @@ print(json.dumps({
 }))
 PY
         index=$((index + 1))
-        cell=$(./target/debug/solana-bn254-decision-collector \
+        cell=$("$COLLECTOR" \
             --workspace-root . --program-dir "$PROGS" \
             --plonk-fixture-dir "$RESEARCH/fixtures-v3/plonk-zolana-shapes" \
             --runtime-revision "$REV" < /tmp/cell-req.json 2>"$CELLS/error")
