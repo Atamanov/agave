@@ -23,15 +23,20 @@ const LANE_WIDTH: u32 = ALT_BN128_PAIRING_LANE_WIDTH as u32;
 fn notation(column: ColumnId, trace: &OperationTrace) -> String {
     let mut parts = Vec::new();
     for call in trace.pairing_checks.iter().chain(&trace.pairing_maps) {
-        // Lanes come off the whole call, so a mixed call cannot attribute them
-        // to the live or the prepared half.
-        let mark = if call.pairs >= LANE_WIDTH { "\u{2078}" } else { "" };
         let width = match (call.full_pairs, call.registered_pairs) {
-            (live, 0) => format!("{live}ML{mark}"),
-            (0, prepared) => format!("{prepared}pML{mark}"),
-            (live, prepared) => format!("({live}ML+{prepared}pML){mark}"),
+            (live, 0) => format!("{live}ML"),
+            (0, prepared) => format!("{prepared}pML"),
+            // Lanes come off the whole call, so a mixed call cannot attribute
+            // them to the live or the prepared half.
+            (live, prepared) => format!("({live}ML+{prepared}pML)"),
         };
-        parts.push(format!("{}\u{d7}{width}", call.calls));
+        let (lanes, remainder) = (call.pairs / LANE_WIDTH, call.pairs % LANE_WIDTH);
+        let lane_split = match (lanes, remainder) {
+            (0, _) => String::new(),
+            (lanes, 0) => format!("[{lanes}L]"),
+            (lanes, remainder) => format!("[{lanes}L+{remainder}]"),
+        };
+        parts.push(format!("{}\u{d7}{width}{lane_split}", call.calls));
     }
     if trace.g2_subgroup_checks > 0 {
         parts.push(format!("{}SC", trace.g2_subgroup_checks));
@@ -86,15 +91,15 @@ fn main() {
          identity compare.\n"
     );
     println!(
-        "\u{2078} marks a call wide enough to fill an {LANE_WIDTH}-wide IFMA lane, so it is \
-         charged on the lane tariff rather than per pair. A call of p pairs takes \
-         p/{LANE_WIDTH} full lanes and carries p mod {LANE_WIDTH} pairs as remainder, and the \
-         remainder is dearer per pair than a lane is. {LANE_WIDTH} pairs cost less than 7.\n"
+        "[nL+r] is how one call is charged, n full {LANE_WIDTH}-wide IFMA lanes plus r \
+         pairs left over. No bracket means the call never fills a lane and every \
+         pair is charged singly. A remainder pair costs more than a pair inside a \
+         lane, which is why {LANE_WIDTH} pairs cost less than 7 and why a call is padded \
+         to a lane boundary where that is cheaper.\n"
     );
     println!(
-        "A full lane costs less than a partial one, so a call is padded with \
-         inert pairs to a lane boundary. That is why a marked call can carry \
-         more pairs than an unmarked one and still charge less.\n"
+        "Padding is why a call can carry more pairs than another and still charge \
+         less. Compare [1L] against a bare 7ML.\n"
     );
     print!("| Scenario |");
     for column in ColumnId::ALL {

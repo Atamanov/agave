@@ -61,8 +61,17 @@ fn a_pairing_term_reports_calls_and_width_separately() {
     );
     // A padded lane is the whole reason the notation carries a width.
     assert!(
-        table.contains("1\u{d7}8ML\u{2078}"),
+        table.contains("1\u{d7}8ML[1L]"),
         "a lane-filling call must show one call of the full lane width"
+    );
+    assert!(
+        table.contains("1\u{d7}9ML[1L+1]"),
+        "a call past a lane boundary must show the remainder it pays for"
+    );
+    // A superscript beside a count reads as arithmetic on that count.
+    assert!(
+        !table.contains('\u{2078}'),
+        "lane width belongs in the bracket, not in a superscript next to a number"
     );
 }
 
