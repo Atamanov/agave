@@ -22,15 +22,16 @@
         "stock_g1_additions": 5,
         "stock_g1_multiplications": 5,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 3899,
-      "transaction_cu": 392829,
+      "non_core_transaction_cu": 3229,
+      "transaction_cu": 392159,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "2b3e52462d79f273e6ec77b73c426def26cc9d84526dc4f8c6300e44ae24d7b2"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "96d47d90ae81ba951ddc4ecb55b1bb8147bf50473320d61267cf233a1617a650"
     },
     {
       "row_id": "groth16_n5_same_vk",
@@ -114,15 +115,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 11883,
-      "transaction_cu": 136253,
+      "non_core_transaction_cu": 8750,
+      "transaction_cu": 133120,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "2c146e927e85b0ff127f58a729a768f2fb0962fd226eec4784d5a5389d3e9587"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "b3d04091be7e912b4e5357bb043ab6056ee315aa95ea9a0deecbff53d3933311"
     },
     {
       "row_id": "groth16_n5_same_vk",
@@ -206,15 +208,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 12546,
-      "transaction_cu": 126131,
+      "non_core_transaction_cu": 9332,
+      "transaction_cu": 122917,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "43e01c1b1fa43731c226b8bed7a5cc451ad39dd901aca9557d4234d10eb2e9de"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "7fb1d0066d24fc0f615951292f2d43903f06633a81b22490f24a917909f1ed17"
     },
     {
       "row_id": "groth16_n5_same_vk",
@@ -302,15 +305,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 11180,
-      "transaction_cu": 111241,
+      "non_core_transaction_cu": 10325,
+      "transaction_cu": 110386,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "a842f34a2c86853b5e646465f266715c319fe8d650ca7d33dcfd5503abe9950c",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "0433b22be200b52ce555347550174199af6f6f7d10f023ba56b9b71876560546"
+      "program_sha256": "7eb1c56770d8799f6f57d69d451d33ef8b9d64369d4a912eb08167b4a170e7a8",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "c220947da165a34d5867c228498de718258aea0ec2dac002bd385794b1b8fe05"
     },
     {
       "row_id": "groth16_n5_same_vk",
@@ -332,15 +336,16 @@
         "stock_g1_additions": 5,
         "stock_g1_multiplications": 5,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 20007,
-      "transaction_cu": 267147,
+      "non_core_transaction_cu": 18186,
+      "transaction_cu": 265326,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "1a102a52bd30b0c14daa4b6d30346de23513c1b0a98150710d464f5405779d16"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "f7fd6c35f9a4894429b11c836bb76442332fef47c22c4688793b08122b52fe6b"
     },
     {
       "row_id": "groth16_n5_same_vk",
@@ -428,15 +433,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 11837,
-      "transaction_cu": 123461,
+      "non_core_transaction_cu": 9637,
+      "transaction_cu": 121261,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "f7fe3e323955aeb1abfa0f0c6ed86146325fe3b04b658f220cccb37d71685bb4"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "b829b11c38a6e4f4177a4c75e064e740c54ee29af63cf02602edd088f2a438b3"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -458,15 +464,16 @@
         "stock_g1_additions": 2,
         "stock_g1_multiplications": 2,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 1999,
-      "transaction_cu": 157571,
+      "non_core_transaction_cu": 1492,
+      "transaction_cu": 157064,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "83388618ea5504861131bd0fcbca4460aac04917fdf0a9baf86cbb4a6f4a88bf"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "98a87ea521396a58dcf2466acba4f4cdde62c6a9089b43370703ab375804654b"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -538,15 +545,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 9177,
-      "transaction_cu": 130301,
+      "non_core_transaction_cu": 6967,
+      "transaction_cu": 128091,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "22511871627c7dd16f71f07b8f32b21dc6911abb2641ba95c60899f4b295abd0"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "49820e68377142b61cf6037a027d0bc632b7df34a62d270a7be083ef3e4445e4"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -618,15 +626,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 10173,
-      "transaction_cu": 109727,
+      "non_core_transaction_cu": 7838,
+      "transaction_cu": 107392,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "8f304ff4d1113d7614bcee0a580aa470b9d3dcfa33700acaadcb8771802cb47a"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "0caf8ebe372ae904c75d217b4e2779785e6ca931e82810845a354d94dc9587ba"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -702,15 +711,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 9962,
-      "transaction_cu": 109399,
+      "non_core_transaction_cu": 9137,
+      "transaction_cu": 108574,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "a842f34a2c86853b5e646465f266715c319fe8d650ca7d33dcfd5503abe9950c",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "20f2c4e53a83306d9fc5c869651b36e537e8544a53d529e80c123bd20ba952df"
+      "program_sha256": "7eb1c56770d8799f6f57d69d451d33ef8b9d64369d4a912eb08167b4a170e7a8",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "d1bc946c684e88a553f0f34c8b78c4a23dcd74cadb67c8b191276bef39108b5f"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -732,15 +742,16 @@
         "stock_g1_additions": 2,
         "stock_g1_multiplications": 2,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 11526,
-      "transaction_cu": 110382,
+      "non_core_transaction_cu": 9131,
+      "transaction_cu": 107987,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "c5d838d58ec3524cf45c8ee8610cf4b6f268f4cc4ce8e0a39dd9e6b6566f29a5"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "52d4c9c5732782816949dc6537108330f136f1d3ee0da29bb47455590d2dc7a8"
     },
     {
       "row_id": "groth16_n2_distinct_vk",
@@ -814,15 +825,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 16778,
-      "transaction_cu": 137696,
+      "non_core_transaction_cu": 7961,
+      "transaction_cu": 128879,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "bfb2c6200bd2ec44e28640e2743433c084c9508e126f476c4ba67a2d9ebf0605"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "cb6b07b048553ef09e266990761101b1a958d0156c5371231d86e4019a14b3a0"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -844,15 +856,16 @@
         "stock_g1_additions": 3,
         "stock_g1_multiplications": 3,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 2703,
-      "transaction_cu": 236061,
+      "non_core_transaction_cu": 2071,
+      "transaction_cu": 235429,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "53a25da83eb8ef989727466cdf2c2da8006f036526d4c5f4e5bbdaf12c65f5cd"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "9d43b5da28b92f1df51457be95bd535f7a50f74b59c525dadaa316fdeaaa8478"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -948,15 +961,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 13074,
-      "transaction_cu": 186137,
+      "non_core_transaction_cu": 9727,
+      "transaction_cu": 182790,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "12e0914c3d4f1fa3fc9707567733cd649315b71ec822865e4b3408b548eef6ae"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "20cc2283420161344ab57c34a77f55c48caa19c321d8e9c8dac37e6255352476"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -1052,15 +1066,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 14399,
-      "transaction_cu": 155107,
+      "non_core_transaction_cu": 10964,
+      "transaction_cu": 151672,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "87a2f32fb79d44cafc8a72662ddaf03c56181bbfdc702ee6eb1f56a81aeaf9c1"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "ddfdc4f60d0e5bbee925323982938daf8068124bb4f52a478027d43f3a63997d"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -1140,15 +1155,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 10306,
-      "transaction_cu": 111237,
+      "non_core_transaction_cu": 9471,
+      "transaction_cu": 110402,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "a842f34a2c86853b5e646465f266715c319fe8d650ca7d33dcfd5503abe9950c",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "06a36f0b0390bce9c1f52e32c41906e997f302623ea67505df34ae29c44e929e"
+      "program_sha256": "7eb1c56770d8799f6f57d69d451d33ef8b9d64369d4a912eb08167b4a170e7a8",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "3830e38e4f3995f2673c571f7bb67afe6a41b4112466dc87d4a816995131547f"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -1170,15 +1186,16 @@
         "stock_g1_additions": 3,
         "stock_g1_multiplications": 3,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 16571,
-      "transaction_cu": 164855,
+      "non_core_transaction_cu": 13292,
+      "transaction_cu": 161576,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "084bd78e2fa37a0a905447f397a25fe668b17b35a7c1171d12d393ff1316244c"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "9e10065fd986cbfdae2ecc3a8a271d61279091aae985145eb912a489018aec90"
     },
     {
       "row_id": "groth16_n3_distinct_vk",
@@ -1276,15 +1293,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 24060,
-      "transaction_cu": 189902,
+      "non_core_transaction_cu": 11194,
+      "transaction_cu": 177036,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "88e5a16beef453fff6b80241ca2cd89ebf785b4c9d80007d0e1e0037d0f39efe",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "49fb80331d7fd959e44d268166b8e11b73fd1fd41493a5fb266c9e7d37d9c298"
+      "program_sha256": "117247313816298c9aeeaa3f9e8bdce8f59700a9844ca38bd388fb9ad4af31ee",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "395b1e4d8ad7acb49c469e2bbf64653ba6b8ea36159871b402890c49b268d87b"
     },
     {
       "row_id": "plonk_n2_distinct_vk_shared_srs",
@@ -1306,15 +1324,16 @@
         "stock_g1_additions": 36,
         "stock_g1_multiplications": 40,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 250558,
-      "transaction_cu": 514154,
+      "non_core_transaction_cu": 247021,
+      "transaction_cu": 510617,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "6e468b7d253a138f7bcc4fbf962db9e915189c276cdb6fe3f2a1191b139b8735"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "ff3f1058d1073fb34d25810a16554465141b58895d17a7b64e366db114cc0242"
     },
     {
       "row_id": "plonk_n2_distinct_vk_shared_srs",
@@ -1352,15 +1371,16 @@
             "public_inputs": 2,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 16352,
-      "transaction_cu": 87811,
+      "non_core_transaction_cu": 8063,
+      "transaction_cu": 79522,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "e837bff26a8aa60cb0970a87fa7ff6fbaab76c80fa560eb2fffbff2838717ea4"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "3c6053bab65623341c21effcbbc1c4cd1c4f06fc8e1bfa062c542e689a3c4883"
     },
     {
       "row_id": "plonk_n2_distinct_vk_shared_srs",
@@ -1398,15 +1418,16 @@
             "public_inputs": 2,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 16614,
-      "transaction_cu": 80883,
+      "non_core_transaction_cu": 8598,
+      "transaction_cu": 72867,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "daea0b797e00eca1c3da0ec341a55777ab47e80363805a4632770ed73e92e798"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "643a879b847ca11397101ebd5e3f11aff3d333920302b63c082ec591d145b6f6"
     },
     {
       "row_id": "plonk_n2_distinct_vk_shared_srs",
@@ -1486,15 +1507,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 10306,
-      "transaction_cu": 111237,
+      "non_core_transaction_cu": 9471,
+      "transaction_cu": 110402,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "5c362ba260184d9a8d6012a6289cc5373e61aa391c42a037ba313cf030834b4f",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "ac6738ebdb3579f8d112184a43a2fc9d3adee89c9ff3be8ee8ef6499f1039342"
+      "program_sha256": "8e66225b2e0dc1a05f2e7d0e6a19050f255f43e8c02a8e3cc8c67e11f741e804",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "7e6d5724f2ff31d5e4c77c28ff58703004b734ed36a7d85a1af93b97803391cf"
     },
     {
       "row_id": "plonk_n2_distinct_vk_shared_srs",
@@ -1516,15 +1538,16 @@
         "stock_g1_additions": 36,
         "stock_g1_multiplications": 40,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 250806,
-      "transaction_cu": 488266,
+      "non_core_transaction_cu": 247261,
+      "transaction_cu": 484721,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "3326b87e903be0d8e7e134d8bdec667c5b69eb22025203c6cb8a9951eb394209"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "2e359a60c680049799662d87ed5113c64adf80982309e35eb3377c48d09b0718"
     },
     {
       "row_id": "plonk_n2_distinct_vk_shared_srs",
@@ -1562,15 +1585,16 @@
             "public_inputs": 2,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 16415,
-      "transaction_cu": 87874,
+      "non_core_transaction_cu": 8125,
+      "transaction_cu": 79584,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "1c46e722093d0c641114f97376a5da40b91d952d336a1b29488710afe64f50db"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "ccf73cc0ad0e3d612f5f21c4578a5a57c00e6c3b44db7790ecc816719478a6a3"
     },
     {
       "row_id": "plonk_n3_distinct_vk_shared_srs",
@@ -1592,15 +1616,16 @@
         "stock_g1_additions": 54,
         "stock_g1_multiplications": 60,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 375945,
-      "transaction_cu": 771339,
+      "non_core_transaction_cu": 370787,
+      "transaction_cu": 766181,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "772a6976f9384e5b67300894a7167a7d17634644c5b5c9e20e93556471018da3"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "139d853131f37fddf5146665c6cd516d13c57cab6e01d3a91a65b476feede097"
     },
     {
       "row_id": "plonk_n3_distinct_vk_shared_srs",
@@ -1638,15 +1663,16 @@
             "public_inputs": 3,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 23000,
-      "transaction_cu": 111967,
+      "non_core_transaction_cu": 10933,
+      "transaction_cu": 99900,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "c0d41b1525cf51815128b558005099b5a569a73e81d83974655c0502e9496fb8"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "92f3c511085cde578ad03eeef8e918af7d3180f5ac8501b6f7f86c25e94d11f6"
     },
     {
       "row_id": "plonk_n3_distinct_vk_shared_srs",
@@ -1684,15 +1710,16 @@
             "public_inputs": 3,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 23289,
-      "transaction_cu": 105066,
+      "non_core_transaction_cu": 11521,
+      "transaction_cu": 93298,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "4864e30d430c8418e2725a4787bd22c8eb591591accbe8ceb6d58727d881dafc"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "0342cdc0e3e49119a30cdf0d653c369e114414fc0f83895dc899b4a154ea973b"
     },
     {
       "row_id": "plonk_n3_distinct_vk_shared_srs",
@@ -1784,15 +1811,16 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 11522,
-      "transaction_cu": 112648,
+      "non_core_transaction_cu": 10656,
+      "transaction_cu": 111782,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "5c362ba260184d9a8d6012a6289cc5373e61aa391c42a037ba313cf030834b4f",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "38fd923671f595d70b91ae641b0671c532c0c633e94b768f53b060b1f2c7fc23"
+      "program_sha256": "8e66225b2e0dc1a05f2e7d0e6a19050f255f43e8c02a8e3cc8c67e11f741e804",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "f9495c777796e4743cf2eddfc02b8a6080850c1b6f8589a94c7510734a04bfd7"
     },
     {
       "row_id": "plonk_n3_distinct_vk_shared_srs",
@@ -1814,15 +1842,16 @@
         "stock_g1_additions": 54,
         "stock_g1_multiplications": 60,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 376304,
-      "transaction_cu": 732494,
+      "non_core_transaction_cu": 371135,
+      "transaction_cu": 727325,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "98ccb85d675108b4db3409a80756b779fa731bbe7dd781d4e6794ff0c7604b87"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "7e1458dbf2aa407ed1cb5cfedfb4889a34512fba899bc66dc0096d3c819c56dc"
     },
     {
       "row_id": "plonk_n3_distinct_vk_shared_srs",
@@ -1860,15 +1889,16 @@
             "public_inputs": 3,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       },
-      "non_core_transaction_cu": 23063,
-      "transaction_cu": 112030,
+      "non_core_transaction_cu": 10995,
+      "transaction_cu": 99962,
       "source": "observed_in_tree_host_non_core",
       "sample_count": 2,
-      "program_sha256": "6c9b917261fcefbca4fdf516c6ce8f151dbf090ea341da72e45fb1edb037a143",
-      "runtime_revision": "6d6136e056e5a95b92e5c45394e2f4c2c6905cff",
-      "transaction_log_sha256": "05955cfea5c2274359645ab59aa42f38d641950acdc472eda67c5fbfcea4f40f"
+      "program_sha256": "7343f73096ac7feb42da7b6398912cecb0e54fb3b9efbf7287623d769a292945",
+      "runtime_revision": "c0e73b131064bcfa98273fbd86871050999d1d2f",
+      "transaction_log_sha256": "f6f9303d7f0a29f21ecb4be65c4c53e3b43a8168997fac16e4ba47720fd8fe7e"
     }
   ]
 }

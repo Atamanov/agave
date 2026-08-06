@@ -21,6 +21,7 @@ backend-b5-helius-ifma = [
 ]
 
 [dependencies]
+solana-keccak-hasher = { workspace = true }
 solana-bn254-decision-bench = { workspace = true }
 bytemuck = { workspace = true }
 litesvm = { version = "0.12", features = ["register-tracing"] }

@@ -21,7 +21,9 @@ extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
+#[cfg(test)]
 use ark_bn254::Fr;
+#[cfg(test)]
 use ark_ff::{BigInteger, One, PrimeField};
 use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
 use solana_bn254::prelude::{
@@ -33,10 +35,12 @@ use solana_bn254_batch_syscall::{
 };
 use solana_bn254_groth16_batch::{
     CurrentFp12Target, Proof, RandomizerMode, SameVkTarget, ValidatedVerifyingKey, VerifyingKey,
-    Version as FoldVersion, derive_randomizers, derive_seed, fold_pairs_for_verification,
+    Version as FoldVersion, derive_randomizer_scalars, derive_seed, fold_pairs_for_verification,
     groth16_batch_verify, groth16_current_fp12_verify, groth16_same_vk_fp12_verify,
     validate_batch_shape,
 };
+#[cfg(test)]
+use solana_bn254_groth16_batch::derive_randomizers;
 use solana_sha256_hasher::{hash as sha256_hash, hashv as sha256_hashv};
 
 #[cfg(target_os = "solana")]
@@ -134,25 +138,64 @@ struct VkView<'a> {
     ic1: &'a [u8; 64],
 }
 
+/// The record's `a` is deliberately absent: only the batch marshalling reads
+/// it, and it does so straight out of the record.
 struct ProofView<'a> {
     neg_a: &'a [u8; 64],
-    a: &'a [u8; 64],
     b: &'a [u8; 128],
     c: &'a [u8; 64],
 }
 
+/// The three fixed-stride record regions, bounded once. A record is cut out
+/// where it is read; parsing never materializes a view per record.
 struct Fixture<'a> {
     n: usize,
     k: usize,
     vk_index: &'a [u8],
-    vks: Vec<VkView<'a>>,
-    proofs: Vec<ProofView<'a>>,
-    inputs: Vec<&'a [u8; 32]>,
+    vks: &'a [u8],
+    proofs: &'a [u8],
+    inputs: &'a [u8],
 }
 
-fn slice<'a, const N: usize>(data: &'a [u8], offset: &mut usize) -> Option<&'a [u8; N]> {
-    let out = data.get(*offset..*offset + N)?.try_into().ok()?;
-    *offset += N;
+impl<'a> Fixture<'a> {
+    fn vk(&self, index: usize) -> Option<VkView<'a>> {
+        let record = record(self.vks, index, VK_BYTES)?;
+        Some(VkView {
+            alpha: record.get(..64)?.try_into().ok()?,
+            beta: record.get(64..192)?.try_into().ok()?,
+            gamma: record.get(192..320)?.try_into().ok()?,
+            delta: record.get(320..448)?.try_into().ok()?,
+            ic0: record.get(448..512)?.try_into().ok()?,
+            ic1: record.get(512..)?.try_into().ok()?,
+        })
+    }
+
+    fn key_of(&self, index: usize) -> Option<usize> {
+        self.vk_index.get(index).copied().map(usize::from)
+    }
+
+    fn proof(&self, index: usize) -> Option<ProofView<'a>> {
+        let record = record(self.proofs, index, PROOF_BYTES)?;
+        Some(ProofView {
+            neg_a: record.get(..64)?.try_into().ok()?,
+            b: record.get(128..256)?.try_into().ok()?,
+            c: record.get(256..)?.try_into().ok()?,
+        })
+    }
+
+    fn input(&self, index: usize) -> Option<&'a [u8; 32]> {
+        record(self.inputs, index, 32)?.try_into().ok()
+    }
+}
+
+fn record(region: &[u8], index: usize, stride: usize) -> Option<&[u8]> {
+    let start = index.checked_mul(stride)?;
+    region.get(start..start.checked_add(stride)?)
+}
+
+fn region<'a>(data: &'a [u8], offset: &mut usize, len: usize) -> Option<&'a [u8]> {
+    let out = data.get(*offset..offset.checked_add(len)?)?;
+    *offset += len;
     Some(out)
 }
 
@@ -164,32 +207,10 @@ fn parse(data: &[u8]) -> Option<Fixture<'_>> {
     if n == 0 || k == 0 || k > n {
         return None;
     }
-    let vk_index = data.get(offset..offset + n)?;
-    offset += n;
-    let mut vks = Vec::with_capacity(k);
-    for _ in 0..k {
-        vks.push(VkView {
-            alpha: slice::<64>(data, &mut offset)?,
-            beta: slice::<128>(data, &mut offset)?,
-            gamma: slice::<128>(data, &mut offset)?,
-            delta: slice::<128>(data, &mut offset)?,
-            ic0: slice::<64>(data, &mut offset)?,
-            ic1: slice::<64>(data, &mut offset)?,
-        });
-    }
-    let mut proofs = Vec::with_capacity(n);
-    for _ in 0..n {
-        proofs.push(ProofView {
-            neg_a: slice::<64>(data, &mut offset)?,
-            a: slice::<64>(data, &mut offset)?,
-            b: slice::<128>(data, &mut offset)?,
-            c: slice::<64>(data, &mut offset)?,
-        });
-    }
-    let mut inputs = Vec::with_capacity(n);
-    for _ in 0..n {
-        inputs.push(slice::<32>(data, &mut offset)?);
-    }
+    let vk_index = region(data, &mut offset, n)?;
+    let vks = region(data, &mut offset, k.checked_mul(VK_BYTES)?)?;
+    let proofs = region(data, &mut offset, n.checked_mul(PROOF_BYTES)?)?;
+    let inputs = region(data, &mut offset, n.checked_mul(32)?)?;
     if vk_index.iter().any(|&i| usize::from(i) >= k) {
         return None;
     }
@@ -207,7 +228,7 @@ fn parse(data: &[u8]) -> Option<Fixture<'_>> {
 #[inline(never)]
 fn verify_solo(f: &Fixture<'_>) -> Option<bool> {
     for i in 0..f.n {
-        let vk = &f.vks[usize::from(f.vk_index[i])];
+        let vk = f.vk(f.key_of(i)?)?;
         let ic = [*vk.ic0, *vk.ic1];
         let key = Groth16Verifyingkey {
             nr_pubinputs: 1,
@@ -218,8 +239,8 @@ fn verify_solo(f: &Fixture<'_>) -> Option<bool> {
             vk_ic: &ic,
             vk_commitment: None,
         };
-        let p = &f.proofs[i];
-        let public_inputs = [*f.inputs[i]];
+        let p = f.proof(i)?;
+        let public_inputs = [*f.input(i)?];
         let mut verifier = Groth16Verifier::new(p.neg_a, p.b, p.c, &public_inputs, &key).ok()?;
         if verifier.verify().is_err() {
             return Some(false);
@@ -285,24 +306,24 @@ fn build_rlc_pairs(f: &Fixture<'_>, data: &[u8]) -> Option<Vec<u8>> {
     // Proof side: e(r_i * negA_i, B_i).
     let mut vkx = Vec::with_capacity(f.n);
     for (i, randomizer) in rs.iter().enumerate().take(f.n) {
-        let p = &f.proofs[i];
+        let p = f.proof(i)?;
         let ra = mul(p.neg_a, randomizer)?;
         pairs.extend_from_slice(&ra);
         pairs.extend_from_slice(p.b);
-        let vk = &f.vks[usize::from(f.vk_index[i])];
-        vkx.push(add(vk.ic0, &mul(vk.ic1, f.inputs[i])?)?);
+        let vk = f.vk(f.key_of(i)?)?;
+        vkx.push(add(vk.ic0, &mul(vk.ic1, f.input(i)?)?)?);
     }
     // Key side per vk: gamma, delta, alpha-beta.
     for key in 0..f.k {
         let members: Vec<usize> = (0..f.n)
             .filter(|&i| usize::from(f.vk_index[i]) == key)
             .collect();
-        let vk = &f.vks[key];
+        let vk = f.vk(key)?;
         let mut vkx_sum: Option<[u8; 64]> = None;
         let mut c_sum: Option<[u8; 64]> = None;
         for &i in &members {
             let wx = mul(&vkx[i], &rs[i])?;
-            let wc = mul(f.proofs[i].c, &rs[i])?;
+            let wc = mul(f.proof(i)?.c, &rs[i])?;
             vkx_sum = Some(match vkx_sum {
                 Some(acc) => add(&acc, &wx)?,
                 None => wx,
@@ -336,8 +357,10 @@ fn verify_rlc_precompiles(f: &Fixture<'_>, data: &[u8]) -> Option<bool> {
 /// Case 2: the shipped fold through the batch syscalls.
 #[inline(never)]
 fn batch_inputs(f: &Fixture<'_>) -> Option<(Vec<ValidatedVerifyingKey>, Vec<Proof>)> {
-    let mut keys = Vec::with_capacity(f.k);
-    for vk in &f.vks {
+    let mut keys: Vec<ValidatedVerifyingKey> = Vec::with_capacity(f.k);
+    let key_slots = keys.spare_capacity_mut();
+    for index in 0..f.k {
+        let vk = f.vk(index)?;
         let key = VerifyingKey {
             alpha_g1: PodG1Point(*vk.alpha),
             beta_g2: PodG2Point(*vk.beta),
@@ -346,20 +369,32 @@ fn batch_inputs(f: &Fixture<'_>) -> Option<(Vec<ValidatedVerifyingKey>, Vec<Proo
             ic: vec![PodG1Point(*vk.ic0), PodG1Point(*vk.ic1)],
             pedersen: None,
         };
-        keys.push(key.trust().ok()?);
+        key_slots.get_mut(index)?.write(key.trust().ok()?);
     }
-    let mut proofs = Vec::with_capacity(f.n);
-    for i in 0..f.n {
-        let p = &f.proofs[i];
-        proofs.push(Proof {
-            vk_index: u16::from(f.vk_index[i]),
-            a: PodG1Point(*p.a),
-            b: PodG2Point(*p.b),
-            c: PodG1Point(*p.c),
+    // SAFETY: the loop wrote slots 0..f.k of the capacity reserved above. An
+    // early return leaves the length at zero and leaks the IC allocations of
+    // the slots already written; it frees nothing that is still owned.
+    unsafe { keys.set_len(f.k) };
+    // A `Proof` is 416 bytes, so pushing one costs a build and a move. Writing
+    // it into the reserved slot costs the build alone.
+    let mut proofs: Vec<Proof> = Vec::with_capacity(f.n);
+    let spare = proofs.spare_capacity_mut();
+    for index in 0..f.n {
+        let p = record(f.proofs, index, PROOF_BYTES)?;
+        spare.get_mut(index)?.write(Proof {
+            vk_index: u16::try_from(f.key_of(index)?).ok()?,
+            a: PodG1Point(p.get(64..128)?.try_into().ok()?),
+            b: PodG2Point(p.get(128..256)?.try_into().ok()?),
+            c: PodG1Point(p.get(256..)?.try_into().ok()?),
             commitment: None,
-            public_inputs: vec![PodScalar(*f.inputs[i])],
+            public_inputs: vec![PodScalar(*f.input(index)?)],
         });
     }
+    // SAFETY: the loop wrote slots 0..f.n, and `with_capacity(f.n)` reserved
+    // them. Any early return above leaves the length at zero, which leaks the
+    // public-input allocations of the slots already written and frees nothing
+    // that is still owned.
+    unsafe { proofs.set_len(f.n) };
     Some((keys, proofs))
 }
 
@@ -386,6 +421,7 @@ fn fr_from_pod(value: &[u8; 32]) -> Option<Fr> {
     Fr::from_bigint(<Fr as PrimeField>::BigInt::new(limbs))
 }
 
+#[cfg(test)]
 fn fr_to_pod(value: &Fr) -> [u8; 32] {
     let bytes = value.into_bigint().to_bytes_be();
     let mut out = [0u8; 32];
@@ -425,7 +461,23 @@ fn fr_sum(values: &[PodScalar]) -> Option<PodScalar> {
 
 /// Independent transcript randomizers with `r_0` pinned to one, so the first
 /// proof's A needs no scalar multiplication.
-fn batch_fp12_randomizers(seed: &[u8; 32], count: usize) -> Vec<Fr> {
+///
+/// The draw never leaves the byte domain. `byte_randomizers_are_the_field_path`
+/// pins the vector against the field derivation this replaced, element by
+/// element.
+fn batch_fp12_randomizers(seed: &[u8; 32], count: usize) -> Vec<PodScalar> {
+    let mut randomizers =
+        derive_randomizer_scalars(seed, count as u64, RandomizerMode::Independent);
+    if let Some(first) = randomizers.first_mut() {
+        *first = ONE_BE;
+    }
+    randomizers
+}
+
+/// [`batch_fp12_randomizers`] as it stood while it built field elements, kept
+/// as the bit-exactness reference.
+#[cfg(test)]
+fn reference_batch_fp12_randomizers(seed: &[u8; 32], count: usize) -> Vec<Fr> {
     let mut randomizers = derive_randomizers(seed, count as u64, RandomizerMode::Independent);
     if let Some(first) = randomizers.first_mut() {
         *first = Fr::one();
@@ -517,7 +569,7 @@ fn batch_fp12_fold(
 fn registry_sources(f: &Fixture<'_>) -> (Vec<PodG2Point>, Vec<PodG1G2Pair>) {
     let mut g2 = Vec::with_capacity(3 * f.k);
     let mut gt = Vec::with_capacity(f.k);
-    for vk in &f.vks {
+    for vk in (0..f.k).filter_map(|index| f.vk(index)) {
         g2.extend([
             PodG2Point(*vk.beta),
             PodG2Point(*vk.gamma),
@@ -559,7 +611,9 @@ fn registry_keyset_digest_v3(f: &Fixture<'_>) -> [u8; 32] {
 fn pinned_registry_digest(address: &[u8; 32]) -> Option<&'static [u8; 32]> {
     REGISTRY_V3_PINNED
         .iter()
-        .find_map(|(digest, pinned)| (pinned == address).then_some(digest))
+        .find_map(|(digest, pinned)| {
+            (pinned.first() == address.first() && pinned == address).then_some(digest)
+        })
 }
 
 fn registry_header_matches(
@@ -625,19 +679,30 @@ fn registered_suffix(
     (cursor == pairs.len()).then_some(registered)
 }
 
+/// `(opaque id, target)` of the GT entry that stands for `e(alpha, beta)` of
+/// key `index`.
+///
+/// The entry carries its own canonical source, and taking the entry is sound
+/// only if that source is the key the fixture declares, so the two are
+/// compared byte for byte. That comparison, not a keyset digest recomputed
+/// over the whole registry, is what stops a fixture from taking another
+/// keyset's target: the pinned address only proves the account is a registry
+/// of this consumer.
 fn registry_gt_record(
     data: &[u8],
     index: usize,
     f: &Fixture<'_>,
 ) -> Option<([u8; 32], PodGtElement)> {
-    if index >= f.k {
-        return None;
-    }
+    let vk = f.vk(index)?;
     let start = REGISTRY_V3_HEADER_BYTES
         + 3 * f.k * REGISTRY_V3_G2_ENTRY_BYTES
         + index * REGISTRY_V3_GT_ENTRY_BYTES;
-    let id = data.get(start..start + 32)?.try_into().ok()?;
-    let target = data.get(start + 224..start + 608)?.try_into().ok()?;
+    let entry = data.get(start..start + REGISTRY_V3_GT_ENTRY_BYTES)?;
+    if entry.get(32..96)? != vk.alpha.as_slice() || entry.get(96..224)? != vk.beta.as_slice() {
+        return None;
+    }
+    let id = entry.get(..32)?.try_into().ok()?;
+    let target = entry.get(224..)?.try_into().ok()?;
     Some((id, PodGtElement(target)))
 }
 
@@ -706,10 +771,7 @@ fn verify_batch_fp12(f: &Fixture<'_>, registry_data: &[u8]) -> Option<bool> {
 
     validate_batch_shape(&keys, &proofs).ok()?;
     let seed = derive_seed(RandomizerMode::Independent, &keys, &proofs);
-    let randomizers: Vec<PodScalar> = batch_fp12_randomizers(&seed, proofs.len())
-        .iter()
-        .map(|randomizer| PodScalar(fr_to_pod(randomizer)))
-        .collect();
+    let randomizers = batch_fp12_randomizers(&seed, proofs.len());
     let (pairs, exponents) = batch_fp12_fold(&keys, &proofs, &randomizers)?;
 
     let mut operands = Vec::with_capacity(f.k);
@@ -865,15 +927,16 @@ mod entrypoint {
             // The registered-pairing syscall authenticates the immutable
             // program-owned PDA, complete v3 header and every opaque ID.  Do
             // not repeat that work in the guest's measured Registry path.
-            // The Fp12 paths read registry bytes directly and take their G2
-            // and GT operands from the header, so they keep the guest-side
-            // header check against the digest recomputed from the fixture.
+            // The Fp12 paths read registry bytes directly, so they keep a
+            // guest-side header check. The digest they check it against is the
+            // one the pinned address encodes; binding the entries to this
+            // fixture is the source comparison in `registry_gt_record`.
             if ix_tag != super::tag::REGISTRY
                 && !super::registry_header_matches(
                     &registry_data,
                     &parsed,
                     _program_id.as_array(),
-                    &super::registry_keyset_digest_v3(&parsed),
+                    pinned_digest,
                 )
             {
                 return Err(ProgramError::InvalidAccountData);
@@ -944,6 +1007,153 @@ mod registry_pin_tests {
     #[test]
     fn unpinned_address_has_no_digest() {
         assert!(pinned_registry_digest(&[0u8; 32]).is_none());
+    }
+}
+
+/// The GT-entry binding that replaced the hot-path keyset digest on the Fp12
+/// rails. Point encodings are arbitrary here: the record reader compares bytes
+/// and never interprets them.
+#[cfg(all(test, not(target_os = "solana")))]
+mod registry_gt_record_tests {
+    use super::*;
+
+    const N: usize = 3;
+    const K: usize = 3;
+
+    fn fixture_bytes() -> Vec<u8> {
+        let mut data = vec![N as u8, K as u8, 0, 1, 2];
+        data.extend((0..K * VK_BYTES + N * PROOF_BYTES + N * 32).map(|index| (index % 251) as u8));
+        data
+    }
+
+    /// A registry image whose GT entries carry each key's own `alpha || beta`.
+    fn registry_image(f: &Fixture<'_>) -> Vec<u8> {
+        let mut data = vec![
+            0u8;
+            REGISTRY_V3_HEADER_BYTES
+                + 3 * K * REGISTRY_V3_G2_ENTRY_BYTES
+                + K * REGISTRY_V3_GT_ENTRY_BYTES
+        ];
+        for key in 0..K {
+            let start = REGISTRY_V3_HEADER_BYTES
+                + 3 * K * REGISTRY_V3_G2_ENTRY_BYTES
+                + key * REGISTRY_V3_GT_ENTRY_BYTES;
+            let vk = f.vk(key).expect("synthetic key");
+            data[start..start + 32].copy_from_slice(&[0x40 | key as u8; 32]);
+            data[start + 32..start + 96].copy_from_slice(vk.alpha);
+            data[start + 96..start + 224].copy_from_slice(vk.beta);
+            data[start + 224..start + 608].copy_from_slice(&[0x90 | key as u8; 384]);
+        }
+        data
+    }
+
+    #[test]
+    fn a_matching_source_carries_the_entry_id_and_target() {
+        let bytes = fixture_bytes();
+        let fixture = parse(&bytes).expect("synthetic fixture parses");
+        let image = registry_image(&fixture);
+        for key in 0..K {
+            let (id, target) =
+                registry_gt_record(&image, key, &fixture).expect("entry binds to its key");
+            assert_eq!(id, [0x40 | key as u8; 32], "key {key} took the wrong id");
+            assert_eq!(
+                target.0,
+                [0x90 | key as u8; 384],
+                "key {key} took the wrong target"
+            );
+        }
+    }
+
+    /// One byte of the stored source is enough. Another keyset's registry
+    /// differs in every source, so its target cannot reach the comparison.
+    #[test]
+    fn a_substituted_source_is_rejected() {
+        let bytes = fixture_bytes();
+        let fixture = parse(&bytes).expect("synthetic fixture parses");
+        for key in 0..K {
+            for offset in [32usize, 95, 96, 223] {
+                let mut image = registry_image(&fixture);
+                let start = REGISTRY_V3_HEADER_BYTES
+                    + 3 * K * REGISTRY_V3_G2_ENTRY_BYTES
+                    + key * REGISTRY_V3_GT_ENTRY_BYTES;
+                image[start + offset] ^= 1;
+                assert!(
+                    registry_gt_record(&image, key, &fixture).is_none(),
+                    "key {key} accepted a source it does not stand for at byte {offset}"
+                );
+            }
+        }
+    }
+
+    /// A key's entry must be the entry at its own index, so two keys cannot
+    /// swap targets.
+    #[test]
+    fn another_keys_entry_is_rejected() {
+        let bytes = fixture_bytes();
+        let fixture = parse(&bytes).expect("synthetic fixture parses");
+        let image = registry_image(&fixture);
+        // two entries swapped: each now stands for the other key
+        let mut swapped = image.clone();
+        let base = REGISTRY_V3_HEADER_BYTES + 3 * K * REGISTRY_V3_G2_ENTRY_BYTES;
+        let first = base..base + REGISTRY_V3_GT_ENTRY_BYTES;
+        let second = base + REGISTRY_V3_GT_ENTRY_BYTES..base + 2 * REGISTRY_V3_GT_ENTRY_BYTES;
+        let head = image[first.clone()].to_vec();
+        let next = image[second.clone()].to_vec();
+        swapped[first].copy_from_slice(&next);
+        swapped[second].copy_from_slice(&head);
+        assert!(registry_gt_record(&swapped, 0, &fixture).is_none());
+        assert!(registry_gt_record(&swapped, 1, &fixture).is_none());
+    }
+
+    #[test]
+    fn an_out_of_range_key_and_a_truncated_registry_are_rejected() {
+        let bytes = fixture_bytes();
+        let fixture = parse(&bytes).expect("synthetic fixture parses");
+        let image = registry_image(&fixture);
+        assert!(registry_gt_record(&image, K, &fixture).is_none());
+        let mut short = image.clone();
+        short.truncate(short.len() - 1);
+        assert!(registry_gt_record(&short, K - 1, &fixture).is_none());
+    }
+
+    /// The header check no longer recomputes the keyset digest, so it must
+    /// still refuse a header that does not carry the digest its address
+    /// encodes.
+    #[test]
+    fn the_header_check_binds_the_pinned_digest() {
+        let bytes = fixture_bytes();
+        let fixture = parse(&bytes).expect("synthetic fixture parses");
+        let consumer = [7u8; 32];
+        let digest = [9u8; 32];
+        let mut header = vec![0u8; REGISTRY_V3_HEADER_BYTES];
+        header[..8].copy_from_slice(REGISTRY_V3_MAGIC);
+        header[8] = REGISTRY_V3_VERSION;
+        header[9] = REGISTRY_V3_FROZEN;
+        header[10] = REGISTRY_V3_CURVE;
+        header[11] = REGISTRY_V3_BACKEND_B5;
+        header[12..14].copy_from_slice(&(3 * K as u16).to_le_bytes());
+        header[14..16].copy_from_slice(&(K as u16).to_le_bytes());
+        header[16..48].copy_from_slice(&consumer);
+        header[48..80].copy_from_slice(&digest);
+        let mut image = header.clone();
+        image.resize(
+            REGISTRY_V3_HEADER_BYTES
+                + 3 * K * REGISTRY_V3_G2_ENTRY_BYTES
+                + K * REGISTRY_V3_GT_ENTRY_BYTES,
+            0,
+        );
+        assert!(registry_header_matches(&image, &fixture, &consumer, &digest));
+        for byte in 0..REGISTRY_V3_HEADER_BYTES {
+            let mut mutated = image.clone();
+            mutated[byte] ^= 1;
+            assert!(
+                !registry_header_matches(&mutated, &fixture, &consumer, &digest),
+                "header byte {byte} is unchecked"
+            );
+        }
+        let mut short = image.clone();
+        short.truncate(short.len() - 1);
+        assert!(!registry_header_matches(&short, &fixture, &consumer, &digest));
     }
 }
 
@@ -1197,7 +1407,28 @@ mod batch_fp12_identity_tests {
 
     fn transcript_randomizers(keys: &[ValidatedVerifyingKey], proofs: &[Proof]) -> Vec<Fr> {
         let seed = derive_seed(RandomizerMode::Independent, keys, proofs);
-        batch_fp12_randomizers(&seed, proofs.len())
+        reference_batch_fp12_randomizers(&seed, proofs.len())
+    }
+
+    /// The byte draw must reproduce the field draw exactly. It feeds the MSM
+    /// scalars, so a divergence changes the statement the map proves while
+    /// still verifying.
+    #[test]
+    fn byte_randomizers_are_the_field_path() {
+        for (label, keys, proofs) in batches() {
+            let seed = derive_seed(RandomizerMode::Independent, &keys, &proofs);
+            for count in [1usize, proofs.len(), 7, 16] {
+                let expected: Vec<PodScalar> = reference_batch_fp12_randomizers(&seed, count)
+                    .iter()
+                    .map(|randomizer| PodScalar(fr_to_pod(randomizer)))
+                    .collect();
+                let scalars = batch_fp12_randomizers(&seed, count);
+                assert_eq!(scalars.len(), count, "{label}: count {count}");
+                for (index, (scalar, expected)) in scalars.iter().zip(&expected).enumerate() {
+                    assert_eq!(scalar, expected, "{label}: count {count} index {index}");
+                }
+            }
+        }
     }
 
     /// Bit-identical to the field-arithmetic reference over the randomizers the

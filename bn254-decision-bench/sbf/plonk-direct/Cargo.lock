@@ -172,6 +172,7 @@ dependencies = [
  "ark-bn254",
  "ark-ec",
  "ark-ff",
+ "bytemuck",
  "light-hasher",
  "pinocchio",
  "pinocchio-system",

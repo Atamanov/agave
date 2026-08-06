@@ -20,6 +20,7 @@ current-only = []
 ark-bn254 = "0.5"
 ark-ec = "0.5"
 ark-ff = "0.5"
+bytemuck = "1.25"
 light-hasher = { version = "5.0", features = ["keccak"] }
 pinocchio = { version = "0.11", features = ["account-resize", "cpi"] }
 pinocchio-system = "0.6.0"

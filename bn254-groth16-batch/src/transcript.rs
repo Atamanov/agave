@@ -27,6 +27,7 @@ pub enum RandomizerMode {
 /// Public as a composition surface: a joint (multi-scheme) verifier absorbs
 /// this seed as its Groth16 section digest, so one collision-resistant value
 /// binds the section's whole framing.
+#[inline]
 pub fn derive_seed(
     mode: RandomizerMode,
     vks: &[ValidatedVerifyingKey],
@@ -107,7 +108,8 @@ pub fn derive_randomizers(seed: &[u8; 32], num_equations: u64, mode: RandomizerM
 /// with no reduction. `Powers` needs field multiplication and converts once.
 /// `randomizer_scalars_are_the_field_derivation` pins both modes against
 /// [`derive_randomizers`] element by element.
-pub(crate) fn derive_randomizer_scalars(
+#[inline]
+pub fn derive_randomizer_scalars(
     seed: &[u8; 32],
     num_equations: u64,
     mode: RandomizerMode,
@@ -121,6 +123,7 @@ pub(crate) fn derive_randomizer_scalars(
     }
 }
 
+#[inline]
 fn draw_scalar(seed: &[u8; 32], k: u64) -> PodScalar {
     let digest = keccak_parts(&[seed, &k.to_be_bytes()]);
     let mut lo = [0u8; 16];
@@ -131,6 +134,7 @@ fn draw_scalar(seed: &[u8; 32], k: u64) -> PodScalar {
 /// `addend + x` for a 128-bit big-endian `x`. The sum is at most
 /// `2^128 + 254 < r`, so the carry stops inside the top half of the buffer and
 /// the result is canonical without a reduction.
+#[inline]
 pub(crate) fn small_plus_lo128(addend: u8, lo: &[u8; 16]) -> PodScalar {
     let mut bytes = [0u8; 32];
     bytes[16..].copy_from_slice(lo);
@@ -157,6 +161,7 @@ impl RandomizerMode {
 }
 
 /// Hash ordered chunks on native and SBF targets.
+#[inline]
 fn keccak_parts(parts: &[&[u8]]) -> [u8; 32] {
     hashv(parts).to_bytes()
 }

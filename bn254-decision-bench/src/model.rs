@@ -28,6 +28,20 @@ pub fn current_pairing_map_cu(pairs: u64) -> u64 {
 /// subtractor once omitted those three, so they stayed inside the residual
 /// while the renderer added them again, overstating every Current cell by
 /// between 1,002 and 4,425 CU. One definition now serves both.
+/// What the runtime charges `sol_keccak256`: a base plus, per slice, the
+/// greater of the memory-op floor and the byte cost. Mirrors `SyscallHash`.
+///
+/// Nothing observed keccak until now, so a transcript's syscall charge sat
+/// inside the guest residual and made frozen hashing look like software.
+pub fn keccak_cu(slices: u64, bytes: u64) -> u64 {
+    const BASE: u64 = 85;
+    const BYTE_COST: u64 = 1;
+    const MEM_OP_BASE: u64 = 10;
+    let per_slice_bytes = bytes.checked_div(slices.max(1)).unwrap_or_default();
+    let slice_cost = MEM_OP_BASE.max(BYTE_COST.saturating_mul(per_slice_bytes.saturating_div(2)));
+    BASE.saturating_add(slice_cost.saturating_mul(slices))
+}
+
 pub fn stock_group_op_pairing_cu(pairs: u64) -> u64 {
     const FIRST: u64 = 36_364;
     const OTHER: u64 = 12_121;
@@ -215,6 +229,14 @@ pub struct FrLincombCall {
 /// transcript and returns the MSM coefficients, so the guest does none of it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct KeccakCall {
+    pub slices: u32,
+    pub bytes: u32,
+    pub calls: u32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlonkMultiVkReduceCall {
     pub contexts: u32,
     pub proofs: u32,
@@ -265,6 +287,9 @@ pub struct OperationTrace {
     /// The whole PLONK verifier reduction, moved into the runtime.
     #[serde(default)]
     pub plonk_multi_vk_reduce_calls: Vec<PlonkMultiVkReduceCall>,
+    /// Transcript hashing. Metered by the runtime like any other syscall.
+    #[serde(default)]
+    pub keccak_calls: Vec<KeccakCall>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

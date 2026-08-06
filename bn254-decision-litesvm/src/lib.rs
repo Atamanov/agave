@@ -83,6 +83,13 @@ pub struct RegisteredPairingObservation {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct KeccakObservation {
+    pub slices: u64,
+    pub bytes: u64,
+    pub charged_cu: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PlonkMultiVkReduceObservation {
     pub contexts: u64,
     pub proofs: u64,
@@ -121,6 +128,7 @@ pub struct ObserverSnapshot {
     pub registered_pairing_checks: Vec<RegisteredPairingObservation>,
     pub trusted_gt_multiexps: Vec<TrustedGtObservation>,
     pub fr_lincombs: Vec<FrLincombObservation>,
+    pub keccaks: Vec<KeccakObservation>,
     pub plonk_multi_vk_reduces: Vec<PlonkMultiVkReduceObservation>,
     /// Setup is separate so hot-path totals can exclude it without inference.
     pub registry_init: RegistryInitObservation,
@@ -188,6 +196,8 @@ pub fn current_snarkjs_plonk_multi_vk_reduce_cu(
     scalar.saturating_add(transcript)
 }
 
+pub use solana_bn254_decision_bench::keccak_cu as current_keccak_cu;
+
 pub fn current_fr_lincomb_cu(terms: u64) -> u64 {
     CURRENT_FR_LINCOMB_BASE_CU.saturating_add(CURRENT_FR_LINCOMB_PER_TERM_CU.saturating_mul(terms))
 }
@@ -241,6 +251,7 @@ pub fn current_embedded_hot_core_cu(snapshot: &ObserverSnapshot) -> u64 {
                 .map(|event| event.charged_cu),
         )
         .chain(snapshot.fr_lincombs.iter().map(|event| event.charged_cu))
+        .chain(snapshot.keccaks.iter().map(|event| event.charged_cu))
         .chain(
             snapshot
                 .plonk_multi_vk_reduces
@@ -327,6 +338,14 @@ pub fn observer_snapshot() -> ObserverSnapshot {
                     proofs,
                     public_inputs,
                 ),
+            })
+            .collect(),
+        keccaks: backend_observer::observed_keccak_shapes()
+            .into_iter()
+            .map(|(slices, bytes)| KeccakObservation {
+                slices,
+                bytes,
+                charged_cu: current_keccak_cu(slices, bytes),
             })
             .collect(),
         fr_lincombs: backend_observer::observed_fr_lincomb_term_counts()

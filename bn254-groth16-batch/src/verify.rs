@@ -7,8 +7,8 @@ use {
     ark_bn254::Fr,
     ark_ff::{BigInteger, PrimeField},
     solana_bn254_batch_syscall::{
-        G1_BYTES, G2_BYTES, PAIRING_MAX_PAIRS, PodG1G2Pair, PodG1Point, PodG2Point, PodScalar,
-        alt_bn128_fr_lincomb, alt_bn128_g1_msm, alt_bn128_pairing_check,
+        PAIRING_MAX_PAIRS, PodG1G2Pair, PodG1Point, PodG2Point, PodScalar, alt_bn128_fr_lincomb,
+        alt_bn128_g1_msm, alt_bn128_pairing_check,
     },
 };
 
@@ -58,6 +58,7 @@ pub fn groth16_batch_verify(
 /// runtimes use this composition surface to send the leading proof terms as
 /// full pairs and the fixed-key suffix as authenticated prepared-G2 terms
 /// without reimplementing or drifting the B5 transcript.
+#[inline]
 pub fn fold_pairs_for_verification(
     vks: &[ValidatedVerifyingKey],
     proofs: &[Proof],
@@ -72,6 +73,7 @@ pub fn fold_pairs_for_verification(
 
 /// One verification equation per proof plus one more for a committed proof's
 /// Pedersen proof of knowledge; the randomizer stream is indexed by equation.
+#[inline]
 pub fn equation_count(proofs: &[Proof]) -> u64 {
     proofs
         .iter()
@@ -82,6 +84,7 @@ pub fn equation_count(proofs: &[Proof]) -> u64 {
 /// Shape and canonicality checks over the frozen batch, before any hashing.
 /// Public as a composition surface: a joint (multi-scheme) verifier runs the
 /// same checks before absorbing this batch into its own transcript.
+#[inline]
 pub fn validate_batch_shape(
     vks: &[ValidatedVerifyingKey],
     proofs: &[Proof],
@@ -125,7 +128,7 @@ pub fn validate_batch_shape(
         // the syscall would skip an infinity pair as the identity factor;
         // in a proof position that is a degenerate proof, so reject here
 
-        if is_infinity_g1(&proof.a) || proof.b.0 == [0u8; G2_BYTES] || is_infinity_g1(&proof.c) {
+        if is_infinity_g1(&proof.a) || all_zero(&proof.b.0) || is_infinity_g1(&proof.c) {
             return Err(Groth16BatchError::InfinityInProofPosition);
         }
         if let Some(commitment) = &proof.commitment {
@@ -181,6 +184,7 @@ pub fn fold_pairs_prevalidated(
 /// big-endian scalar produced by the scalar-field syscall, which reduces once
 /// per call, and the public inputs go to that syscall as the wire bytes they
 /// already are.
+#[inline]
 fn fold_pairs_scalars_prevalidated(
     vks: &[ValidatedVerifyingKey],
     proofs: &[Proof],
@@ -190,72 +194,112 @@ fn fold_pairs_scalars_prevalidated(
         return Err(Groth16BatchError::RandomizerCountMismatch);
     }
 
-    // assign per-equation randomizers in proof order: r_i always, s_i for
-    // the PoK equation of a committed proof
-    let mut next = randomizers.iter().copied();
-    let assigned: Vec<(PodScalar, Option<PodScalar>)> = proofs
-        .iter()
-        .map(|proof| -> Result<_, Groth16BatchError> {
-            let r = next
-                .next()
-                .ok_or(Groth16BatchError::RandomizerCountMismatch)?;
-            let s = if proof.commitment.is_some() {
-                Some(
-                    next.next()
-                        .ok_or(Groth16BatchError::RandomizerCountMismatch)?,
-                )
-            } else {
-                None
-            };
-            Ok((r, s))
-        })
-        .collect::<Result<_, _>>()?;
-    debug_assert!(next.next().is_none());
+    // Equation index of each proof's r_i; a committed proof's s_i is the next
+    // one. A batch with no committed proof draws one equation per proof, so
+    // the map is the identity and the table is not built at all.
+    let committed = proofs.iter().any(|proof| proof.commitment.is_some());
+    let mut equation_of_proof: Vec<u32> = Vec::new();
+    if committed {
+        equation_of_proof.reserve_exact(proofs.len());
+        let mut equation = 0usize;
+        for proof in proofs {
+            equation_of_proof
+                .push(u32::try_from(equation).map_err(|_| Groth16BatchError::TooManyPairs)?);
+            equation = equation
+                .checked_add(if proof.commitment.is_some() { 2 } else { 1 })
+                .ok_or(Groth16BatchError::TooManyPairs)?;
+        }
+    }
+    let equation_of = |index: usize| -> Result<usize, Groth16BatchError> {
+        if committed {
+            equation_of_proof
+                .get(index)
+                .map(|equation| *equation as usize)
+                .ok_or(Groth16BatchError::RandomizerCountMismatch)
+        } else {
+            Ok(index)
+        }
+    };
+    let randomizer_at = |equation: usize| -> Result<&PodScalar, Groth16BatchError> {
+        randomizers
+            .get(equation)
+            .ok_or(Groth16BatchError::RandomizerCountMismatch)
+    };
+    let proof_at = |index: u32| -> Result<&Proof, Groth16BatchError> {
+        proofs
+            .get(index as usize)
+            .ok_or(Groth16BatchError::UnknownVerifyingKey)
+    };
 
-    let mut pairs: Vec<PodG1G2Pair> = Vec::new();
-    let mut push_pair = |g1: PodG1Point, g2: PodG2Point| pairs.push(PodG1G2Pair { g1, g2 });
+    let mut pairs: Vec<PodG1G2Pair> =
+        Vec::with_capacity(proofs.len().saturating_add(vks.len().saturating_mul(5)));
+    let mut sink = PairSink::over(&mut pairs);
 
     // e([r_i]A_i, B_i): the per-proof G2 points are the only ones that
     // resist folding
-    for (proof, (r, _)) in proofs.iter().zip(&assigned) {
-        push_pair(msm(&[proof.a], &[*r])?, proof.b);
+    for (index, proof) in proofs.iter().enumerate() {
+        sink.push(
+            msm(
+                core::slice::from_ref(&proof.a),
+                core::slice::from_ref(randomizer_at(equation_of(index)?)?),
+            )?,
+            proof.b,
+        )?;
     }
 
+    // Per-key scratch, allocated once for the whole fold.
+    let mut members: Vec<u32> = Vec::with_capacity(proofs.len());
+    let mut neg_r: Vec<PodScalar> = Vec::with_capacity(proofs.len());
+    let mut column: Vec<PodScalar> = Vec::with_capacity(proofs.len());
+    let mut points: Vec<PodG1Point> = Vec::with_capacity(proofs.len());
+    let mut scalars: Vec<PodScalar> = Vec::with_capacity(proofs.len());
+
     for (key_index, vk) in vks.iter().enumerate() {
-        let key_proofs: Vec<(&Proof, PodScalar, Option<PodScalar>)> = proofs
-            .iter()
-            .zip(&assigned)
-            .filter(|(proof, _)| usize::from(proof.vk_index) == key_index)
-            .map(|(proof, (r, s))| (proof, *r, *s))
-            .collect();
-        if key_proofs.is_empty() {
+        members.clear();
+        for (index, proof) in proofs.iter().enumerate() {
+            if usize::from(proof.vk_index) == key_index {
+                members.push(u32::try_from(index).map_err(|_| Groth16BatchError::TooManyPairs)?);
+            }
+        }
+        if members.is_empty() {
             continue;
         }
         let key = vk.key();
         // every proof-side term of this key enters the fold negated, so -r_i
         // is derived once and reused; (-sum r_i) is the sum of those
-        let neg_r = key_proofs
-            .iter()
-            .map(|(_, r, _)| fr_negate(r))
-            .collect::<Result<Vec<PodScalar>, _>>()?;
+        neg_r.clear();
+        for &index in &members {
+            neg_r.push(fr_negate(randomizer_at(equation_of(index as usize)?)?)?);
+        }
         let neg_r_sum = fr_sum(&neg_r)?;
 
         // e(-[sum r_i] alpha, beta)
-        push_pair(msm(&[key.alpha_g1], &[neg_r_sum])?, key.beta_g2);
+        sink.push(
+            msm(
+                core::slice::from_ref(&key.alpha_g1),
+                core::slice::from_ref(&neg_r_sum),
+            )?,
+            key.beta_g2,
+        )?;
 
         // e(-sum_i [r_i] L_i, gamma) with L_i = IC_0 + sum_j x_ij IC_j
         // (+ com_i on the committed rail), all folded into one MSM. Column j
         // is the inner product <-r, x_j>, one scalar-field call.
-        let mut gamma_points: Vec<PodG1Point> = vec![key.ic[0]];
-        let mut gamma_scalars: Vec<PodScalar> = vec![neg_r_sum];
-        let mut column: Vec<PodScalar> = Vec::with_capacity(key_proofs.len());
+        points.clear();
+        scalars.clear();
+        points.push(
+            *key.ic
+                .first()
+                .ok_or(Groth16BatchError::InvalidVerifyingKey("ic must contain IC_0"))?,
+        );
+        scalars.push(neg_r_sum);
         for (j, ic) in key.ic.iter().enumerate().skip(1) {
             let input_index = j
                 .checked_sub(1)
                 .ok_or(Groth16BatchError::InputCountMismatch)?;
             column.clear();
-            for (proof, _, _) in &key_proofs {
-                let input = proof
+            for &index in &members {
+                let input = proof_at(index)?
                     .public_inputs
                     .get(input_index)
                     .ok_or(Groth16BatchError::InputCountMismatch)?;
@@ -267,51 +311,101 @@ fn fold_pairs_scalars_prevalidated(
                 }
                 column.push(*input);
             }
-            gamma_points.push(*ic);
-            gamma_scalars.push(fr_inner_product(&neg_r, &column)?);
+            points.push(*ic);
+            scalars.push(fr_inner_product(&neg_r, &column)?);
         }
-        for ((proof, _, _), neg_r) in key_proofs.iter().zip(&neg_r) {
-            if let Some(commitment) = &proof.commitment {
-                gamma_points.push(commitment.com);
-                gamma_scalars.push(*neg_r);
+        for (&index, neg_r) in members.iter().zip(&neg_r) {
+            if let Some(commitment) = &proof_at(index)?.commitment {
+                points.push(commitment.com);
+                scalars.push(*neg_r);
             }
         }
-        push_pair(msm(&gamma_points, &gamma_scalars)?, key.gamma_g2);
+        sink.push(msm(&points, &scalars)?, key.gamma_g2)?;
 
         // e(-sum [r_i] C_i, delta)
-        let delta_points: Vec<PodG1Point> =
-            key_proofs.iter().map(|(proof, _, _)| proof.c).collect();
-        push_pair(msm(&delta_points, &neg_r)?, key.delta_g2);
+        points.clear();
+        for &index in &members {
+            points.push(proof_at(index)?.c);
+        }
+        sink.push(msm(&points, &neg_r)?, key.delta_g2)?;
 
         // committed rail: e(sum [s_i] com_i, g2) * e(-sum [s_i] pok_i,
         // sigma_g2), two pair terms per key whatever n is; the PoK equations
         // take their own s_i, never the proof's r_i
         if let Some(pedersen) = &key.pedersen {
-            let mut com_points: Vec<PodG1Point> = Vec::new();
-            let mut pok_points: Vec<PodG1Point> = Vec::new();
-            let mut com_scalars: Vec<PodScalar> = Vec::new();
-            let mut pok_scalars: Vec<PodScalar> = Vec::new();
-            for (proof, _, s) in &key_proofs {
+            points.clear();
+            scalars.clear();
+            let mut pok_points: Vec<PodG1Point> = Vec::with_capacity(members.len());
+            let mut pok_scalars: Vec<PodScalar> = Vec::with_capacity(members.len());
+            for &index in &members {
+                let proof = proof_at(index)?;
                 let commitment = proof
                     .commitment
                     .as_ref()
                     .ok_or(Groth16BatchError::CommitmentMismatch)?;
-                let s = s.ok_or(Groth16BatchError::RandomizerCountMismatch)?;
-                com_points.push(commitment.com);
-                com_scalars.push(s);
+                let equation = equation_of(index as usize)?
+                    .checked_add(1)
+                    .ok_or(Groth16BatchError::RandomizerCountMismatch)?;
+                let s = randomizer_at(equation)?;
+                points.push(commitment.com);
+                scalars.push(*s);
                 pok_points.push(commitment.pok);
-                pok_scalars.push(fr_negate(&s)?);
+                pok_scalars.push(fr_negate(s)?);
             }
-            push_pair(msm(&com_points, &com_scalars)?, pedersen.g2);
-            push_pair(msm(&pok_points, &pok_scalars)?, pedersen.sigma_g2);
+            sink.push(msm(&points, &scalars)?, pedersen.g2)?;
+            sink.push(msm(&pok_points, &pok_scalars)?, pedersen.sigma_g2)?;
         }
     }
+    let written = sink.written;
+    // SAFETY: the sink wrote slots 0..written inside the capacity reserved
+    // above. A pair is plain data, so an early return leaves nothing to drop.
+    unsafe { pairs.set_len(written) };
     Ok(pairs)
+}
+
+/// Writes into a vector's reserved tail, so a 192-byte pair is built once
+/// rather than built and then moved.
+pub(crate) struct PairSink<'a> {
+    slots: &'a mut [core::mem::MaybeUninit<PodG1G2Pair>],
+    written: usize,
+}
+
+impl<'a> PairSink<'a> {
+    pub(crate) fn over(pairs: &'a mut Vec<PodG1G2Pair>) -> Self {
+        Self {
+            slots: pairs.spare_capacity_mut(),
+            written: 0,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn push(
+        &mut self,
+        g1: PodG1Point,
+        g2: PodG2Point,
+    ) -> Result<(), Groth16BatchError> {
+        self.slots
+            .get_mut(self.written)
+            .ok_or(Groth16BatchError::TooManyPairs)?
+            .write(PodG1G2Pair { g1, g2 });
+        self.written = self
+            .written
+            .checked_add(1)
+            .ok_or(Groth16BatchError::TooManyPairs)?;
+        Ok(())
+    }
 }
 
 // The syscall skips infinity points as identity factors. Proof points cannot be infinity.
 fn is_infinity_g1(point: &PodG1Point) -> bool {
-    point.0 == [0u8; G1_BYTES]
+    all_zero(&point.0)
+}
+
+/// The wire encoding of infinity. Scanning stops at the first nonzero byte,
+/// which a valid point has in its first coordinate.
+#[inline]
+pub(crate) fn all_zero(bytes: &[u8]) -> bool {
+    bytes.iter().all(|byte| *byte == 0)
 }
 
 #[inline]
@@ -338,21 +432,34 @@ pub(crate) const ONE_BE: PodScalar = PodScalar([
 
 /// `-x mod r`. One scalar-field call beats a borrow-propagating byte
 /// subtraction, and it maps zero to zero where `r - x` would not.
+#[inline]
 pub(crate) fn fr_negate(scalar: &PodScalar) -> Result<PodScalar, Groth16BatchError> {
-    fr_inner_product(core::slice::from_ref(scalar), &[MINUS_ONE_BE])
+    fr_inner_product(
+        core::slice::from_ref(scalar),
+        core::slice::from_ref(&MINUS_ONE_BE),
+    )
 }
 
 /// `sum_i values[i] mod r`, reducing once.
+#[inline]
 pub(crate) fn fr_sum(values: &[PodScalar]) -> Result<PodScalar, Groth16BatchError> {
     match values {
         [] => Err(Groth16BatchError::EmptyBatch),
         [single] => Ok(*single),
-        _ => fr_inner_product(values, &vec![ONE_BE; values.len()]),
+        _ => match ONES.get(..values.len()) {
+            Some(ones) => fr_inner_product(values, ones),
+            None => fr_inner_product(values, &vec![ONE_BE; values.len()]),
+        },
     }
 }
 
+/// Right operand of the summing inner product, so the common batch widths need
+/// no allocation. Longer sums fall back to a built vector.
+const ONES: [PodScalar; 32] = [ONE_BE; 32];
+
 /// `sum_i left[i] * right[i] mod r`. Every operand must be canonical; the
 /// syscall rejects one that is not.
+#[inline]
 pub(crate) fn fr_inner_product(
     left: &[PodScalar],
     right: &[PodScalar],
@@ -376,6 +483,7 @@ pub(crate) fn fr_to_pod(scalar: &Fr) -> PodScalar {
 /// comparison, so this is the same predicate `Fr::from_bigint` applies when it
 /// returns `None`, and `fr_from_be_rejects_exactly_what_the_byte_compare_does`
 /// pins the equivalence over the boundary values and a random sweep.
+#[inline]
 pub(crate) fn is_canonical_fr_be(scalar: &PodScalar) -> bool {
     const MODULUS_BE: [u8; 32] = [
         0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58,
@@ -417,7 +525,7 @@ mod tests {
         ark_ff::{Field, One, PrimeField, UniformRand},
         ark_std::rand::rngs::StdRng,
         core::ops::{Add, Mul, Neg, Sub},
-        solana_bn254_batch_syscall::AltBn128BatchError,
+        solana_bn254_batch_syscall::{AltBn128BatchError, G1_BYTES},
     };
 
     fn verify(vks: &[ValidatedVerifyingKey], proofs: &[Proof]) -> Result<bool, Groth16BatchError> {
@@ -1198,6 +1306,43 @@ mod fold_identity_tests {
 #[cfg(test)]
 mod canonicality_tests {
     use super::*;
+
+    /// The scanning form must accept and reject exactly what comparing against
+    /// a zero array does. It replaced that comparison in every infinity check,
+    /// so any divergence lets an infinity point through or rejects a valid one.
+    #[test]
+    fn all_zero_is_the_zero_array_comparison() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for len in [32usize, 64, 128] {
+            let mut bytes = vec![0u8; len];
+            assert!(all_zero(&bytes));
+            for index in 0..len {
+                for value in [1u8, 0x80, 0xff] {
+                    bytes[index] = value;
+                    assert_eq!(
+                        all_zero(&bytes),
+                        bytes.iter().all(|byte| *byte == 0),
+                        "len {len} byte {index} = {value}"
+                    );
+                    assert!(!all_zero(&bytes));
+                    bytes[index] = 0;
+                }
+            }
+            for _ in 0..256 {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let sparse: Vec<u8> = (0..len)
+                    .map(|index| u8::from(state >> (index % 64) & 1 == 1) * (state as u8))
+                    .collect();
+                assert_eq!(
+                    all_zero(&sparse),
+                    sparse.iter().all(|byte| *byte == 0),
+                    "random pattern"
+                );
+            }
+        }
+    }
 
     /// The byte compare must accept and reject exactly what building the field
     /// element does. It replaced that construction on the hot path, so any

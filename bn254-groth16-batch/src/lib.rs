@@ -19,7 +19,7 @@ pub use crate::{
         SAME_VK_FP12_MAX_PROOFS, SameVkTarget, derive_same_vk_sum_one_randomizers,
         fold_same_vk_target_pairs, groth16_same_vk_fp12_verify, same_vk_target_pair_count,
     },
-    transcript::{RandomizerMode, derive_randomizers, derive_seed},
+    transcript::{RandomizerMode, derive_randomizer_scalars, derive_randomizers, derive_seed},
     verify::{
         Proof, ProofCommitment, equation_count, fold_pairs, fold_pairs_for_verification,
         fold_pairs_prevalidated, groth16_batch_verify, validate_batch_shape,

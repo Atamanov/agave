@@ -22,7 +22,8 @@
         "stock_g1_additions": 5,
         "stock_g1_multiplications": 5,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -107,7 +108,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -192,7 +194,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -281,7 +284,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -304,7 +308,8 @@
         "stock_g1_additions": 5,
         "stock_g1_multiplications": 5,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -393,7 +398,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -416,7 +422,8 @@
         "stock_g1_additions": 2,
         "stock_g1_multiplications": 2,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -489,7 +496,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -562,7 +570,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -639,7 +648,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -662,7 +672,8 @@
         "stock_g1_additions": 2,
         "stock_g1_multiplications": 2,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -737,7 +748,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -760,7 +772,8 @@
         "stock_g1_additions": 3,
         "stock_g1_multiplications": 3,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -857,7 +870,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -954,7 +968,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1035,7 +1050,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1058,7 +1074,8 @@
         "stock_g1_additions": 3,
         "stock_g1_multiplications": 3,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1157,7 +1174,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1180,7 +1198,8 @@
         "stock_g1_additions": 36,
         "stock_g1_multiplications": 40,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1219,7 +1238,8 @@
             "public_inputs": 2,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       }
     },
     {
@@ -1258,7 +1278,8 @@
             "public_inputs": 2,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       }
     },
     {
@@ -1339,7 +1360,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1362,7 +1384,8 @@
         "stock_g1_additions": 36,
         "stock_g1_multiplications": 40,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1401,7 +1424,8 @@
             "public_inputs": 2,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       }
     },
     {
@@ -1424,7 +1448,8 @@
         "stock_g1_additions": 54,
         "stock_g1_multiplications": 60,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1463,7 +1488,8 @@
             "public_inputs": 3,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       }
     },
     {
@@ -1502,7 +1528,8 @@
             "public_inputs": 3,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       }
     },
     {
@@ -1595,7 +1622,8 @@
             "calls": 1
           }
         ],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1618,7 +1646,8 @@
         "stock_g1_additions": 54,
         "stock_g1_multiplications": 60,
         "fr_lincomb_calls": [],
-        "plonk_multi_vk_reduce_calls": []
+        "plonk_multi_vk_reduce_calls": [],
+        "keccak_calls": []
       }
     },
     {
@@ -1657,7 +1686,8 @@
             "public_inputs": 3,
             "calls": 1
           }
-        ]
+        ],
+        "keccak_calls": []
       }
     }
   ]

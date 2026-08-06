@@ -5,7 +5,7 @@ use {
     solana_account_v3::Account,
     solana_address_v2::Address,
     solana_bn254_decision_bench::{
-        ColumnId, ExecutionRequest, FixtureManifest, FrLincombCall, GtTargetMultiexpCall, MsmCall, PlonkMultiVkReduceCall,
+        ColumnId, ExecutionRequest, FixtureManifest, FrLincombCall, GtTargetMultiexpCall, KeccakCall, MsmCall, PlonkMultiVkReduceCall,
         OperationTrace,
         PairingCall, ResidualCell, RowId,
     },
@@ -547,7 +547,19 @@ fn trace(snapshot: &ObserverSnapshot) -> Result<OperationTrace, String> {
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let keccak_calls = snapshot
+        .keccaks
+        .iter()
+        .map(|event| {
+            Ok(KeccakCall {
+                slices: u32::try_from(event.slices).map_err(|_| "keccak slice overflow")?,
+                bytes: u32::try_from(event.bytes).map_err(|_| "keccak byte overflow")?,
+                calls: 1,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     Ok(OperationTrace {
+        keccak_calls,
         plonk_multi_vk_reduce_calls,
         fr_lincomb_calls,
         stock_g1_additions,

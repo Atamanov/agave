@@ -39,6 +39,7 @@ event_storage!(
 );
 event_storage!(GT_CALLS, GT_OVERFLOW, GT_TARGETS, GT_NONTRIVIAL,);
 event_storage!(FR_LINCOMB_CALLS, FR_LINCOMB_OVERFLOW, FR_LINCOMB_TERMS);
+event_storage!(KECCAK_CALLS, KECCAK_OVERFLOW, KECCAK_SLICES, KECCAK_BYTES);
 event_storage!(
     PLONK_REDUCE_CALLS,
     PLONK_REDUCE_OVERFLOW,
@@ -80,6 +81,11 @@ pub fn reset() {
         &FR_LINCOMB_CALLS,
         &FR_LINCOMB_OVERFLOW,
         &[&FR_LINCOMB_TERMS],
+    );
+    reset_stream(
+        &KECCAK_CALLS,
+        &KECCAK_OVERFLOW,
+        &[&KECCAK_SLICES, &KECCAK_BYTES],
     );
     reset_stream(
         &PLONK_REDUCE_CALLS,
@@ -292,6 +298,28 @@ pub(crate) fn record_msm(points: usize) {
     if let Some(index) = reserve(&MSM_CALLS, &MSM_OVERFLOW) {
         MSM_POINTS[index].store(points as u64, Ordering::SeqCst);
     }
+}
+
+/// `sol_keccak256` is metered like any other syscall, but nothing observed it,
+/// so its charge sat inside the guest residual and made every transcript look
+/// like software.
+pub fn record_keccak(slices: usize, bytes: usize) {
+    if let Some(index) = reserve(&KECCAK_CALLS, &KECCAK_OVERFLOW) {
+        KECCAK_SLICES[index].store(slices as u64, Ordering::SeqCst);
+        KECCAK_BYTES[index].store(bytes as u64, Ordering::SeqCst);
+    }
+}
+
+/// Slice count and total byte length of every observed keccak.
+pub fn observed_keccak_shapes() -> Vec<(u64, u64)> {
+    (0..event_count(&KECCAK_CALLS, &KECCAK_OVERFLOW, "keccak"))
+        .map(|index| {
+            (
+                KECCAK_SLICES[index].load(Ordering::SeqCst),
+                KECCAK_BYTES[index].load(Ordering::SeqCst),
+            )
+        })
+        .collect()
 }
 
 pub(crate) fn record_fr_lincomb(terms: usize) {

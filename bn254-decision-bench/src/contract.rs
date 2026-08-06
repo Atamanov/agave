@@ -34,6 +34,7 @@ fn trace(
         stock_g1_multiplications: 0,
         fr_lincomb_calls: Vec::new(),
         plonk_multi_vk_reduce_calls: Vec::new(),
+        keccak_calls: Vec::new(),
     }
 }
 
