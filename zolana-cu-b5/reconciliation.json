@@ -1,0 +1,507 @@
+{
+  "schema": "helius.zolana-cu-b5.reconciliation.v1",
+  "generated": "2026-08-06",
+  "source": "zolana-cu-b5, LiteSVM over the unmodified shielded-pool program from dev/zolana/.worktrees/groth16-recursion, agave runtime 4.1.2, B5 group op installed by src/kernel.rs",
+  "evidence": [
+    "artifacts/probe-b5-2.txt",
+    "artifacts/b5-2.txt",
+    "artifacts/raw-2.txt",
+    "artifacts/stock-2.txt"
+  ],
+  "class_definitions": {
+    "verification": "work the decision table ought to model, including the statement compression its own footnote calls verification",
+    "application": "work the decision table should not model"
+  },
+  "source_definitions": {
+    "measured": "a charge the runtime made during the transaction under measurement, read from the VM register trace with the argument registers that fixed the price, or from the compute meter either side of the charge site",
+    "derived": "computed from committed code rather than observed on its own line"
+  },
+  "mapping": {
+    "chosen": "The Batching cell at n=2 is compared against two solo transact transactions, so both sides carry two Groth16 proofs over the same statements and no line is halved. The Recursion cell at n=2 is compared against one aggregate_transact over 2 legs, which is the shape that column names.",
+    "refused": "Dividing the Batching cell by its proof count. The fold's pairing charge is one padded eight-pair call, not two things, and contract.rs::groth_msm reaches unreachable!() at n=1, so the model cannot be evaluated at the only Groth16 shape zolana sends today.",
+    "shape_difference": "A table row is n proofs verified inside one transaction. zolana sends either one leg with one Groth16 proof, or one recursive proof attesting n leg statements plus the full state machine of all n legs."
+  },
+  "measured_transactions": {
+    "solo_transact_b5": {
+      "cu": 113940,
+      "legs": 1,
+      "stable": true
+    },
+    "solo_transact_stock": {
+      "cu": 166940,
+      "legs": 1,
+      "stable": true,
+      "note": "only the pairing check 23505->73612 and the public-input multiplication 947->3840 move; decompression is 14706 in both"
+    },
+    "aggregate_transact_2_legs_b5": {
+      "cu": 221695,
+      "legs": 2,
+      "stable": false,
+      "note": "moves by up to 20 CU between runs because Pubkey::new_unique() hands the settlement recipients different bytes, which reach the outer proof's public inputs; the drift is confined to verify_groth16 and every other line is bit-stable"
+    },
+    "aggregate_transact_2_legs_stock": {
+      "cu": 311744,
+      "legs": 2,
+      "stable": false
+    }
+  },
+  "decision_table_cells": {
+    "groth16_n2_distinct_vk/batch_b5": {
+      "total": 42458,
+      "pairing": 27160,
+      "msm": 8304,
+      "lincomb": 8,
+      "hash": 1473,
+      "guest_sbpf_residual": 5513
+    },
+    "groth16_n2_distinct_vk/recursion_b5": {
+      "total": 44043,
+      "pairing": 27160,
+      "msm": 7502,
+      "lincomb": 16,
+      "hash": 1625,
+      "guest_sbpf_residual": 7740
+    }
+  },
+  "reconciliation_id": "batch_b5_n2_to_two_solo_legs",
+  "lines": [
+    {
+      "label": "decision-table cell, Groth16 n=2 distinct VK, Batching syscalls (B5), one transaction, 2 proofs",
+      "cu": 42458,
+      "class": "verification",
+      "source": "derived",
+      "band": "cell",
+      "note": "recomputed here from bn254-decision-bench/src/contract.rs and the committed B5 charge schedule; reproduces the published cell exactly"
+    },
+    {
+      "label": "remove fold pairing check, 1 call, 8 pairs padded to one IFMA lane",
+      "cu": -27160,
+      "class": "verification",
+      "source": "derived",
+      "band": "cell"
+    },
+    {
+      "label": "remove fold MSM, 8 calls over 10 points",
+      "cu": -8304,
+      "class": "verification",
+      "source": "derived",
+      "band": "cell"
+    },
+    {
+      "label": "remove fold scalar inner products, 4 calls of 1 term",
+      "cu": -8,
+      "class": "verification",
+      "source": "derived",
+      "band": "cell"
+    },
+    {
+      "label": "remove fold transcript hashing, 5 calls over 35 slices",
+      "cu": -1473,
+      "class": "verification",
+      "source": "derived",
+      "band": "cell"
+    },
+    {
+      "label": "remove synthetic fold guest sBPF",
+      "cu": -5513,
+      "class": "verification",
+      "source": "measured",
+      "band": "cell",
+      "note": "measured by bn254-decision-bench on its own guest, not re-measured here; read from residuals.json"
+    },
+    {
+      "label": "pairing check, 2 legs x 4 pairs, B5 schedule",
+      "cu": 47010,
+      "class": "verification",
+      "source": "measured",
+      "band": "verification_core",
+      "note": "sol_alt_bn128_group_op r1=3 r3=768 from the register trace, charged by src/kernel.rs"
+    },
+    {
+      "label": "G2 decompression of proof B, 2 x 13710",
+      "cu": 27420,
+      "class": "verification",
+      "source": "measured",
+      "band": "verification_core",
+      "note": "sol_alt_bn128_compression r1=3 from groth16_solana::decompression::decompress_g2; charged at the stock price because the B5 schedule states no decompression tariff"
+    },
+    {
+      "label": "G1 decompression of proof A and C, 4 x 498",
+      "cu": 1992,
+      "class": "verification",
+      "source": "measured",
+      "band": "verification_core"
+    },
+    {
+      "label": "public-input commitment, 2 x (MSM over 1 point + G1 addition)",
+      "cu": 2562,
+      "class": "verification",
+      "source": "measured",
+      "band": "verification_core",
+      "note": "issued from groth16_solana::groth16::g1_mul_add; one public input per zolana verifying key"
+    },
+    {
+      "label": "Groth16 verifier guest sBPF, 2 x 571",
+      "cu": 1142,
+      "class": "verification",
+      "source": "measured",
+      "band": "verification_core",
+      "note": "verify_groth16 subtree, inclusive of nested frames"
+    },
+    {
+      "label": "statement compression, Poseidon, 2 x 23 calls at arity 2",
+      "cu": 36156,
+      "class": "verification",
+      "source": "measured",
+      "band": "statement_compression",
+      "note": "credited by the stack-walking collector to TransactProof::public_input_hash; invariant across every column"
+    },
+    {
+      "label": "statement compression, guest sBPF, 2 x 6974",
+      "cu": 13948,
+      "class": "verification",
+      "source": "measured",
+      "band": "statement_compression",
+      "note": "5235 of each 6974 is amount_field converting u64 amounts into Fr through ark-ff"
+    },
+    {
+      "label": "application Poseidon, 2 x 35 calls at arity 2",
+      "cu": 55020,
+      "class": "application",
+      "source": "measured",
+      "band": "application",
+      "note": "Merkle append, nullifier queue and hash chains"
+    },
+    {
+      "label": "application guest sBPF, 2 x 11560",
+      "cu": 23120,
+      "class": "application",
+      "source": "measured",
+      "band": "application",
+      "note": "total leg sBPF 19105 less the verifier subtree 571 and statement compression 6974"
+    },
+    {
+      "label": "keccak256 and sha256, 2 x 7 calls over 7 slices",
+      "cu": 1748,
+      "class": "application",
+      "source": "measured",
+      "band": "application",
+      "note": "bloom filter, nullifier queue and the external data hash; measured by the price-neutral hash shims"
+    },
+    {
+      "label": "memory operations, 2 x 74 calls",
+      "cu": 1480,
+      "class": "application",
+      "source": "measured",
+      "band": "application"
+    },
+    {
+      "label": "CPI invoke base, 6 x 946",
+      "cu": 5676,
+      "class": "application",
+      "source": "derived",
+      "band": "application",
+      "note": "split of a measured 7927 CU per-leg window using DEFAULT_INVOCATION_COST"
+    },
+    {
+      "label": "CPI callee builtin, 4 x system program at 150",
+      "cu": 600,
+      "class": "application",
+      "source": "derived",
+      "band": "application"
+    },
+    {
+      "label": "CPI account-data translation, 2 x 4743",
+      "cu": 9486,
+      "class": "application",
+      "source": "derived",
+      "band": "application",
+      "note": "confirmed independently: the pool tree account is 1185728 bytes and 1185728/250 is 4742, plus 1 for the event instruction data"
+    },
+    {
+      "label": "clock sysvar read, 2 x 110",
+      "cu": 220,
+      "class": "application",
+      "source": "measured",
+      "band": "application",
+      "note": "measured by the price-neutral sol_get_sysvar observer"
+    },
+    {
+      "label": "ComputeBudget instruction, 2 x 150",
+      "cu": 300,
+      "class": "application",
+      "source": "measured",
+      "band": "application",
+      "note": "the runtime log states the top-level program consumed 113790 of a 113940 transaction"
+    }
+  ],
+  "total": 227880,
+  "target": 227880,
+  "unattributed": 0,
+  "band_totals": {
+    "cell": 0,
+    "verification_core": 80126,
+    "statement_compression": 50104,
+    "application": 97650
+  },
+  "secondary_reconciliations": [
+    {
+      "id": "recursion_b5_n2_to_aggregate_transact_2_legs",
+      "lines": [
+        {
+          "label": "decision-table cell, Groth16 n=2 distinct VK, Recursion over B5, one transaction",
+          "cu": 44043,
+          "class": "verification",
+          "source": "derived",
+          "band": "cell"
+        },
+        {
+          "label": "remove outer pairing check, 1 call, 6 real pairs padded to 8",
+          "cu": -27160,
+          "class": "verification",
+          "source": "derived",
+          "band": "cell"
+        },
+        {
+          "label": "remove outer MSM, 6 calls over 11 points",
+          "cu": -7502,
+          "class": "verification",
+          "source": "derived",
+          "band": "cell"
+        },
+        {
+          "label": "remove BSB22 reduction modelled as fr_lincomb, 7 calls",
+          "cu": -16,
+          "class": "verification",
+          "source": "derived",
+          "band": "cell",
+          "note": "the real recursion program does not call this syscall"
+        },
+        {
+          "label": "remove outer transcript hashing, 7 calls over 34 slices",
+          "cu": -1625,
+          "class": "verification",
+          "source": "derived",
+          "band": "cell"
+        },
+        {
+          "label": "remove synthetic recursion guest sBPF",
+          "cu": -7740,
+          "class": "verification",
+          "source": "measured",
+          "band": "cell",
+          "note": "measured by bn254-decision-bench on its own guest, not re-measured here"
+        },
+        {
+          "label": "outer pairing checks, 4 pairs and 2 pairs, B5",
+          "cu": 38310,
+          "class": "verification",
+          "source": "measured",
+          "band": "verification_core",
+          "note": "two calls, not the one padded call the cell models; padding both into one lane would save 11150"
+        },
+        {
+          "label": "decompression, 1 G2 and 4 G1",
+          "cu": 15702,
+          "class": "verification",
+          "source": "measured",
+          "band": "verification_core"
+        },
+        {
+          "label": "public-input commitment, 2 MSM over 1 point and 3 G1 additions",
+          "cu": 2896,
+          "class": "verification",
+          "source": "measured",
+          "band": "verification_core"
+        },
+        {
+          "label": "BSB22 hash-to-field, 3 sol_sha256 calls",
+          "cu": 379,
+          "class": "verification",
+          "source": "measured",
+          "band": "verification_core",
+          "note": "contract.rs::bsb22_hash_to_field() prices the same three calls at 379; independent confirmation of the hash tariff"
+        },
+        {
+          "label": "recursive verifier guest sBPF",
+          "cu": 13629,
+          "class": "verification",
+          "source": "measured",
+          "band": "verification_core",
+          "note": "13208 of it is the ark-ff BSB22 reduction inside Groth16Verifier::verify_common, which the cell prices as a 16 CU syscall; this is the only line of this ladder that drifts between runs"
+        },
+        {
+          "label": "statement compression, Poseidon, 46 calls",
+          "cu": 36156,
+          "class": "verification",
+          "source": "measured",
+          "band": "statement_compression"
+        },
+        {
+          "label": "statement compression, guest sBPF",
+          "cu": 13948,
+          "class": "verification",
+          "source": "measured",
+          "band": "statement_compression"
+        },
+        {
+          "label": "application Poseidon, 73 calls",
+          "cu": 57378,
+          "class": "application",
+          "source": "measured",
+          "band": "application"
+        },
+        {
+          "label": "application guest sBPF",
+          "cu": 23997,
+          "class": "application",
+          "source": "measured",
+          "band": "application",
+          "note": "total sBPF 51574 less the verifier subtree 13629 and statement compression 13948"
+        },
+        {
+          "label": "keccak256 and sha256, 14 calls",
+          "cu": 1748,
+          "class": "application",
+          "source": "measured",
+          "band": "application"
+        },
+        {
+          "label": "memory operations, 153 calls",
+          "cu": 1530,
+          "class": "application",
+          "source": "measured",
+          "band": "application"
+        },
+        {
+          "label": "CPI invoke base, 6 x 946",
+          "cu": 5676,
+          "class": "application",
+          "source": "derived",
+          "band": "application"
+        },
+        {
+          "label": "CPI callee builtin, 4 x system program at 150",
+          "cu": 600,
+          "class": "application",
+          "source": "derived",
+          "band": "application"
+        },
+        {
+          "label": "CPI account-data translation, 2 x 4743",
+          "cu": 9486,
+          "class": "application",
+          "source": "derived",
+          "band": "application"
+        },
+        {
+          "label": "clock sysvar read",
+          "cu": 110,
+          "class": "application",
+          "source": "measured",
+          "band": "application"
+        },
+        {
+          "label": "ComputeBudget instruction",
+          "cu": 150,
+          "class": "application",
+          "source": "measured",
+          "band": "application"
+        }
+      ],
+      "total": 221695,
+      "target": 221695,
+      "unattributed": 0,
+      "band_totals": {
+        "cell": 0,
+        "verification_core": 70916,
+        "statement_compression": 50104,
+        "application": 100675
+      }
+    }
+  ],
+  "per_leg_bands_solo": {
+    "verification_core": 40063,
+    "statement_compression": 25052,
+    "application": 48825,
+    "total": 113940
+  },
+  "findings": [
+    {
+      "id": "decompression_uncharged",
+      "cu_per_proof": 14706,
+      "text": "Point decompression is charged by no cell. A single G2 decompression is 13710 of it, 12.0 percent of a real leg and 32.3 percent of the whole n=2 Batching cell. contract.rs emits no compression operation and the B5 schedule states no decompression constant.",
+      "class": "verification",
+      "belongs": "inside_cell"
+    },
+    {
+      "id": "b5_decompression_unpriced",
+      "text": "The B5 run still pays the stock decompression price, because the B5 schedule has nothing to say about it. If the IFMA kernel decompresses faster, 13710 CU per proof is an overcharge of unknown size. Unmeasured and not closed here.",
+      "class": "verification",
+      "belongs": "inside_cell"
+    },
+    {
+      "id": "saving_does_not_transfer",
+      "text": "The table reads 3.70x from Current to Batching B5 at n=2. On the real transaction the same schedule change is 1.47x, 333880 to 227880. The batching claim holds; 65 percent of a real leg is work no column touches.",
+      "class": "verification",
+      "belongs": "beside_cell"
+    },
+    {
+      "id": "structural_share_wrong",
+      "text": "STRUCTURE-TABLE.md puts the n=2 Batching cell at 87.0 percent syscall. On a real leg the BN254 syscalls are 39492 of 113940, 34.7 percent.",
+      "class": "verification",
+      "belongs": "beside_cell"
+    },
+    {
+      "id": "cpi_account_data_translation",
+      "cu": 4743,
+      "text": "Every CPI that touches the 1185728-byte pool tree account pays len/250 for translating it. That is 11.2 percent of the whole n=2 cell and it scales with the tree account, not with the proof or the column.",
+      "class": "application",
+      "belongs": "beside_cell"
+    },
+    {
+      "id": "statement_compression_band",
+      "cu_per_leg": 25052,
+      "text": "18078 Poseidon plus 6974 guest sBPF, 22.0 percent of a leg, invariant across all six columns. It exists because every zolana verifying key declares exactly one public input. OPERATIONS-TABLE.md carries the Poseidon half in a footnote and the sBPF half nowhere.",
+      "class": "verification",
+      "belongs": "beside_cell"
+    },
+    {
+      "id": "recursion_prices_an_uncalled_syscall",
+      "text": "The recursion cell charges 16 CU of fr_lincomb for the BSB22 reduction. The real program runs the ark-ff loop in the guest for 13208 CU.",
+      "class": "verification",
+      "belongs": "inside_cell"
+    },
+    {
+      "id": "recursion_pairing_call_count",
+      "text": "The cell models one padded eight-pair check. The real recursion verifier issues two, four pairs for the Groth16 equation and two for the BSB22 proof of knowledge. Padding both into one lane is available and unused, worth 11150 CU.",
+      "class": "verification",
+      "belongs": "inside_cell"
+    },
+    {
+      "id": "guest_residual_describes_no_real_guest",
+      "text": "5513 for the Batching cell against 571 of real verifier sBPF, and 7740 for the recursion cell against 13629. The residual is 13.0 and 17.6 percent of its cell, so it is not a rounding term.",
+      "class": "verification",
+      "belongs": "inside_cell"
+    },
+    {
+      "id": "hash_tariff_confirmed",
+      "text": "contract.rs::bsb22_hash_to_field() prices three calls at 379 CU and the three measured sol_sha256 calls cost 379 CU.",
+      "class": "verification",
+      "belongs": "confirmed"
+    },
+    {
+      "id": "pairing_tariff_confirmed",
+      "text": "The schedule charges 23505 for four pairs and the measured four-pair check costs 23505. The syscall core of the table is sound.",
+      "class": "verification",
+      "belongs": "confirmed"
+    }
+  ],
+  "limits": [
+    "The synthetic-guest residuals 5513 and 7740 were not re-measured here. They are read from residuals.json and STRUCTURE-TABLE.md, and they are produced by a pipeline this session does not own.",
+    "The Batching model cannot be evaluated at n=1, k=1, so no cell exists at the shape zolana actually sends. contract.rs::groth_msm reaches unreachable!() there.",
+    "No B5 tariff exists for point decompression, so the 14706 CU per proof is a stock charge inside a B5 measurement. The size of the B5 opportunity there is unknown.",
+    "The three CPI sub-lines are a derived split of a measured 7927 CU window. The split is confirmed on the translation term by the account length, and on the invoke base by DEFAULT_INVOCATION_COST, but the 150 CU system-program builtin is taken from the runtime rather than isolated on its own line.",
+    "Every cell figure was read from bn254-decision-bench as the worktree holds it today, which another session is editing. The recomputation reproduces the published TRANSACTION-TABLE.md and STRUCTURE-TABLE.md cells exactly, so the two agree at the time of writing, but a later edit there moves the cell side of both ladders and not the measured side."
+  ]
+}

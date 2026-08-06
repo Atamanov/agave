@@ -1,0 +1,11 @@
+mode stock  legs 4  symbols 375
+
+=== solo transact [stock] ===
+  transaction CU               166940
+  executed sBPF CU              19105   11.4%
+  BN254 pairing                 73612   44.1%   x1 over 4 pairs
+  BN254 MSM / other             18880   11.3%   x5
+  Poseidon                      45588   27.3%   x58
+  keccak256 / sha256              874    0.5%   x7 over 7 slices
+  mem ops                         740    0.4%   x74
+  everything else                8141    4.9%   3 CPI
