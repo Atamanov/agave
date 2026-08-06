@@ -15,6 +15,7 @@ pub use crate::{
     current_fp12::{
         CurrentFp12Target, current_fp12_pairs, groth16_current_fp12_verify, legacy_current_vk_x,
     },
+    lane::{PAIRING_LANE_WIDTH, lane_padding_pairs},
     same_vk::{
         SAME_VK_FP12_MAX_PROOFS, SameVkTarget, derive_same_vk_sum_one_randomizers,
         fold_same_vk_target_pairs, groth16_same_vk_fp12_verify, same_vk_target_pair_count,
@@ -29,6 +30,7 @@ pub use crate::{
 use solana_bn254_batch_syscall::AltBn128BatchError;
 
 pub mod current_fp12;
+pub mod lane;
 pub mod same_vk;
 pub(crate) mod transcript;
 pub(crate) mod verify;

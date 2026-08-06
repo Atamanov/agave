@@ -4,7 +4,8 @@
 //! The outer proofs are genuine OS-random gnark Groth16/BSB22 proofs. Each
 //! selected VK is compiled into the guest. Verification converts the one
 //! committed proof into the Agave batch representation and ends in exactly
-//! one six-pair B5 check: one final exponentiation and six G2 subgroup checks.
+//! one B5 check: six fold terms padded to a full eight-pair lane, one final
+//! exponentiation and eight G2 subgroup checks.
 
 #![cfg_attr(target_os = "solana", no_std)]
 
@@ -320,7 +321,7 @@ mod tests {
 
     #[cfg(feature = "research-observer")]
     #[test]
-    fn exact_outer_operation_shapes_are_one_six_pair_check() {
+    fn exact_outer_operation_shapes_are_one_padded_lane_check() {
         use solana_bn254_batch_syscall::research_observer;
 
         let _guard = VERIFICATION_LOCK.lock().expect("verification test lock");
@@ -332,7 +333,7 @@ mod tests {
             assert_eq!(verify_scenario(selector, &data), Some(true));
             assert_eq!(
                 research_observer::observed_pairing_check_shapes(),
-                vec![(6, 6)]
+                vec![(8, 8)]
             );
             assert_eq!(
                 research_observer::observed_g1_msm_point_count_list(),

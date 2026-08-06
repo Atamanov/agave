@@ -3,10 +3,12 @@ use {
         B5Attestation, CampaignMode, CampaignSpec, Cli, ColumnId, ExactMeasurement,
         ExactShapeTariff, ExecutionRequest, ExpectedCountContract, FixtureManifest,
         FixtureProvenance, FixtureRow, HostCapabilities, MeasurementKind, MsmCall, OperationKind,
-        OutputPaths, PinnedFile, RowId, SCHEMA_PREFIX, TariffEntry,
-        TariffSourceConfig, TransactionExecutor, TransactionMeasurement, builtin_expected_counts,
-        expected_trace, render_report, run_campaign,
+        OperationTrace, OutputPaths, PAIRING_CHECK_CAP, PinnedFile, RowId,
+        SCHEMA_PREFIX, TariffEntry, TariffSourceConfig, TransactionExecutor,
+        TransactionMeasurement, builtin_expected_counts, expected_trace, lane_pad, render_report,
+        run_campaign,
     },
+    solana_program_runtime::execution_budget::SVMTransactionExecutionCost,
     std::{
         collections::{BTreeMap, BTreeSet},
         ffi::OsString,
@@ -336,6 +338,26 @@ fn total_pairs(trace: &solana_bn254_decision_bench::OperationTrace) -> u32 {
         .sum()
 }
 
+/// What the batch tariff charges for a trace's pairing calls.
+///
+/// Pair count stopped ranking the columns when lane padding landed: the 8-wide
+/// kernel makes a full lane cheaper than the partial one it completes, so a
+/// column can run more pairs for less. The charge is what the ranking is
+/// about, and it is the same function the renderer prices with.
+fn batch_pairing_cu(trace: &OperationTrace) -> u64 {
+    let cost = SVMTransactionExecutionCost::default();
+    trace
+        .pairing_checks
+        .iter()
+        .chain(&trace.pairing_maps)
+        .map(|call| {
+            u64::from(call.calls).saturating_mul(
+                cost.alt_bn128_pairing_cost(call.full_pairs.into(), call.registered_pairs.into()),
+            )
+        })
+        .sum()
+}
+
 fn registered_pairs(trace: &solana_bn254_decision_bench::OperationTrace) -> u32 {
     trace
         .pairing_checks
@@ -401,8 +423,8 @@ fn batch_column_folds_into_one_final_exponentiation() {
             "{row:?}: batching must reach exactly one pairing syscall"
         );
         assert!(
-            total_pairs(&trace) <= total_pairs(&current),
-            "{row:?}: batching must never run more pairs than verifying each proof alone"
+            batch_pairing_cu(&trace) <= batch_pairing_cu(&current),
+            "{row:?}: batching must never cost more than verifying each proof alone"
         );
     }
 }
@@ -421,8 +443,9 @@ fn pair_folding_happens_only_where_the_statements_share_structure() {
             assert!(batch < current, "{row:?}: {batch} !< {current}");
         } else {
             assert_eq!(
-                batch, current,
-                "{row:?}: distinct Groth16 keys have no pairs to fold"
+                batch,
+                current.saturating_add(lane_pad(current, 0, PAIRING_CHECK_CAP)),
+                "{row:?}: distinct Groth16 keys have no pairs to fold, only a lane to fill"
             );
         }
     }
@@ -471,11 +494,12 @@ fn recursion_column_costs_the_same_pairing_work_on_every_row() {
         "recursion must not vary its pairing shape by row: {shapes:?}"
     );
     let (checks, subgroup_checks) = shapes.into_iter().next().expect("one shape");
+    // Six fold terms padded to a full lane.
     assert_eq!(
         checks,
-        vec![solana_bn254_decision_bench::PairingCall::full(6, 1)]
+        vec![solana_bn254_decision_bench::PairingCall::full(8, 1)]
     );
-    assert_eq!(subgroup_checks, 6);
+    assert_eq!(subgroup_checks, 8);
 
     // One outer Groth16/BSB22 verification is six MSM calls. Five are single
     // points; only the gamma slot carries the outer public inputs, so that is
@@ -571,11 +595,20 @@ fn batch_fp12_column_folds_once_and_charges_one_gt_target_per_distinct_key() {
 #[test]
 fn pairing_work_ranks_current_then_batch_then_registry() {
     for row in RowId::ALL {
-        let current = total_pairs(&expected_trace(row, ColumnId::Current));
-        let batch = total_pairs(&expected_trace(row, ColumnId::BatchB5));
-        let registry = total_pairs(&expected_trace(row, ColumnId::RegistryB5));
-        assert!(current >= batch, "{row:?}: {current} !>= {batch}");
-        assert_eq!(batch, registry, "{row:?}: {batch} != {registry}");
+        let current = expected_trace(row, ColumnId::Current);
+        let batch = expected_trace(row, ColumnId::BatchB5);
+        let registry = expected_trace(row, ColumnId::RegistryB5);
+        assert!(
+            batch_pairing_cu(&current) >= batch_pairing_cu(&batch),
+            "{row:?}: {} !>= {}",
+            batch_pairing_cu(&current),
+            batch_pairing_cu(&batch)
+        );
+        assert_eq!(
+            total_pairs(&batch),
+            total_pairs(&registry),
+            "{row:?}: registration must not change the pair count"
+        );
     }
 }
 

@@ -216,8 +216,8 @@
       "trace": {
         "pairing_checks": [
           {
-            "pairs": 6,
-            "full_pairs": 6,
+            "pairs": 8,
+            "full_pairs": 8,
             "registered_pairs": 0,
             "calls": 1
           }
@@ -251,7 +251,7 @@
         ],
         "gt_target_multiexp_calls": [],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 6,
+        "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
@@ -339,8 +339,8 @@
         "pairing_checks": [],
         "pairing_maps": [
           {
-            "pairs": 7,
-            "full_pairs": 7,
+            "pairs": 9,
+            "full_pairs": 9,
             "registered_pairs": 0,
             "calls": 1
           }
@@ -377,7 +377,7 @@
         ],
         "gt_target_multiexp_calls": [],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 7,
+        "g2_subgroup_checks": 9,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
@@ -616,8 +616,8 @@
       "trace": {
         "pairing_checks": [
           {
-            "pairs": 6,
-            "full_pairs": 6,
+            "pairs": 8,
+            "full_pairs": 8,
             "registered_pairs": 0,
             "calls": 1
           }
@@ -651,7 +651,7 @@
         ],
         "gt_target_multiexp_calls": [],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 6,
+        "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
@@ -727,8 +727,8 @@
         "pairing_checks": [],
         "pairing_maps": [
           {
-            "pairs": 6,
-            "full_pairs": 6,
+            "pairs": 8,
+            "full_pairs": 8,
             "registered_pairs": 0,
             "calls": 1
           }
@@ -763,7 +763,7 @@
           }
         ],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 6,
+        "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
@@ -834,8 +834,8 @@
       "trace": {
         "pairing_checks": [
           {
-            "pairs": 12,
-            "full_pairs": 12,
+            "pairs": 16,
+            "full_pairs": 16,
             "registered_pairs": 0,
             "calls": 1
           }
@@ -893,7 +893,7 @@
         ],
         "gt_target_multiexp_calls": [],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 12,
+        "g2_subgroup_checks": 16,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
@@ -936,8 +936,8 @@
       "trace": {
         "pairing_checks": [
           {
-            "pairs": 12,
-            "full_pairs": 3,
+            "pairs": 16,
+            "full_pairs": 7,
             "registered_pairs": 9,
             "calls": 1
           }
@@ -995,7 +995,7 @@
         ],
         "gt_target_multiexp_calls": [],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 3,
+        "g2_subgroup_checks": 7,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
@@ -1038,8 +1038,8 @@
       "trace": {
         "pairing_checks": [
           {
-            "pairs": 6,
-            "full_pairs": 6,
+            "pairs": 8,
+            "full_pairs": 8,
             "registered_pairs": 0,
             "calls": 1
           }
@@ -1073,7 +1073,7 @@
         ],
         "gt_target_multiexp_calls": [],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 6,
+        "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
@@ -1372,8 +1372,8 @@
       "trace": {
         "pairing_checks": [
           {
-            "pairs": 6,
-            "full_pairs": 6,
+            "pairs": 8,
+            "full_pairs": 8,
             "registered_pairs": 0,
             "calls": 1
           }
@@ -1407,7 +1407,7 @@
         ],
         "gt_target_multiexp_calls": [],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 6,
+        "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [
@@ -1646,8 +1646,8 @@
       "trace": {
         "pairing_checks": [
           {
-            "pairs": 6,
-            "full_pairs": 6,
+            "pairs": 8,
+            "full_pairs": 8,
             "registered_pairs": 0,
             "calls": 1
           }
@@ -1681,7 +1681,7 @@
         ],
         "gt_target_multiexp_calls": [],
         "final_exponentiations": 1,
-        "g2_subgroup_checks": 6,
+        "g2_subgroup_checks": 8,
         "stock_g1_additions": 0,
         "stock_g1_multiplications": 0,
         "fr_lincomb_calls": [

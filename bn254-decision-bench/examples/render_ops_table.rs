@@ -78,6 +78,11 @@ fn main() {
          kMSM(np) k MSM syscalls over n points · GT(t) target multiexp \u{b7} RED(c/p) PLONK multi-VK reduction over c contexts and p proofs \u{b7} kLC(nt) k scalar inner products over n terms \u{b7} kH(ns) k hash syscalls over n slices · CMP FP12 \
          identity compare. \u{2078} marks a call the 8-wide IFMA kernel takes.\n"
     );
+    println!(
+        "A full lane costs less than a partial one, so a call is padded with \
+         inert pairs to a lane boundary. That is why a marked call can carry \
+         more pairs than an unmarked one and still charge less.\n"
+    );
     print!("| Scenario |");
     for column in ColumnId::ALL {
         print!(" {} |", column.label());

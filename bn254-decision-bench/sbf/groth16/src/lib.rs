@@ -30,14 +30,15 @@ use solana_bn254::prelude::{
     alt_bn128_g1_addition_be, alt_bn128_g1_multiplication_be, alt_bn128_pairing_be,
 };
 use solana_bn254_batch_syscall::{
-    PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair, PodG2Point, PodGtElement, PodScalar,
-    PodTrustedGtExponent, Version, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
+    PAIRING_MAP_MAX_PAIRS, PAIRING_MAX_PAIRS, PodG1G2Pair, PodG1Point, PodG1RegisteredG2Pair,
+    PodG2Point, PodGtElement, PodScalar, PodTrustedGtExponent, REGISTRY_MAX_REGISTERED_PAIRS,
+    Version, alt_bn128_fr_lincomb, alt_bn128_g1_msm,
 };
 use solana_bn254_groth16_batch::{
     CurrentFp12Target, Proof, RandomizerMode, SameVkTarget, ValidatedVerifyingKey, VerifyingKey,
     Version as FoldVersion, derive_randomizer_scalars, derive_seed, fold_pairs_for_verification,
     groth16_batch_verify, groth16_current_fp12_verify, groth16_same_vk_fp12_verify,
-    validate_batch_shape,
+    lane_padding_pairs, validate_batch_shape,
 };
 #[cfg(test)]
 use solana_bn254_groth16_batch::derive_randomizers;
@@ -726,10 +727,17 @@ fn initialize_registry_v3(f: &Fixture<'_>, registry_data: &mut [u8]) -> Option<(
 #[inline(never)]
 fn verify_registry_v3(f: &Fixture<'_>, registry_data: &[u8]) -> Option<bool> {
     let (keys, proofs) = batch_inputs(f)?;
-    let pairs = fold_pairs_for_verification(&keys, &proofs, RandomizerMode::Independent).ok()?;
-    let full = pairs.get(..f.n)?;
+    let mut pairs = fold_pairs_for_verification(&keys, &proofs, RandomizerMode::Independent).ok()?;
     let registered = registered_suffix(f, &pairs, registry_data)?;
-    alt_bn128_pairing_check_registered(Version::V0, 0, full, &registered).ok()
+    // The suffix now owns the fixed-G2 terms, so the fold's tail is free for
+    // the pad. A registered pair occupies a lane like any other, so the lane
+    // decision is over the total.
+    pairs.truncate(f.n);
+    let pad = lane_padding_pairs(f.n, registered.len(), REGISTRY_MAX_REGISTERED_PAIRS);
+    if !pad.is_empty() {
+        pairs.extend_from_slice(pad);
+    }
+    alt_bn128_pairing_check_registered(Version::V0, 0, &pairs, &registered).ok()
 }
 
 #[cfg(target_os = "solana")]
@@ -772,7 +780,7 @@ fn verify_batch_fp12(f: &Fixture<'_>, registry_data: &[u8]) -> Option<bool> {
     validate_batch_shape(&keys, &proofs).ok()?;
     let seed = derive_seed(RandomizerMode::Independent, &keys, &proofs);
     let randomizers = batch_fp12_randomizers(&seed, proofs.len());
-    let (pairs, exponents) = batch_fp12_fold(&keys, &proofs, &randomizers)?;
+    let (mut pairs, exponents) = batch_fp12_fold(&keys, &proofs, &randomizers)?;
 
     let mut operands = Vec::with_capacity(f.k);
     for (key_index, exponent) in exponents {
@@ -784,6 +792,12 @@ fn verify_batch_fp12(f: &Fixture<'_>, registry_data: &[u8]) -> Option<bool> {
     }
     if pairs.len() != f.n + 2 * f.k || operands.len() != f.k {
         return None;
+    }
+    // Inert pairs leave the mapped product, and so the comparison against the
+    // registry target, exactly as it was.
+    let pad = lane_padding_pairs(pairs.len(), 0, PAIRING_MAP_MAX_PAIRS);
+    if !pad.is_empty() {
+        pairs.extend_from_slice(pad);
     }
     let mapped = alt_bn128_pairing_map(Version::V0, &pairs).ok()?;
     let target = alt_bn128_trusted_gt_multiexp(Version::V0, 0, &operands).ok()?;
@@ -806,6 +820,9 @@ pub struct PairCounts {
 /// Pair counts per case, for cross-checking documented pairing arithmetic
 /// against the code that calls the syscalls.
 pub fn pair_counts(ix_tag: u8, data: &[u8]) -> Option<PairCounts> {
+    fn padded(full: usize, registered: usize, cap: usize) -> usize {
+        full + lane_padding_pairs(full, registered, cap).len()
+    }
     let f = parse(data)?;
     let counts = match ix_tag {
         // groth16-solana builds each 4-pair list internally, one call per proof.
@@ -821,17 +838,19 @@ pub fn pair_counts(ix_tag: u8, data: &[u8]) -> Option<PairCounts> {
         },
         // The fold assembles its own pair list inside zolana-groth16-batch.
         tag::BATCH_SYSCALL => PairCounts {
-            full: f.n + 3 * f.k,
+            full: padded(f.n + 3 * f.k, 0, PAIRING_MAX_PAIRS),
             prepped: 0,
             observed: false,
         },
+        // A registered pair occupies a lane too, so the lane decision is over
+        // the total and the pad lands in the full list.
         tag::REGISTRY => PairCounts {
-            full: f.n,
+            full: padded(f.n, 3 * f.k, REGISTRY_MAX_REGISTERED_PAIRS),
             prepped: 3 * f.k,
             observed: false,
         },
         tag::BATCH_FP12 => PairCounts {
-            full: f.n + 2 * f.k,
+            full: padded(f.n + 2 * f.k, 0, PAIRING_MAP_MAX_PAIRS),
             prepped: 0,
             observed: false,
         },

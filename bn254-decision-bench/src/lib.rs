@@ -8,8 +8,8 @@ mod tariff;
 
 pub use {
     contract::{
-        builtin_expected_counts, expected_trace, reject_deprecated_or_derived_json,
-        validate_expected_counts,
+        PAIRING_CHECK_CAP, PAIRING_MAP_CAP, builtin_expected_counts, expected_trace, lane_pad,
+        reject_deprecated_or_derived_json, validate_expected_counts,
     },
     model::*,
     pricing::{

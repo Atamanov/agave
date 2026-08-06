@@ -1,6 +1,7 @@
 use {
     crate::{
         Groth16BatchError, Version,
+        lane::lane_padding_pairs,
         transcript::{RandomizerMode, derive_randomizer_scalars, derive_seed},
         vk::ValidatedVerifyingKey,
     },
@@ -46,7 +47,13 @@ pub fn groth16_batch_verify(
     proofs: &[Proof],
     mode: RandomizerMode,
 ) -> Result<bool, Groth16BatchError> {
-    let pairs = fold_pairs_for_verification(vks, proofs, mode)?;
+    let mut pairs = fold_pairs_for_verification(vks, proofs, mode)?;
+    // The pad belongs here and not in the fold: a joint verifier concatenates
+    // fold outputs and pads the concatenation once, at its own syscall.
+    let pad = lane_padding_pairs(pairs.len(), 0, PAIRING_MAX_PAIRS);
+    if !pad.is_empty() {
+        pairs.extend_from_slice(pad);
+    }
     Ok(alt_bn128_pairing_check(
         solana_bn254_batch_syscall::Version::V0,
         &pairs,
@@ -578,6 +585,24 @@ mod tests {
         let c = parse_g1(&proofs[2].c);
         proofs[2].c = g1_bytes(&c.add(g1(Fr::one())).into_affine());
         assert_eq!(verify(&vks, &proofs), Ok(false));
+    }
+
+    #[test]
+    fn test_lane_padding_moves_no_verdict() {
+        let mut rng = rng();
+        // One vanilla key folds to n + 3 terms, so these are the three batch
+        // sizes whose fold lands on a residue the rule pads.
+        for n in [2usize, 3, 4] {
+            let (_, vks, mut proofs) = vanilla_batch(&mut rng, n);
+            let folded = fold_pairs_for_verification(&vks, &proofs, Independent).unwrap();
+            let pad = lane_padding_pairs(folded.len(), 0, PAIRING_MAX_PAIRS);
+            assert!(!pad.is_empty(), "n = {n} folds to {} pairs", folded.len());
+            assert_eq!(verify(&vks, &proofs), Ok(true), "n = {n}");
+
+            let c = parse_g1(&proofs[n - 1].c);
+            proofs[n - 1].c = g1_bytes(&c.add(g1(Fr::one())).into_affine());
+            assert_eq!(verify(&vks, &proofs), Ok(false), "n = {n}");
+        }
     }
 
     #[test]

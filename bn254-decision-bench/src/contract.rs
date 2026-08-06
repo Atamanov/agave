@@ -1,7 +1,52 @@
 use {
     crate::{Error, model::*},
+    solana_program_runtime::execution_budget::{
+        ALT_BN128_PAIRING_LANE_WIDTH, SVMTransactionExecutionCost,
+    },
     std::collections::BTreeSet,
 };
+
+/// Pair limits of the pairing syscalls, from
+/// `solana_bn254_batch_syscall::{PAIRING_MAX_PAIRS, PAIRING_MAP_MAX_PAIRS}`.
+/// The bench does not link the syscall crate, which would drag a backend
+/// selection into a host build that only prices shapes.
+pub const PAIRING_CHECK_CAP: u32 = 256;
+pub const PAIRING_MAP_CAP: u32 = 18;
+
+/// Inert pairs the guests append so the call lands on the cheapest lane count.
+///
+/// Derived here from the charge itself, where the guests carry the residue
+/// table it reduces to (`solana_bn254_groth16_batch::lane`). The two
+/// derivations are independent and `tests/observed_traces` compares them.
+///
+/// Only a block of two or more pairs can be inert: `e(P, Q) = 1` forces an
+/// infinity point, and the runtime drops an infinity pair before the kernel,
+/// so it would buy a lane in the charge and not in the work. One added pair is
+/// therefore out of reach.
+pub fn lane_pad(full: u32, registered: u32, cap: u32) -> u32 {
+    let cost = SVMTransactionExecutionCost::default();
+    let charge = |pad: u32| {
+        cost.alt_bn128_pairing_cost(u64::from(full.saturating_add(pad)), u64::from(registered))
+    };
+    let pairs = full.saturating_add(registered);
+    (0..=ALT_BN128_PAIRING_LANE_WIDTH as u32)
+        .filter(|pad| *pad != 1 && pairs.saturating_add(*pad) <= cap)
+        .min_by_key(|pad| (charge(*pad), *pad))
+        .unwrap_or_default()
+}
+
+/// One boolean pairing check over `pairs` fold terms and their lane pad.
+fn padded_check(pairs: u32) -> PairingCall {
+    PairingCall::full(
+        pairs.saturating_add(lane_pad(pairs, 0, PAIRING_CHECK_CAP)),
+        1,
+    )
+}
+
+/// One pairing map over `pairs` fold terms and their lane pad.
+fn padded_map(pairs: u32) -> PairingCall {
+    PairingCall::full(pairs.saturating_add(lane_pad(pairs, 0, PAIRING_MAP_CAP)), 1)
+}
 
 fn msm(points: &[u32]) -> Vec<MsmCall> {
     points.iter().copied().map(MsmCall::one).collect()
@@ -332,10 +377,7 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
             ColumnId::BatchB5 => with_hash_syscalls(
                 with_fold_lincombs(
                     trace(
-                        vec![PairingCall::full(
-                            n.saturating_add(3u32.saturating_mul(k)),
-                            1,
-                        )],
+                        vec![padded_check(n.saturating_add(3u32.saturating_mul(k)))],
                         vec![],
                         groth_msm(row, column),
                         vec![],
@@ -350,7 +392,14 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
             ColumnId::RegistryB5 => with_hash_syscalls(
                 with_fold_lincombs(
                     trace(
-                        vec![PairingCall::registered(n, 3u32.saturating_mul(k))],
+                        vec![PairingCall::registered(
+                            n.saturating_add(lane_pad(
+                                n,
+                                3u32.saturating_mul(k),
+                                PAIRING_CHECK_CAP,
+                            )),
+                            3u32.saturating_mul(k),
+                        )],
                         vec![],
                         groth_msm(row, column),
                         vec![],
@@ -362,7 +411,7 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
             ),
             ColumnId::RecursionB5 => with_hash_syscalls(
                 with_bsb22_reduction(trace(
-                    vec![PairingCall::full(6, 1)],
+                    vec![padded_check(6)],
                     vec![],
                     groth_msm(row, column),
                     vec![],
@@ -414,10 +463,7 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
                     with_fp12_fold_lincombs(
                         trace(
                             vec![],
-                            vec![PairingCall::full(
-                                n.saturating_add(2u32.saturating_mul(k)),
-                                1,
-                            )],
+                            vec![padded_map(n.saturating_add(2u32.saturating_mul(k)))],
                             groth_msm(row, column),
                             gt_target_multiexp_calls,
                         ),
@@ -463,7 +509,7 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
         ),
         ColumnId::BatchB5 => with_hash_syscalls(
             with_multi_vk_reduce(
-                trace(vec![PairingCall::full(2, 1)], vec![], folded_msm(), vec![]),
+                trace(vec![padded_check(2)], vec![], folded_msm(), vec![]),
                 n,
             ),
             key_binding(),
@@ -471,7 +517,10 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
         ColumnId::RegistryB5 => with_hash_syscalls(
             with_multi_vk_reduce(
                 trace(
-                    vec![PairingCall::registered(0, 2)],
+                    vec![PairingCall::registered(
+                        lane_pad(0, 2, PAIRING_CHECK_CAP),
+                        2,
+                    )],
                     vec![],
                     folded_msm(),
                     vec![],
@@ -488,7 +537,7 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
             };
             with_hash_syscalls(
                 with_bsb22_reduction(trace(
-                    vec![PairingCall::full(6, 1)],
+                    vec![padded_check(6)],
                     vec![],
                     msm(outer_msm),
                     vec![],
@@ -507,7 +556,7 @@ pub fn expected_trace(row: RowId, column: ColumnId) -> OperationTrace {
         ),
         ColumnId::BatchFp12B5 => with_hash_syscalls(
             with_multi_vk_reduce(
-                trace(vec![], vec![PairingCall::full(2, 1)], folded_msm(), vec![]),
+                trace(vec![], vec![padded_map(2)], folded_msm(), vec![]),
                 n,
             ),
             key_binding(),

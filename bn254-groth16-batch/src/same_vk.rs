@@ -10,6 +10,7 @@
 use {
     crate::{
         Groth16BatchError,
+        lane::lane_padding_pairs,
         transcript::{RandomizerMode, derive_seed, small_plus_lo128},
         verify::{
             MINUS_ONE_BE, ONE_BE, Proof, fr_inner_product, fr_negate, fr_sum, fr_to_pod,
@@ -99,20 +100,30 @@ pub fn groth16_same_vk_fp12_verify(
         application_context,
         target,
     )?;
-    let pairs = fold_same_vk_target_pairs_prevalidated(vk, proofs, &randomizers)?;
+    let mut pairs = fold_same_vk_target_pairs_prevalidated(vk, proofs, &randomizers)?;
+    // Inert pairs leave the mapped product, and so the comparison against the
+    // authenticated target, exactly as it was.
+    let pad = lane_padding_pairs(pairs.len(), 0, PAIRING_MAP_MAX_PAIRS);
+    if !pad.is_empty() {
+        pairs.extend_from_slice(pad);
+    }
     let mapped = alt_bn128_pairing_map(SyscallVersion::V0, &pairs)?;
     Ok(mapped == *target)
 }
 
-/// Return the exact map shape for a valid same-VK target batch.
+/// Return the exact map shape for a valid same-VK target batch, the `n + 2`
+/// fold terms plus whatever lane padding the charge asks for.
 pub fn same_vk_target_pair_count(
     vk: &ValidatedVerifyingKey,
     proofs: &[Proof],
 ) -> Result<usize, Groth16BatchError> {
     validate_same_vk_target_shape(vk, proofs)?;
-    proofs
+    let folded = proofs
         .len()
         .checked_add(2)
+        .ok_or(Groth16BatchError::TooManyPairs)?;
+    folded
+        .checked_add(lane_padding_pairs(folded, 0, PAIRING_MAP_MAX_PAIRS).len())
         .ok_or(Groth16BatchError::TooManyPairs)
 }
 
@@ -407,10 +418,19 @@ mod tests {
                     .all(|coefficient| !coefficient.is_zero())
             );
             assert_eq!(coefficients.iter().copied().sum::<Fr>(), Fr::one());
-            assert_eq!(same_vk_target_pair_count(&vk, &proofs), Ok(n + 2));
+            let padded = n + 2 + lane_padding_pairs(n + 2, 0, PAIRING_MAP_MAX_PAIRS).len();
+            assert_eq!(same_vk_target_pair_count(&vk, &proofs), Ok(padded));
 
-            let pairs = fold_same_vk_target_pairs(&vk, &proofs, &coefficients).unwrap();
+            let mut pairs = fold_same_vk_target_pairs(&vk, &proofs, &coefficients).unwrap();
             assert_eq!(pairs.len(), n + 2);
+            assert_eq!(
+                alt_bn128_pairing_map(SyscallVersion::V0, &pairs),
+                Ok(*target.target())
+            );
+            // The padded map is the same GT element, which is what lets the
+            // verifier compare against the unchanged authenticated target.
+            pairs.extend_from_slice(lane_padding_pairs(pairs.len(), 0, PAIRING_MAP_MAX_PAIRS));
+            assert_eq!(pairs.len(), padded);
             assert_eq!(
                 alt_bn128_pairing_map(SyscallVersion::V0, &pairs),
                 Ok(*target.target())
@@ -505,6 +525,34 @@ mod tests {
             groth16_same_vk_fp12_verify(&vk, &bad, &CONTEXT, &target),
             Ok(false)
         );
+    }
+
+    #[test]
+    fn lane_padding_moves_no_verdict() {
+        // The map takes n + 2 terms, so these are the batch sizes whose fold
+        // lands on a residue the rule pads.
+        for n in [3usize, 4, 5] {
+            let (vk, proofs, target) = fixture(n);
+            assert!(
+                !lane_padding_pairs(n + 2, 0, PAIRING_MAP_MAX_PAIRS).is_empty(),
+                "n = {n} folds to {} pairs",
+                n + 2
+            );
+            assert_eq!(
+                groth16_same_vk_fp12_verify(&vk, &proofs, &CONTEXT, &target),
+                Ok(true),
+                "n = {n}"
+            );
+
+            let mut bad = proofs.clone();
+            let point = bad[n - 1].c.to_affine().unwrap();
+            bad[n - 1].c = PodG1Point::from(&(point + g1(Fr::one())).into_affine());
+            assert_eq!(
+                groth16_same_vk_fp12_verify(&vk, &bad, &CONTEXT, &target),
+                Ok(false),
+                "n = {n}"
+            );
+        }
     }
 
     #[test]
