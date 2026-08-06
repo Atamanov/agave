@@ -852,12 +852,13 @@ fn optimized_proof(proof: &Proof) -> Option<OptimizedProof> {
     })
 }
 
-/// Structural checks only. Scalar canonicality is deliberately NOT repeated
-/// here: every evaluation is converted by `optimized_fr` in `optimized_proof`
-/// and every public input by `Raw::from_be_bytes` in `prepare`, both of which
-/// reject a value at or above the modulus and fail the whole verification. All
-/// three callers reach both. Repeating it cost 31,207 CU of the n=2 cell, a
-/// tenth of the transaction, for no security property.
+/// Structural checks only. Each path rejects a scalar at or above the modulus
+/// where it consumes it, and that rejection fails the whole verification.
+///
+/// The in-guest verifiers reject an evaluation in `optimized_fr` and a public
+/// input in `Raw::from_be_bytes`. The multi-VK path copies raw bytes into the
+/// syscall buffer, so the runtime reducer rejects both in `PodScalar::to_fr`
+/// before it hashes the transcript or inverts a denominator.
 ///
 /// Key authentication is not repeated either. [`parse_account`] is the only
 /// constructor of a [`Group`], and it sets `vk_digest` from the key bytes and

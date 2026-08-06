@@ -101,6 +101,35 @@ key declares, so the per-proof and per-Lagrange terms are not separable from thi
 capture. Their sum is fitted; the split holds the per-Lagrange marginal at its
 prototype value for wider statements.
 
+## The multi-VK transcript term, unfitted
+
+The multi-VK PLONK reducer adds a transcript charge on top of the fitted scalar
+terms above:
+
+```
+transcript = 200 + 800 * contexts + 1719 * proofs + 32 * public_inputs
+```
+
+No capture measures it. The fitter produces the three scalar constants (127, 62,
+6) and nothing else, and `capture-zen5-20260805/` holds no transcript shape, so
+every coefficient here is a prototype value carried over from the same-key
+reducer. Measure it before activation.
+
+One cross-check bounds its direction. The reducer replays the six phased Keccak
+rounds per proof, one batch seed over all contexts, inputs and public signals,
+and one randomizer draw per proof. Pricing exactly those calls at the runtime's
+own `SyscallHash` tariff, 85 CU per call plus `max(10, len / 2)` per slice, gives
+the guest-equivalent cost:
+
+| shape | SyscallHash tariff | charged | over |
+|---|---:|---:|---:|
+| 2 contexts, 2 proofs, 2 public inputs | 4,670 | 5,302 | 13.5% |
+| 3 contexts, 3 proofs, 3 public inputs | 6,935 | 7,853 | 13.2% |
+
+The term therefore overcharges the hashing rather than undercharges it. That
+says nothing about the native work the reducer does around the hashing, which
+stays unmeasured.
+
 ## GT multiexp, previously provisional
 
 The published table carried `50,000 + 20,000t` against no x86 measurement.

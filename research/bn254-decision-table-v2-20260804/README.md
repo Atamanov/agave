@@ -34,7 +34,7 @@ the newly measured exact-shape tariffs. Estimates are explicitly labeled and
 cannot masquerade as current-runtime measurements; missing residuals, shapes,
 digests, or observations hard-fail.
 
-Before execution, the bench authenticates the Zolana source manifest, dirty
+Before execution, that entrypoint authenticates the Zolana source manifest, dirty
 path list, proving-key lock and prefix, every proving key, all 60 fixture files,
 and the independent 5-by-6 operation-count contract. It writes exactly:
 
@@ -46,6 +46,24 @@ and the independent 5-by-6 operation-count contract. It writes exactly:
 remains independent per proof: Groth16 performs `n` three-pair maps and PLONK
 performs `n` two-pair maps, with `n` final exponentiations and no MSM syscall.
 Only Batching + Fp12 performs one folded map and folded MSMs.
+
+## What the published tables check
+
+`TRANSACTION-TABLE.md`, `OPERATIONS-TABLE.md`, `STRUCTURE-TABLE.md` and
+`expected-counts.v1.json` are not written by the campaign entrypoint. They come
+from `bn254-decision-bench/run-pipeline.sh`, which measures the residuals with
+the collector and then renders each file with one `--example` renderer. The
+renderers read the charge schedule, the in-code operation-count matrix and
+`residuals.json`. None of them runs the fixture-manifest check above.
+
+The fixture bytes behind those residuals are still pinned. For every cell, the
+collector compares the length and SHA-256 of each file it loads against the row
+record in `fixture-manifest.real-20260805.json`, plus digests hardcoded for the
+canonical PLONK exporter manifest, each exported PLONK account and each
+recursion payload. A changed fixture stops the collector, and a failed cell
+stops the pipeline before anything is rendered. What only the campaign
+entrypoint checks is the whole 60-file set against its sealed source manifest,
+including the files no cell loads.
 
 ## Seals
 
