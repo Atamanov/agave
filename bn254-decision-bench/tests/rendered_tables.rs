@@ -43,6 +43,29 @@ fn operations_table_matches_the_committed_markdown() {
     assert_matches_committed("render_ops_table", "OPERATIONS-TABLE.md");
 }
 
+/// A pairing term must keep its call count apart from its per-call width.
+/// The two were once multiplied together, which printed five calls of four
+/// pairs as twenty pairs and hid which tariff the row was charged on.
+#[test]
+fn a_pairing_term_reports_calls_and_width_separately() {
+    let table = std::fs::read_to_string(research_dir().join("OPERATIONS-TABLE.md"))
+        .expect("OPERATIONS-TABLE.md must be committed");
+
+    assert!(
+        table.contains("5\u{d7}4ML"),
+        "the baseline row runs five pairing calls of four pairs and must say so"
+    );
+    assert!(
+        !table.contains(" 20ML"),
+        "20ML is the product of five calls and four pairs, not a shape the runtime charges"
+    );
+    // A padded lane is the whole reason the notation carries a width.
+    assert!(
+        table.contains("1\u{d7}8ML\u{2078}"),
+        "a lane-filling call must show one call of the full lane width"
+    );
+}
+
 /// The file carrying the syscall-share claim was the one table with no golden
 /// test, so a hand-edited share passed the suite.
 #[test]
