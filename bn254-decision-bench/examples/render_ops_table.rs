@@ -42,6 +42,24 @@ fn notation(column: ColumnId, trace: &OperationTrace) -> String {
     for call in &trace.gt_target_multiexp_calls {
         parts.push(format!("GT({}t)", call.targets));
     }
+    for call in &trace.plonk_multi_vk_reduce_calls {
+        parts.push(format!("RED({}c/{}p)", call.contexts, call.proofs));
+    }
+    let lincombs: u32 = trace.fr_lincomb_calls.iter().map(|c| c.calls).sum();
+    let terms: u32 = trace
+        .fr_lincomb_calls
+        .iter()
+        .map(|c| c.terms.saturating_mul(c.calls))
+        .sum();
+    if lincombs > 0 {
+        parts.push(format!("{lincombs}LC({terms}t)"));
+    }
+    if trace.hash_syscalls.calls > 0 {
+        parts.push(format!(
+            "{}H({}s)",
+            trace.hash_syscalls.calls, trace.hash_syscalls.slices
+        ));
+    }
     if matches!(column, ColumnId::CurrentFp12 | ColumnId::BatchFp12B5) {
         parts.push("CMP".to_owned());
     }
@@ -57,7 +75,7 @@ fn main() {
     println!(
         "ML live Miller pair · pML prepared pair (lines cached, subgroup paid at \
          registration) · SC G2 subgroup check · FE final exponentiation · \
-         kMSM(np) k MSM syscalls over n points · GT(t) target multiexp · CMP FP12 \
+         kMSM(np) k MSM syscalls over n points · GT(t) target multiexp \u{b7} RED(c/p) PLONK multi-VK reduction over c contexts and p proofs \u{b7} kLC(nt) k scalar inner products over n terms \u{b7} kH(ns) k hash syscalls over n slices · CMP FP12 \
          identity compare. \u{2078} marks a call the 8-wide IFMA kernel takes.\n"
     );
     print!("| Scenario |");
