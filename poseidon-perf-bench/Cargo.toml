@@ -1,0 +1,20 @@
+[package]
+name = "poseidon-perf-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Own workspace root, kept out of the agave workspace on purpose.
+[workspace]
+
+[dependencies]
+ark-bn254 = "0.5.0"
+ark-ff = "0.5.0"
+light-poseidon = "0.4.0"
+solana-poseidon = "4.0.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
