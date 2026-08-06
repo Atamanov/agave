@@ -9685,13 +9685,13 @@ mod tests {
         prepare_mockup!(invoke_context, program_id, bpf_loader::id());
 
         for (pairs, expected) in [
-            (1, 26_582),
-            (2, 35_918),
-            (3, 45_254),
-            (4, 54_590),
-            (8, 91_934),
-            (16, 166_622),
-            (18, 185_294),
+            (1, 10_455),
+            (2, 14_805),
+            (3, 19_155),
+            (4, 23_505),
+            (8, 27_160),
+            (16, 49_665),
+            (18, 61_395),
         ] {
             assert_eq!(pairing_check_cost(&invoke_context, pairs), expected);
         }
