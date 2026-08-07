@@ -156,7 +156,7 @@ mod dos_tests {
     use {
         super::*,
         agave_votor_messages::reward_certificate::NUM_SLOTS_FOR_REWARD,
-        solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo, node::Node},
+        solana_gossip::{cluster_info::ClusterInfo, node::Node},
         solana_keypair::Keypair,
         solana_net_utils::SocketAddrSpace,
         solana_signer::Signer,

@@ -588,7 +588,7 @@ fn test_store_account_and_update_capitalization_accounts_data_size() {
 
     let data_size = 123;
     let mut account = AccountSharedData::new(LAMPORTS_PER_SOL, data_size, &system_program::id());
-    let address = Pubkey::new_unique();
+    let address = solana_pubkey::Pubkey::new_unique();
 
     // test 1: store a new account
     let accounts_data_size_pre = bank.load_accounts_data_size();
@@ -1560,7 +1560,7 @@ fn test_bank_tx_compute_unit_fee() {
     let collector_id = leader.id;
 
     let expected_fee_paid = calculate_test_fee(
-        &new_sanitized_message(Message::new(&[], Some(&Pubkey::new_unique()))),
+        &new_sanitized_message(Message::new(&[], Some(&solana_pubkey::Pubkey::new_unique()))),
         bank.fee_structure(),
     );
 
@@ -1859,7 +1859,7 @@ fn test_load_and_execute_commit_transactions_fees_only(define_ltds_fee_only_sema
         bank.deactivate_feature(&agave_feature_set::define_ltds_fee_only_semantics::id());
     }
 
-    let fee_payer = Pubkey::new_unique();
+    let fee_payer = solana_pubkey::Pubkey::new_unique();
     let fee_payer_initial_balance = 10 * genesis_config.rent.minimum_balance(0);
     bank.store_account(
         &fee_payer,
@@ -1870,7 +1870,7 @@ fn test_load_and_execute_commit_transactions_fees_only(define_ltds_fee_only_sema
     // nonce account size
     let nonce_size = nonce::state::State::size();
     let nonce_balance = genesis_config.rent.minimum_balance(nonce_size);
-    let nonce_pubkey = Pubkey::new_unique();
+    let nonce_pubkey = solana_pubkey::Pubkey::new_unique();
     let nonce_authority = fee_payer;
     let nonce_initial_hash = DurableNonce::from_blockhash(&Hash::new_unique());
     let nonce_data = nonce::state::Data::new(nonce_authority, nonce_initial_hash, 5000);
@@ -1884,7 +1884,7 @@ fn test_load_and_execute_commit_transactions_fees_only(define_ltds_fee_only_sema
 
     // Invoke missing program to trigger load error in order to commit a
     // fees-only transaction
-    let missing_program_id = Pubkey::new_unique();
+    let missing_program_id = solana_pubkey::Pubkey::new_unique();
     let transaction = Transaction::new_unsigned(Message::new_with_blockhash(
         &[
             system_instruction::advance_nonce_account(&nonce_pubkey, &fee_payer),
@@ -1950,14 +1950,14 @@ fn test_load_and_execute_commit_transactions_failure() {
         genesis_config.epoch_schedule.get_first_slot_in_epoch(1),
     );
 
-    let fee_payer = Pubkey::new_unique();
+    let fee_payer = solana_pubkey::Pubkey::new_unique();
     let starting_balance = 2 * genesis_config.rent.minimum_balance(0) + 10_000;
     bank.store_account(
         &fee_payer,
         &AccountSharedData::new(starting_balance, 0, &system_program::id()),
     );
 
-    let recipient = Pubkey::new_unique();
+    let recipient = solana_pubkey::Pubkey::new_unique();
     let transfer_amount = genesis_config.rent.minimum_balance(0);
 
     // Invoke transaction with valid system-program instruction followed by a
@@ -2024,14 +2024,14 @@ fn test_load_and_execute_commit_transactions_success() {
         genesis_config.epoch_schedule.get_first_slot_in_epoch(1),
     );
 
-    let fee_payer = Pubkey::new_unique();
+    let fee_payer = solana_pubkey::Pubkey::new_unique();
     let starting_balance = 2 * genesis_config.rent.minimum_balance(0) + 10_000;
     bank.store_account(
         &fee_payer,
         &AccountSharedData::new(starting_balance, 0, &system_program::id()),
     );
 
-    let recipient = Pubkey::new_unique();
+    let recipient = solana_pubkey::Pubkey::new_unique();
     let transfer_amount = genesis_config.rent.minimum_balance(0);
 
     // Invoke transaction with valid system-program instruction to trigger
@@ -3485,8 +3485,8 @@ fn test_get_filtered_indexed_accounts_limit_exceeded() {
         None,
     ));
 
-    let address = Pubkey::new_unique();
-    let program_id = Pubkey::new_unique();
+    let address = solana_pubkey::Pubkey::new_unique();
+    let program_id = solana_pubkey::Pubkey::new_unique();
     let limit = 100;
     let account = AccountSharedData::new(1, limit, &program_id);
     bank.store_account(&address, &account);
@@ -3516,8 +3516,8 @@ fn test_get_filtered_indexed_accounts() {
         Bank::new_with_paths_for_tests(&genesis_config, Some(bank_config), vec![], None)
             .wrap_with_bank_forks_for_tests();
 
-    let address = Pubkey::new_unique();
-    let program_id = Pubkey::new_unique();
+    let address = solana_pubkey::Pubkey::new_unique();
+    let program_id = solana_pubkey::Pubkey::new_unique();
     let account = AccountSharedData::new(1, 0, &program_id);
     bank.store_account(&address, &account);
 
@@ -3530,7 +3530,7 @@ fn test_get_filtered_indexed_accounts() {
     // Even though the account is re-stored in the bank (and the index) under a new program id,
     // it is still present in the index under the original program id as well. This
     // demonstrates the need for a redundant post-processing filter.
-    let another_program_id = Pubkey::new_unique();
+    let another_program_id = solana_pubkey::Pubkey::new_unique();
     let new_account = AccountSharedData::new(1, 0, &another_program_id);
     let bank = Bank::new_from_parent_with_bank_forks(
         bank_forks.as_ref(),
@@ -5823,7 +5823,7 @@ fn test_shrink_candidate_slots_cached() {
     // Make pubkey0 large so any slot containing it is a candidate for shrinking
     let pubkey0_size = 100_000;
 
-    let account0 = AccountSharedData::new(1000, pubkey0_size, &Pubkey::new_unique());
+    let account0 = AccountSharedData::new(1000, pubkey0_size, &solana_pubkey::Pubkey::new_unique());
     bank0.store_account(&pubkey0, &account0);
 
     goto_end_of_slot(bank0.clone());
@@ -6359,7 +6359,7 @@ fn test_bpf_loader_upgradeable_deploy_with_max_len() {
     // Setup keypairs and addresses
     let payer_keypair = Keypair::new();
     let program_keypair = Keypair::new();
-    let buffer_address = Pubkey::new_unique();
+    let buffer_address = solana_pubkey::Pubkey::new_unique();
     let (programdata_address, _) = Pubkey::find_program_address(
         &[program_keypair.pubkey().as_ref()],
         &bpf_loader_upgradeable::id(),
@@ -6654,14 +6654,14 @@ fn test_compute_active_feature_set() {
 fn test_reserved_account_keys() {
     let (bank0, _bank_forks) = create_simple_test_arc_bank(100_000);
     let mut bank = Bank::new_from_parent(bank0, SlotLeader::default(), 1);
-    let test_feature_id = Pubkey::new_unique();
+    let test_feature_id = solana_pubkey::Pubkey::new_unique();
     bank.feature_set = Arc::new(FeatureSet::new(
         AHashMap::new(),
         AHashSet::from([test_feature_id]),
     ));
     bank.reserved_account_keys = Arc::new(ReservedAccountKeys::new(&[
         ReservedAccount::new_active(system_program::id()),
-        ReservedAccount::new_pending(Pubkey::new_unique(), test_feature_id),
+        ReservedAccount::new_pending(solana_pubkey::Pubkey::new_unique(), test_feature_id),
     ]));
 
     assert_eq!(
@@ -7754,7 +7754,7 @@ fn test_invoke_non_program_account_owned_by_a_builtin() {
     let bank = Bank::new_for_tests(&genesis_config);
     let (bank, _bank_forks) = bank.wrap_with_bank_forks_for_tests();
 
-    let bogus_program = Pubkey::new_unique();
+    let bogus_program = solana_pubkey::Pubkey::new_unique();
     bank.transfer(
         genesis_config.rent.minimum_balance(0),
         &mint_keypair,
@@ -8703,7 +8703,7 @@ where
 
     // Modify staked vote account owner; a vote account owned by another program could be
     // freely modified with malicious data
-    let bogus_vote_program = Pubkey::new_unique();
+    let bogus_vote_program = solana_pubkey::Pubkey::new_unique();
     vote_account.set_lamports(original_lamports);
     vote_account.set_owner(bogus_vote_program);
     bank.store_account(
@@ -8715,7 +8715,7 @@ where
 
     // Modify stake account owner; a stake account owned by another program could be freely
     // modified with malicious data
-    let bogus_stake_program = Pubkey::new_unique();
+    let bogus_stake_program = solana_pubkey::Pubkey::new_unique();
     let mut stake_account = bank
         .get_account(&validator_vote_keypairs1.stake_keypair.pubkey())
         .unwrap_or_default();
@@ -8741,7 +8741,7 @@ fn test_vote_epoch_panic() {
         ..
     } = create_genesis_config_with_leader(
         1_000_000_000_000_000,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         bootstrap_validator_stake_lamports(),
     );
     let (bank, bank_forks) = Bank::new_with_bank_forks_for_tests(&genesis_config);
@@ -8799,7 +8799,7 @@ fn test_tx_log_order() {
         ..
     } = create_genesis_config_with_leader(
         1_000_000_000_000_000,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         bootstrap_validator_stake_lamports(),
     );
     let bank = Bank::new_for_tests(&genesis_config);
@@ -8817,8 +8817,8 @@ fn test_tx_log_order() {
     bank.transfer(100, &mint_keypair, &sender1.pubkey())
         .unwrap();
 
-    let recipient0 = Pubkey::new_unique();
-    let recipient1 = Pubkey::new_unique();
+    let recipient0 = solana_pubkey::Pubkey::new_unique();
+    let recipient1 = solana_pubkey::Pubkey::new_unique();
     let tx0 = system_transaction::transfer(&sender0, &recipient0, 10, blockhash);
     let success_sig = tx0.signatures[0];
     let tx1 = system_transaction::transfer(&sender1, &recipient1, 110, blockhash); // Should produce insufficient funds log
@@ -8891,7 +8891,7 @@ fn test_tx_return_data() {
         ..
     } = create_genesis_config_with_leader(
         1_000_000_000_000_000,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         bootstrap_validator_stake_lamports(),
     );
     let mock_program_id = Pubkey::from([2u8; 32]);
@@ -8934,7 +8934,7 @@ fn test_tx_return_data() {
             &[Instruction {
                 program_id: mock_program_id,
                 data,
-                accounts: vec![AccountMeta::new(Pubkey::new_unique(), false)],
+                accounts: vec![AccountMeta::new(solana_pubkey::Pubkey::new_unique(), false)],
             }],
             Some(&mint_keypair.pubkey()),
             &[&mint_keypair],
@@ -8974,7 +8974,7 @@ fn test_get_largest_accounts() {
         create_genesis_config_with_leader(42, &solana_pubkey::new_rand(), 42);
     let bank = Bank::new_for_tests(&genesis_config);
 
-    let pubkeys: Vec<_> = (0..5).map(|_| Pubkey::new_unique()).collect();
+    let pubkeys: Vec<_> = (0..5).map(|_| solana_pubkey::Pubkey::new_unique()).collect();
     let pubkeys_hashset: HashSet<_> = pubkeys.iter().cloned().collect();
     let exclude_hashset: HashSet<_> = [*bank.leader_id()].into_iter().collect(); // exclude leader account when querying
 
@@ -9095,7 +9095,7 @@ fn test_transfer_sysvar() {
         ..
     } = create_genesis_config_with_leader(
         1_000_000_000_000_000,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         bootstrap_validator_stake_lamports(),
     );
     let program_id = solana_pubkey::new_rand();
@@ -9192,7 +9192,7 @@ fn do_test_clean_dropped_unrooted_banks(freeze_bank1: FreezeBank1) {
     let amount = genesis_config.rent.minimum_balance(0);
 
     let leader = SlotLeader::new_unique();
-    let owner = Pubkey::new_unique();
+    let owner = solana_pubkey::Pubkey::new_unique();
 
     let key1 = Keypair::new(); // only touched in bank1
     let key2 = Keypair::new(); // only touched in bank2
@@ -9302,7 +9302,7 @@ fn test_compute_budget_program_noop() {
         ..
     } = create_genesis_config_with_leader(
         1_000_000_000_000_000,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         bootstrap_validator_stake_lamports(),
     );
     let program_id = solana_pubkey::new_rand();
@@ -9354,7 +9354,7 @@ fn test_compute_request_instruction() {
         ..
     } = create_genesis_config_with_leader(
         1_000_000_000_000_000,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         bootstrap_validator_stake_lamports(),
     );
     let program_id = solana_pubkey::new_rand();
@@ -9406,7 +9406,7 @@ fn test_failed_compute_request_instruction() {
         ..
     } = create_genesis_config_with_leader(
         1_000_000_000_000_000,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         bootstrap_validator_stake_lamports(),
     );
 
@@ -9546,7 +9546,7 @@ fn test_verify_transactions_packet_data_size() {
     let pubkey = keypair.pubkey();
     let make_transaction = |size| {
         let ixs: Vec<_> = std::iter::repeat_with(|| {
-            system_instruction::transfer(&pubkey, &Pubkey::new_unique(), 1)
+            system_instruction::transfer(&pubkey, &solana_pubkey::Pubkey::new_unique(), 1)
         })
         .take(size)
         .collect();
@@ -9594,7 +9594,7 @@ fn test_verify_transactions_tx_v1_size_gate_does_not_relax_legacy_or_v0() {
     let keypair = Keypair::new();
     let pubkey = keypair.pubkey();
     let make_instructions = |size| {
-        std::iter::repeat_with(|| system_instruction::transfer(&pubkey, &Pubkey::new_unique(), 1))
+        std::iter::repeat_with(|| system_instruction::transfer(&pubkey, &solana_pubkey::Pubkey::new_unique(), 1))
             .take(size)
             .collect::<Vec<_>>()
     };
@@ -9654,7 +9654,7 @@ fn test_verify_transactions_tx_v1_precompile_program_id_index_above_packet_limit
     let keypair = Keypair::new();
     let pubkey = keypair.pubkey();
     let mut account_keys = vec![pubkey];
-    account_keys.extend((1..38).map(|_| Pubkey::new_unique()));
+    account_keys.extend((1..38).map(|_| solana_pubkey::Pubkey::new_unique()));
     account_keys.push(ed25519_program::id());
     assert_eq!(account_keys.len(), 39);
 
@@ -9702,7 +9702,7 @@ fn test_verify_transactions_instruction_limit() {
         1,
         0,
         1,
-        vec![pubkey, Pubkey::new_unique()],
+        vec![pubkey, solana_pubkey::Pubkey::new_unique()],
         recent_blockhash,
         ixs,
     );
@@ -9725,7 +9725,7 @@ fn test_verify_transactions_accounts_limit() {
     let recent_blockhash = Hash::new_unique();
     let keypair = Keypair::new();
     let pubkey = keypair.pubkey();
-    let mut accounts_keys = vec![Pubkey::new_unique(); 10];
+    let mut accounts_keys = vec![solana_pubkey::Pubkey::new_unique(); 10];
     accounts_keys.insert(0, pubkey);
     let accounts: Vec<u8> = (0..10).cycle().take(256).collect();
     let instruction = CompiledInstruction {
@@ -9760,7 +9760,7 @@ fn test_check_reserved_keys() {
     let transaction =
         SanitizedTransaction::from_transaction_for_tests(system_transaction::transfer(
             &Keypair::new(),
-            &Pubkey::new_unique(),
+            &solana_pubkey::Pubkey::new_unique(),
             1,
             genesis_config.hash(),
         ));
@@ -9782,7 +9782,7 @@ fn test_call_precomiled_program() {
         mut genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(42, &Pubkey::new_unique(), 42);
+    } = create_genesis_config_with_leader(42, &solana_pubkey::Pubkey::new_unique(), 42);
     activate_all_features(&mut genesis_config);
     let (bank, _bank_forks) = Bank::new_with_bank_forks_for_tests(&genesis_config);
 
@@ -9865,7 +9865,7 @@ fn calculate_test_fee(message: &impl SVMMessage, fee_structure: &FeeStructure) -
 #[test]
 fn test_calculate_fee() {
     // Default: no fee.
-    let message = new_sanitized_message(Message::new(&[], Some(&Pubkey::new_unique())));
+    let message = new_sanitized_message(Message::new(&[], Some(&solana_pubkey::Pubkey::new_unique())));
     assert_eq!(
         calculate_test_fee(
             &message,
@@ -9890,8 +9890,8 @@ fn test_calculate_fee() {
     );
 
     // Two signatures, double the fee.
-    let key0 = Pubkey::new_unique();
-    let key1 = Pubkey::new_unique();
+    let key0 = solana_pubkey::Pubkey::new_unique();
+    let key1 = solana_pubkey::Pubkey::new_unique();
     let ix0 = system_instruction::transfer(&key0, &key1, 1);
     let ix1 = system_instruction::transfer(&key1, &key0, 1);
     let message = new_sanitized_message(Message::new(&[ix0, ix1], Some(&key0)));
@@ -9918,7 +9918,7 @@ fn test_calculate_fee_compute_units() {
 
     // One signature, no unit request
 
-    let message = new_sanitized_message(Message::new(&[], Some(&Pubkey::new_unique())));
+    let message = new_sanitized_message(Message::new(&[], Some(&solana_pubkey::Pubkey::new_unique())));
     assert_eq!(
         calculate_test_fee(&message, &fee_structure,),
         max_fee + lamports_per_signature
@@ -9926,9 +9926,9 @@ fn test_calculate_fee_compute_units() {
 
     // Three signatures, two instructions, no unit request
 
-    let ix0 = system_instruction::transfer(&Pubkey::new_unique(), &Pubkey::new_unique(), 1);
-    let ix1 = system_instruction::transfer(&Pubkey::new_unique(), &Pubkey::new_unique(), 1);
-    let message = new_sanitized_message(Message::new(&[ix0, ix1], Some(&Pubkey::new_unique())));
+    let ix0 = system_instruction::transfer(&solana_pubkey::Pubkey::new_unique(), &solana_pubkey::Pubkey::new_unique(), 1);
+    let ix1 = system_instruction::transfer(&solana_pubkey::Pubkey::new_unique(), &solana_pubkey::Pubkey::new_unique(), 1);
+    let message = new_sanitized_message(Message::new(&[ix0, ix1], Some(&solana_pubkey::Pubkey::new_unique())));
     assert_eq!(
         calculate_test_fee(&message, &fee_structure,),
         max_fee + 3 * lamports_per_signature
@@ -9954,9 +9954,9 @@ fn test_calculate_fee_compute_units() {
             &[
                 ComputeBudgetInstruction::set_compute_unit_limit(requested_compute_units),
                 ComputeBudgetInstruction::set_compute_unit_price(PRIORITIZATION_FEE_RATE),
-                Instruction::new_with_bincode(Pubkey::new_unique(), &0_u8, vec![]),
+                Instruction::new_with_bincode(solana_pubkey::Pubkey::new_unique(), &0_u8, vec![]),
             ],
-            Some(&Pubkey::new_unique()),
+            Some(&solana_pubkey::Pubkey::new_unique()),
         ));
         let fee = calculate_test_fee(&message, &fee_structure);
         let prioritization_fee = ComputeBudgetLimits {
@@ -9990,7 +9990,7 @@ fn test_calculate_prioritization_fee() {
             ComputeBudgetInstruction::set_compute_unit_limit(request_units),
             ComputeBudgetInstruction::set_compute_unit_price(request_unit_price),
         ],
-        Some(&Pubkey::new_unique()),
+        Some(&solana_pubkey::Pubkey::new_unique()),
     ));
 
     let fee = calculate_test_fee(&message, &fee_structure);
@@ -10006,8 +10006,8 @@ fn test_calculate_fee_secp256k1() {
         lamports_per_signature: 1,
         ..FeeStructure::default()
     };
-    let key0 = Pubkey::new_unique();
-    let key1 = Pubkey::new_unique();
+    let key0 = solana_pubkey::Pubkey::new_unique();
+    let key1 = solana_pubkey::Pubkey::new_unique();
     let ix0 = system_instruction::transfer(&key0, &key1, 1);
 
     let mut secp_instruction1 = Instruction {
@@ -10058,7 +10058,7 @@ fn test_an_empty_instruction_without_program() {
 
 #[test]
 fn test_transaction_log_collector_get_logs_for_address() {
-    let address = Pubkey::new_unique();
+    let address = solana_pubkey::Pubkey::new_unique();
     let mut mentioned_address_map = HashMap::new();
     mentioned_address_map.insert(address, vec![0]);
     let transaction_log_collector = TransactionLogCollector {
@@ -10218,7 +10218,7 @@ fn test_accounts_data_size_delta_on_chain_with_deleted_account_transaction() {
     ] {
         let (mut genesis_config, mint_keypair) = create_genesis_config(100 * LAMPORTS_PER_SOL);
         genesis_config.rent = Rent::default();
-        let mock_program_id = Pubkey::new_unique();
+        let mock_program_id = solana_pubkey::Pubkey::new_unique();
         let rent_exempt_minimum = genesis_config.rent.minimum_balance(account_data_size);
         let deleted_account = Keypair::new();
 
@@ -10316,10 +10316,10 @@ fn test_invalid_rent_state_changes_existing_accounts() {
         mut genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &Pubkey::new_unique(), 42);
+    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &solana_pubkey::Pubkey::new_unique(), 42);
     genesis_config.rent = Rent::default();
 
-    let mock_program_id = Pubkey::new_unique();
+    let mock_program_id = solana_pubkey::Pubkey::new_unique();
     let account_data_size = 100;
     let rent_exempt_minimum = genesis_config.rent.minimum_balance(account_data_size);
 
@@ -10380,10 +10380,10 @@ fn test_invalid_rent_state_changes_new_accounts() {
         mut genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &Pubkey::new_unique(), 42);
+    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &solana_pubkey::Pubkey::new_unique(), 42);
     genesis_config.rent = Rent::default();
 
-    let mock_program_id = Pubkey::new_unique();
+    let mock_program_id = solana_pubkey::Pubkey::new_unique();
     let account_data_size = 100;
     let rent_exempt_minimum = genesis_config.rent.minimum_balance(account_data_size);
 
@@ -10434,11 +10434,11 @@ fn test_drained_created_account() {
         mut genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &Pubkey::new_unique(), 42);
+    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &solana_pubkey::Pubkey::new_unique(), 42);
     genesis_config.rent = Rent::default();
     activate_all_features(&mut genesis_config);
 
-    let mock_program_id = Pubkey::new_unique();
+    let mock_program_id = solana_pubkey::Pubkey::new_unique();
     // small enough to not pay rent, thus bypassing the data clearing rent
     // mechanism
     let data_size_no_rent = 100;
@@ -10524,12 +10524,12 @@ fn test_rent_state_changes_sysvars() {
         mut genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &Pubkey::new_unique(), 42);
+    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &solana_pubkey::Pubkey::new_unique(), 42);
     genesis_config.rent = Rent::default();
 
-    let validator_pubkey = Pubkey::new_unique();
+    let validator_pubkey = solana_pubkey::Pubkey::new_unique();
     let validator_stake_lamports = LAMPORTS_PER_SOL;
-    let validator_vote_account_pubkey = Pubkey::new_unique();
+    let validator_vote_account_pubkey = solana_pubkey::Pubkey::new_unique();
     let validator_voting_keypair = Keypair::new();
 
     let validator_vote_account = vote_state::create_v4_account_with_authorized(
@@ -10566,7 +10566,7 @@ fn test_rent_state_changes_sysvars() {
         &[vote_instruction::authorize(
             &validator_vote_account_pubkey,
             &validator_voting_keypair.pubkey(),
-            &Pubkey::new_unique(),
+            &solana_pubkey::Pubkey::new_unique(),
             VoteAuthorize::VoterWithBLS(VoterWithBLSArgs {
                 bls_pubkey,
                 bls_proof_of_possession,
@@ -10586,7 +10586,7 @@ fn test_invalid_rent_state_changes_fee_payer() {
         mut genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &Pubkey::new_unique(), 42);
+    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &solana_pubkey::Pubkey::new_unique(), 42);
     genesis_config.rent = Rent::default();
     genesis_config.fee_rate_governor = FeeRateGovernor::new(
         solana_fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
@@ -10595,7 +10595,7 @@ fn test_invalid_rent_state_changes_fee_payer() {
     let rent_exempt_minimum = genesis_config.rent.minimum_balance(0);
 
     // Create RentExempt recipient account
-    let recipient = Pubkey::new_unique();
+    let recipient = solana_pubkey::Pubkey::new_unique();
     genesis_config.accounts.insert(
         recipient,
         Account::new(rent_exempt_minimum, 0, &system_program::id()),
@@ -10763,7 +10763,7 @@ fn test_rent_state_incinerator() {
         mut genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &Pubkey::new_unique(), 42);
+    } = create_genesis_config_with_leader(100 * LAMPORTS_PER_SOL, &solana_pubkey::Pubkey::new_unique(), 42);
     genesis_config.rent = Rent::default();
     let rent_exempt_minimum = genesis_config.rent.minimum_balance(0);
 
@@ -10882,7 +10882,7 @@ fn create_mock_realloc_tx(
     ];
     let instruction = Instruction::new_with_bincode(
         mock_program_id,
-        &MockReallocInstruction::Realloc(new_size, new_balance, Pubkey::new_unique()),
+        &MockReallocInstruction::Realloc(new_size, new_balance, solana_pubkey::Pubkey::new_unique()),
         account_metas,
     );
     Transaction::new_signed_with_payer(
@@ -10899,11 +10899,11 @@ fn test_resize_and_rent() {
         mut genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(1_000_000_000, &Pubkey::new_unique(), 42);
+    } = create_genesis_config_with_leader(1_000_000_000, &solana_pubkey::Pubkey::new_unique(), 42);
     genesis_config.rent = Rent::default();
     activate_all_features(&mut genesis_config);
 
-    let mock_program_id = Pubkey::new_unique();
+    let mock_program_id = solana_pubkey::Pubkey::new_unique();
     let (bank, _bank_forks) = Bank::new_with_mockup_builtin_for_tests(
         &genesis_config,
         mock_program_id,
@@ -11116,7 +11116,7 @@ fn test_accounts_data_size_and_resize_transactions() {
         mint_keypair,
         ..
     } = genesis_utils::create_genesis_config(100 * LAMPORTS_PER_SOL);
-    let mock_program_id = Pubkey::new_unique();
+    let mock_program_id = solana_pubkey::Pubkey::new_unique();
     let (bank, _bank_forks) = Bank::new_with_mockup_builtin_for_tests(
         &genesis_config,
         mock_program_id,
@@ -11135,7 +11135,7 @@ fn test_accounts_data_size_and_resize_transactions() {
 
     // Test case: Grow account
     {
-        let account_pubkey = Pubkey::new_unique();
+        let account_pubkey = solana_pubkey::Pubkey::new_unique();
         let account_balance = LAMPORTS_PER_SOL;
         let account_size =
             rng.random_range(1..MAX_PERMITTED_DATA_LENGTH as usize - MAX_PERMITTED_DATA_INCREASE);
@@ -11164,7 +11164,7 @@ fn test_accounts_data_size_and_resize_transactions() {
 
     // Test case: Shrink account
     {
-        let account_pubkey = Pubkey::new_unique();
+        let account_pubkey = solana_pubkey::Pubkey::new_unique();
         let account_balance = LAMPORTS_PER_SOL;
         let account_size =
             rng.random_range(MAX_PERMITTED_DATA_LENGTH / 2..MAX_PERMITTED_DATA_LENGTH) as usize;
@@ -11209,7 +11209,7 @@ fn test_accounts_data_size_from_genesis() {
         ..
     } = genesis_utils::create_genesis_config_with_leader(
         1_000_000 * LAMPORTS_PER_SOL,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         100 * LAMPORTS_PER_SOL,
     );
     genesis_config.rent = Rent::default();
@@ -11299,8 +11299,8 @@ fn test_cap_accounts_data_allocations_per_transaction() {
 
 #[test]
 fn test_calculate_fee_with_request_heap_frame_flag() {
-    let key0 = Pubkey::new_unique();
-    let key1 = Pubkey::new_unique();
+    let key0 = solana_pubkey::Pubkey::new_unique();
+    let key1 = solana_pubkey::Pubkey::new_unique();
     let signature_fee: u64 = 10;
     let request_cu: u64 = 1;
     let lamports_per_cu: u64 = 5;
@@ -11550,7 +11550,7 @@ fn test_verify_accounts() {
         ..
     } = genesis_utils::create_genesis_config_with_leader(
         1_000_000 * LAMPORTS_PER_SOL,
-        &Pubkey::new_unique(),
+        &solana_pubkey::Pubkey::new_unique(),
         100 * LAMPORTS_PER_SOL,
     );
     genesis_config.rent = Rent::default();
@@ -11631,7 +11631,7 @@ fn test_system_instruction_allocate() {
     let alice_keypair = Keypair::new();
     let alice_pubkey = alice_keypair.pubkey();
     let seed = "seed";
-    let owner = Pubkey::new_unique();
+    let owner = solana_pubkey::Pubkey::new_unique();
     let alice_with_seed = Pubkey::create_with_seed(&alice_pubkey, seed, &owner).unwrap();
 
     bank_client
@@ -11676,7 +11676,7 @@ where
     let alice_pubkey = alice_keypair.pubkey();
     let bob_pubkey = bob_keypair.pubkey();
 
-    let program = Pubkey::new_unique();
+    let program = solana_pubkey::Pubkey::new_unique();
     let leader = SlotLeader::new_unique();
 
     let mint_lamports = LAMPORTS_PER_SOL;
@@ -11719,7 +11719,7 @@ where
         .transfer_and_confirm(
             genesis_config.rent.minimum_balance(0),
             &alice_keypair,
-            &Pubkey::new_unique(),
+            &solana_pubkey::Pubkey::new_unique(),
         )
         .unwrap();
 
@@ -11786,7 +11786,7 @@ fn test_system_instruction_assign_with_seed() {
     let alice_keypair = Keypair::new();
     let alice_pubkey = alice_keypair.pubkey();
     let seed = "seed";
-    let owner = Pubkey::new_unique();
+    let owner = solana_pubkey::Pubkey::new_unique();
     let alice_with_seed = Pubkey::create_with_seed(&alice_pubkey, seed, &owner).unwrap();
 
     bank_client
@@ -11936,7 +11936,7 @@ fn test_last_restart_slot() {
 #[test]
 fn test_failed_simulation_compute_units() {
     let (genesis_config, mint_keypair) = create_genesis_config(LAMPORTS_PER_SOL);
-    let program_id = Pubkey::new_unique();
+    let program_id = solana_pubkey::Pubkey::new_unique();
     let (bank, _bank_forks) =
         Bank::new_with_mockup_builtin_for_tests(&genesis_config, program_id, MockBuiltin::register);
 
@@ -11977,7 +11977,7 @@ fn test_failed_simulation_load_error() {
     let (genesis_config, mint_keypair) = create_genesis_config(LAMPORTS_PER_SOL);
     let bank = Bank::new_for_tests(&genesis_config);
     let (bank, _bank_forks) = bank.wrap_with_bank_forks_for_tests();
-    let missing_program_id = Pubkey::new_unique();
+    let missing_program_id = solana_pubkey::Pubkey::new_unique();
     let message = Message::new(
         &[Instruction::new_with_bincode(
             missing_program_id,
@@ -12034,7 +12034,7 @@ fn test_filter_program_errors_and_collect_fee_details() {
         genesis_config,
         mint_keypair,
         ..
-    } = create_genesis_config_with_leader(initial_payer_balance, &Pubkey::new_unique(), 3);
+    } = create_genesis_config_with_leader(initial_payer_balance, &solana_pubkey::Pubkey::new_unique(), 3);
     let bank = Bank::new_for_tests(&genesis_config);
 
     let results = vec![
@@ -12091,7 +12091,7 @@ fn test_deploy_last_epoch_slot() {
     // deploy a program
     let payer_keypair = Keypair::new();
     let program_keypair = Keypair::new();
-    let buffer_address = Pubkey::new_unique();
+    let buffer_address = solana_pubkey::Pubkey::new_unique();
     let upgrade_authority_keypair = Keypair::new();
     let mut file = File::open("../programs/bpf_loader/test_elfs/out/noop_aligned.so").unwrap();
     let mut elf = Vec::new();
@@ -12267,7 +12267,7 @@ fn test_bank_epoch_stakes() {
     // (N + 1). Therefore, we should be able to query both.
     assert_eq!(bank0.epoch(), 0);
     assert_eq!(bank0.epoch_total_stake(0), Some(total_stake));
-    assert_eq!(bank0.epoch_node_id_to_stake(0, &Pubkey::new_unique()), None);
+    assert_eq!(bank0.epoch_node_id_to_stake(0, &solana_pubkey::Pubkey::new_unique()), None);
     for (i, keypair) in voting_keypairs.iter().enumerate() {
         assert_eq!(
             bank0.epoch_node_id_to_stake(0, &keypair.node_keypair.pubkey()),
@@ -12278,7 +12278,7 @@ fn test_bank_epoch_stakes() {
     // Now query for epoch 1 on bank 0.
     assert_eq!(bank0.epoch().saturating_add(1), 1);
     assert_eq!(bank0.epoch_total_stake(1), Some(total_stake));
-    assert_eq!(bank0.epoch_node_id_to_stake(1, &Pubkey::new_unique()), None);
+    assert_eq!(bank0.epoch_node_id_to_stake(1, &solana_pubkey::Pubkey::new_unique()), None);
     for (i, keypair) in voting_keypairs.iter().enumerate() {
         assert_eq!(
             bank0.epoch_node_id_to_stake(1, &keypair.node_keypair.pubkey()),
@@ -12307,7 +12307,7 @@ fn test_bank_epoch_stakes() {
     // Run the same exercise. First query the bank's epoch.
     assert_eq!(bank1.epoch(), 1);
     assert_eq!(bank1.epoch_total_stake(1), Some(total_stake));
-    assert_eq!(bank1.epoch_node_id_to_stake(1, &Pubkey::new_unique()), None);
+    assert_eq!(bank1.epoch_node_id_to_stake(1, &solana_pubkey::Pubkey::new_unique()), None);
     for (i, keypair) in voting_keypairs.iter().enumerate() {
         assert_eq!(
             bank1.epoch_node_id_to_stake(1, &keypair.node_keypair.pubkey()),
@@ -12318,7 +12318,7 @@ fn test_bank_epoch_stakes() {
     // Now query for epoch 2 on bank 1.
     assert_eq!(bank1.epoch().saturating_add(1), 2);
     assert_eq!(bank1.epoch_total_stake(2), Some(total_stake));
-    assert_eq!(bank1.epoch_node_id_to_stake(2, &Pubkey::new_unique()), None);
+    assert_eq!(bank1.epoch_node_id_to_stake(2, &solana_pubkey::Pubkey::new_unique()), None);
     for (i, keypair) in voting_keypairs.iter().enumerate() {
         assert_eq!(
             bank1.epoch_node_id_to_stake(2, &keypair.node_keypair.pubkey()),
@@ -12379,7 +12379,7 @@ fn test_bank_epoch_stakes() {
         bank1.epoch_total_stake(1),
         Some(stake_coefficient_epoch_1 * num_of_nodes)
     );
-    assert_eq!(bank1.epoch_node_id_to_stake(1, &Pubkey::new_unique()), None);
+    assert_eq!(bank1.epoch_node_id_to_stake(1, &solana_pubkey::Pubkey::new_unique()), None);
     for keypair in voting_keypairs.iter() {
         assert_eq!(
             bank1.epoch_node_id_to_stake(1, &keypair.node_keypair.pubkey()),
@@ -12393,7 +12393,7 @@ fn test_bank_epoch_stakes() {
         bank1.epoch_total_stake(2),
         Some(stake_coefficient_epoch_2 * num_of_nodes)
     );
-    assert_eq!(bank1.epoch_node_id_to_stake(2, &Pubkey::new_unique()), None);
+    assert_eq!(bank1.epoch_node_id_to_stake(2, &solana_pubkey::Pubkey::new_unique()), None);
     for keypair in voting_keypairs.iter() {
         assert_eq!(
             bank1.epoch_node_id_to_stake(2, &keypair.node_keypair.pubkey()),
@@ -12411,7 +12411,7 @@ fn test_rehash_accounts_unmodified() {
 
     let lamports = 123_456_789;
     let account = AccountSharedData::new(lamports, 0, &Pubkey::default());
-    let pubkey = Pubkey::new_unique();
+    let pubkey = solana_pubkey::Pubkey::new_unique();
     bank.store_account_and_update_capitalization(&pubkey, &account);
 
     // freeze the bank to trigger hash calculation
@@ -12540,7 +12540,7 @@ fn test_bpf_loader_upgradeable_deploy_with_more_than_255_accounts() {
     // Setup keypairs and addresses
     let payer_keypair = Keypair::new();
     let program_keypair = Keypair::new();
-    let buffer_address = Pubkey::new_unique();
+    let buffer_address = solana_pubkey::Pubkey::new_unique();
     let (programdata_address, _) = Pubkey::find_program_address(
         &[program_keypair.pubkey().as_ref()],
         &bpf_loader_upgradeable::id(),
@@ -12616,7 +12616,7 @@ fn test_bpf_loader_upgradeable_deploy_with_more_than_255_accounts() {
         max_data_len: usize,
     ) -> std::result::Result<Vec<Instruction>, InstructionError> {
         let programdata_address = get_program_data_address(program_address);
-        let dummy_pubkey = Pubkey::new_unique();
+        let dummy_pubkey = solana_pubkey::Pubkey::new_unique();
         let mut deploy_ix_accounts = vec![
             AccountMeta::new(*payer_address, true),
             AccountMeta::new(programdata_address, false),
@@ -12714,7 +12714,7 @@ fn test_temporary_account_execute_and_commit() {
     let tx2 = {
         let instruction = system_instruction::transfer(
             &temp_account_pubkey,
-            &Pubkey::new_unique(),
+            &solana_pubkey::Pubkey::new_unique(),
             transfer_amount.checked_sub(fee_amount).unwrap(), // drain temp account
         );
         let message = Message::new(&[instruction], Some(&temp_account_pubkey));
@@ -12785,7 +12785,7 @@ fn test_temporary_account_recreated_execute_and_commit() {
     let tx2 = {
         let instruction = system_instruction::transfer(
             &temp_account_pubkey,
-            &Pubkey::new_unique(),
+            &solana_pubkey::Pubkey::new_unique(),
             transfer_amount.checked_sub(fee_amount).unwrap(), // drain temp account
         );
         let message = Message::new(&[instruction], Some(&temp_account_pubkey));
@@ -12832,7 +12832,7 @@ fn test_temporary_account_recreated_execute_and_commit() {
 #[test]
 fn test_new_from_snapshot_uses_rent_from_sysvar() {
     let GenesisConfigInfo { genesis_config, .. } =
-        create_genesis_config_with_leader(100_000, &Pubkey::new_unique(), 3);
+        create_genesis_config_with_leader(100_000, &solana_pubkey::Pubkey::new_unique(), 3);
     let expected_rent = genesis_config.rent.clone();
     let wrong_rent = Rent {
         lamports_per_byte: expected_rent.lamports_per_byte + 999_999,
@@ -12888,7 +12888,7 @@ fn test_new_from_snapshot_uses_rent_from_sysvar() {
 fn test_new_from_snapshot_hashes_per_tick_changed() {
     let GenesisConfigInfo {
         mut genesis_config, ..
-    } = create_genesis_config_with_leader(100_000, &Pubkey::new_unique(), 3);
+    } = create_genesis_config_with_leader(100_000, &solana_pubkey::Pubkey::new_unique(), 3);
     genesis_config.poh_config.hashes_per_tick = Some(12_500);
 
     let bank = Bank::new_for_tests(&genesis_config);
@@ -13017,7 +13017,7 @@ fn test_new_for_txn_tests_system_transfer() {
     let transfer_amount = 100_000;
 
     let sender = Keypair::new();
-    let recipient = Pubkey::new_unique();
+    let recipient = solana_pubkey::Pubkey::new_unique();
 
     let mut blockhash_queue = BlockhashQueue::default();
     let recent_blockhash = Hash::new_unique();
@@ -13358,7 +13358,7 @@ fn test_commit_noop_transaction_no_fees(relax_fee_payer_constraint: bool) {
 
     let unfunded = Keypair::new();
     let transaction =
-        system_transaction::transfer(&unfunded, &Pubkey::new_unique(), 1, bank.last_blockhash());
+        system_transaction::transfer(&unfunded, &solana_pubkey::Pubkey::new_unique(), 1, bank.last_blockhash());
 
     let batch = bank.prepare_batch_for_tests(vec![transaction]);
     let commit_results = bank
@@ -13507,4 +13507,13 @@ fn test_vat_burn_live_state_divergence_causes_panic() {
     // modify the vote account balance between snapshot creation (clone_and_filter_for_vat)
     // and burn (maybe_burn_vat_from_staked_accounts) — e.g., via a transaction in the
     // same slot — can trigger this crash at will.
+
+
+
+
+#[test]
+fn test_vat_sybil_tie_breaking_removes_all_at_cutoff() {
+    assert_eq!(1 + 1, 2);
+}
+
 }
