@@ -84,7 +84,7 @@ impl PreparedG2 {
         output
     }
 
-    /// Wire form for stateless-syscall consumers: the scalar-Montgomery block
+    /// Wire form for syscall consumers, the scalar-Montgomery block
     /// alone. The radix-52 IFMA form is derived on restore, so the two limb
     /// domains can never disagree and split a fleet with mixed IFMA support.
     pub(crate) fn to_scalar_bytes(&self) -> Vec<u8> {

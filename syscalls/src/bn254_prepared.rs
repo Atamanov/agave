@@ -1,4 +1,4 @@
-//! Stateless prepared-operand BN254 operations.
+//! Prepared-operand BN254 operations.
 //!
 //! No account access anywhere in this module. Callers own storage and
 //! authentication of prepared blobs; a caller that supplies bytes it never
