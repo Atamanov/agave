@@ -60,8 +60,8 @@ pub const PAIRING_MAP_MAX_PAIRS: usize = 18;
 pub const TRUSTED_GT_MAX_TARGETS: usize = 16;
 /// Canonical account bytes for one Helius G2 Miller-line schedule.
 pub const PREPARED_G2_BYTES: usize = MILLER_PREPARED_G2_BYTES;
-/// Scalar-Montgomery wire block of one G2 Miller-line schedule: the stateless
-/// prepared-operand form. The radix-52 IFMA block is derived on restore.
+/// Scalar-Montgomery wire block of one G2 Miller-line schedule, the
+/// prepared-operand wire form. The radix-52 IFMA block is derived on restore.
 pub const PREPARED_G2_SCALAR_BYTES: usize = MILLER_PREPARED_G2_SCALAR_BYTES;
 /// Per-call cap on [`fr_lincomb`] and [`fr_batch_invert`] elements.
 pub const FR_MAX_ELEMS: usize = 2048;

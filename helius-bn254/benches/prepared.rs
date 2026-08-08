@@ -1,4 +1,4 @@
-//! Prepared-operand costs for the stateless syscall tariff.
+//! Prepared-operand costs for the syscall tariff.
 //!
 //! Three UNMEASURED charge constants depend on these curves:
 //! `alt_bn128_g2_prepare_base_cost` (g2_prepare standalone),

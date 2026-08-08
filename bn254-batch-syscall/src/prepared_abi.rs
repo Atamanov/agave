@@ -1,4 +1,4 @@
-//! Wire ABI for the stateless prepared-operand syscalls.
+//! Wire ABI for the prepared-operand syscalls.
 //!
 //! Nothing here names an account. The caller owns storage and authentication
 //! of prepared blobs; the syscalls validate encodings only, because a caller
