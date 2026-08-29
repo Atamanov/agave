@@ -144,3 +144,8 @@ required-features = ["agave-unstable-api"]
 name = "syscall_bls12_381_pairing"
 harness = false
 required-features = ["agave-unstable-api"]
+
+[[bench]]
+name = "syscall_alt_bn128_sweep"
+harness = false
+required-features = ["agave-unstable-api"]
