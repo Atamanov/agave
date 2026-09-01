@@ -1,0 +1,231 @@
+2026-08-29T18:35:14Z
+Linux narsil-agave-bench-9354 6.17.0-23-generic #23~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Tue Apr 14 16:11:48 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+pin core 2
+agave 73f5e77b24763e54958e1b6d0ee01fdf72b06c31
+agave bench/stock 05775c82914be52a0b3319ca5d743db5b259059b
+sdk stock c68b9e74c0d5d91be6d9d2c9be793cc9741ac8b9
+agave bench/ark06 2ef6b2278e3c2b1b809891a55d936c2abfa859e2
+sdk ark06 f84849b5f3b34f6b9a7ffa18b17bff8048a603c7
+agave bench/mcl 62921d12579634815e6dc73be4178821422bed53
+sdk mcl 23a3ce71dfd411084250556bfa90db16ee3c5352
+agave bench/narsil-v2 10d76c6e047a81e2fe39376e474e006cbfc0451d
+sdk narsil-v2 2648f037812184c8d36f57bc15ed301e48d733c7
+agave bench/narsil 73f5e77b24763e54958e1b6d0ee01fdf72b06c31
+sdk narsil 2648f037812184c8d36f57bc15ed301e48d733c7
+helius-narsil b3d6299009a62dc8906dc94c699219606b383821
+groth16-solana d0b84554d8ee67c059cd379b6e3293eea7b1920d
+mcl b70288469cd065b28a31764450f85238508c4d1e
+mcl archive 4b69dfd18c9cd8e273c51da39a2c8d0354d5ccf37acd7e35a3aee934f0fa9319
+mcl manifest f3b57880f328a88ad24d165e17ab612e6e32150e87e84697a5e13a1ecc4763b9
+script 2c4e31ef5f8f3e08b643e2af60cd0761165665f44e02618b35a49479afdcdbee  /root/narsil-bench/helius-narsil/bench/scripts/agave_rows_table.py
+script b405306e48ab1ffe66601f7aff212f1659ea8c3000cacdc772937589296798ab  /root/narsil-bench/helius-narsil/bench/scripts/cross_check.py
+script db2650bec8e1384a70452a4ec4e7b59eb8ebbe292eca030a8cd1ef9ac690537a  /root/narsil-bench/helius-narsil/bench/scripts/final_table.py
+script 9c995d32d862588ea31abd2a1d0d67c2ab235e062031904aa0e387f51da93a90  /root/narsil-bench/helius-narsil/bench/scripts/mcl_manifest.py
+script 26c14b135874af9c107781b28f318015f443522bdbf9cc98b205c1b9a49613fd  /root/narsil-bench/helius-narsil/bench/scripts/render_bench_svg.py
+script e11437a74c840021d8edecf7b35374acfc036bfa6a8339a1f5d0c461ce599964  /root/narsil-bench/helius-narsil/bench/scripts/run_campaign.py
+script 36e1adc0051f05219cbe1a8b891f73860536c2128f8bfe08b1a76ba401c0459a  /root/narsil-bench/helius-narsil/bench/scripts/summarize_agave_bench.py
+script f5d9708ca97655cbb15b1e808e5803bfad317d2f4e6f77176696b0ff3b3aa7bc  /root/narsil-bench/helius-narsil/bench/scripts/test_run_campaign.py
+script b66ea699f2c985d06da44d7caef7b64215b7e42c52ba647c9d862f72663bcee8  /root/narsil-bench/helius-narsil/bench/scripts/validate_results.py
+script 2770acdd8a95ee8d4c50380ef39339f9f8ca35563c9927e4a7199203ec04628d  /root/narsil-bench/helius-narsil/bench/scripts/write_lanes.py
+script 9bc6ec26cae9c5650ecc6b75b353f9cf75a452808461086b9f91d9bccf9ea8d5  /root/narsil-bench/helius-narsil/bench/scripts/agave_backend_bench.sh
+script d091ad1c15c730acf6477b919a2feeec4bab5d7fd1f10356cb4a0f247095b0c0  /root/narsil-bench/helius-narsil/bench/scripts/build_lanes.sh
+script 96cae086569eb9299709780d0433d58cf26dbaa39ee4d4e095a8bce02adf0e1a  /root/narsil-bench/helius-narsil/bench/scripts/provision.sh
+ceiling RUSTFLAGS -C target-cpu=native
+rows RUSTFLAGS -C target-cpu=native
+build env 
+agave rustc 1.98.0 (88d9e12ae 2026-08-18)
+agave cargo 1.98.0 (797e8a9bc 2026-08-05)
+narsil rustc 1.97.1 (8bab26f4f 2026-07-14)
+performance
+Architecture:                            x86_64
+CPU op-mode(s):                          32-bit, 64-bit
+Address sizes:                           52 bits physical, 57 bits virtual
+Byte Order:                              Little Endian
+CPU(s):                                  64
+On-line CPU(s) list:                     0-33,35-63
+Off-line CPU(s) list:                    34
+Vendor ID:                               AuthenticAMD
+BIOS Vendor ID:                          Advanced Micro Devices, Inc.
+Model name:                              AMD EPYC 9354P 32-Core Processor
+BIOS Model name:                         AMD EPYC 9354P 32-Core Processor                Unknown CPU @ 3.2GHz
+BIOS CPU family:                         107
+CPU family:                              25
+Model:                                   17
+Thread(s) per core:                      2
+Core(s) per socket:                      32
+Socket(s):                               1
+Stepping:                                1
+Frequency boost:                         enabled
+CPU(s) scaling MHz:                      89%
+CPU max MHz:                             3800.2410
+CPU min MHz:                             0.0000
+BogoMIPS:                                6499.84
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpuid_fault cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd amd_ppin cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid overflow_recov succor smca fsrm flush_l1d debug_swap
+Virtualization:                          AMD-V
+L1d cache:                               1 MiB (32 instances)
+L1i cache:                               1 MiB (32 instances)
+L2 cache:                                32 MiB (32 instances)
+L3 cache:                                256 MiB (8 instances)
+NUMA node(s):                            1
+NUMA node0 CPU(s):                       0-33,35-63
+Vulnerability Gather data sampling:      Not affected
+Vulnerability Ghostwrite:                Not affected
+Vulnerability Indirect target selection: Not affected
+Vulnerability Itlb multihit:             Not affected
+Vulnerability L1tf:                      Not affected
+Vulnerability Mds:                       Not affected
+Vulnerability Meltdown:                  Not affected
+Vulnerability Mmio stale data:           Not affected
+Vulnerability Old microcode:             Not affected
+Vulnerability Reg file data sampling:    Not affected
+Vulnerability Retbleed:                  Not affected
+Vulnerability Spec rstack overflow:      Mitigation; Safe RET
+Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
+Vulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+Vulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; STIBP always-on; PBRSB-eIBRS Not affected; BHI Not affected
+Vulnerability Srbds:                     Not affected
+Vulnerability Tsa:                       Mitigation; Clear CPU buffers
+Vulnerability Tsx async abort:           Not affected
+Vulnerability Vmscape:                   Mitigation; IBPB before exit to userspace
+Die	L3	Core	CPU	Avg_MHz	Busy%	Bzy_MHz	TSC_MHz	IPC	IRQ	NMI	SMI	CorWatt	PkgWatt
+-	-	-	-	3	0.08	3805	3256	0.89	8765	0	0	6.99	91.00
+0	0	0	0	2	0.06	3798	3250	0.42	63	0	0	0.22	90.66
+0	0	0	32	0	0.01	3784	3250	0.31	17	0	0
+0	0	1	1	1	0.03	3796	3250	0.23	74	0	0	0.21
+0	0	1	33	1	0.03	3794	3250	0.28	70	0	0
+0	0	2	2	2	0.04	3796	3250	0.56	75	0	0	0.20
+0	0	3	3	1	0.03	3794	3250	0.25	89	0	0	0.20
+0	0	3	35	0	0.01	3790	3250	0.35	23	0	0
+1	2	8	24	1	0.03	3796	3250	0.27	74	0	0	0.21
+1	2	8	56	1	0.02	3793	3250	0.27	63	0	0
+1	2	9	25	1	0.01	3790	3250	0.28	32	0	0	0.21
+1	2	9	57	2	0.05	3797	3250	0.26	181	0	0
+1	2	10	26	1	0.03	3795	3250	0.31	88	0	0	0.21
+1	2	10	58	1	0.02	3793	3250	0.26	50	0	0
+1	2	11	27	1	0.02	3792	3250	0.29	44	0	0	0.20
+1	2	11	59	1	0.02	3793	3250	0.25	97	0	0
+2	4	16	8	5	0.13	3798	3250	0.88	132	0	0	0.27
+2	4	16	40	31	0.82	3799	3250	1.16	1867	0	0
+2	4	17	9	1	0.02	3794	3250	0.22	59	0	0	0.26
+2	4	17	41	21	0.54	3799	3250	1.00	345	0	0
+2	4	18	10	20	0.51	3800	3250	1.21	609	0	0	0.31
+2	4	18	42	46	1.20	3800	3250	1.18	1518	0	0
+2	4	19	11	2	0.06	3797	3250	0.42	97	0	0	0.24
+2	4	19	43	1	0.02	3795	3250	0.26	72	0	0
+3	6	24	16	1	0.02	3791	3250	0.30	22	0	0	0.19
+3	6	24	48	0	0.01	3788	3250	0.32	11	0	0
+3	6	25	17	1	0.02	3794	3250	0.27	82	0	0	0.20
+3	6	25	49	1	0.01	3788	3250	0.31	35	0	0
+3	6	26	18	1	0.03	3795	3250	0.28	96	0	0	0.21
+3	6	26	50	1	0.04	3797	3250	0.22	135	0	0
+3	6	27	19	1	0.03	3795	3250	0.29	76	0	0	0.21
+3	6	27	51	1	0.02	3793	3250	0.23	101	0	0
+4	8	32	4	3	0.09	3798	3250	0.25	217	0	0	0.28
+4	8	32	36	1	0.02	3794	3250	0.34	40	0	0
+4	8	33	5	2	0.04	3797	3250	0.29	78	0	0	0.24
+4	8	33	37	1	0.04	3797	3250	0.33	97	0	0
+4	8	34	6	1	0.02	3793	3250	0.26	84	0	0	0.20
+4	8	34	38	1	0.02	3793	3250	0.35	20	0	0
+4	8	35	7	1	0.02	3794	3250	0.25	91	0	0	0.20
+4	8	35	39	0	0.01	3790	3250	0.31	39	0	0
+5	10	40	28	1	0.02	3792	3250	0.24	30	0	0	0.22
+5	10	40	60	1	0.04	3796	3250	0.51	97	0	0
+5	10	41	29	0	0.01	3787	3250	0.21	10	0	0	0.19
+5	10	41	61	1	0.02	3792	3250	0.27	87	0	0
+5	10	42	30	1	0.02	3794	3250	0.26	56	0	0	0.19
+5	10	42	62	1	0.02	3792	3250	0.27	79	0	0
+5	10	43	31	1	0.02	3794	3250	0.29	60	0	0	0.20
+5	10	43	63	1	0.02	3793	3250	0.29	126	0	0
+6	12	48	12	2	0.05	3797	3250	0.48	133	0	0	0.21
+6	12	48	44	1	0.02	3795	3250	0.24	68	0	0
+6	12	49	13	2	0.04	3797	3250	0.23	126	0	0	0.24
+6	12	49	45	1	0.03	3795	3250	0.25	87	0	0
+6	12	50	14	1	0.02	3793	3250	0.26	62	0	0	0.21
+6	12	50	46	1	0.04	3796	3250	0.34	125	0	0
+6	12	51	15	1	0.02	3795	3250	0.36	26	0	0	0.21
+6	12	51	47	1	0.02	3794	3250	0.42	48	0	0
+7	14	56	20	1	0.03	3795	3250	0.27	126	0	0	0.23
+7	14	56	52	1	0.02	3794	3250	0.29	52	0	0
+7	14	57	21	2	0.04	3796	3250	0.44	91	0	0	0.22
+7	14	57	53	1	0.02	3792	3250	0.28	67	0	0
+7	14	58	22	1	0.02	3794	3250	0.25	63	0	0	0.21
+7	14	58	54	1	0.02	3794	3250	0.28	90	0	0
+7	14	59	23	1	0.02	3793	3250	0.26	37	0	0	0.20
+7	14	59	55	3	0.07	3798	3250	2.03	56	0	0
+lane stock RUSTFLAGS unset
+binary stock target/release/deps/syscall_alt_bn128_compression-eca5c51c7534a8f9 01d490fa5e6a0147b473ca074564d1d056ac855e1988e6e8d652a13d99d1f1c7
+binary stock target/release/deps/syscall_alt_bn128_pairing-e5dfd6f943c63e3c 50bae0eba8c19008145ee6f8f60fa9779aba352393ee4979ca10675d4fd1da4a
+binary stock target/release/deps/syscall_alt_bn128_sweep-918c59d9835f4b6b c051732995e308a9e3d6fdc8cf69c0c72a158719793803a2f2aeaa9be09285bb
+binary stock target/release/deps/syscall_alt_bn128-f9c449ba9b2ed940 b8f2cb2a7ed73bf4d88c50de3fe711088a30c76237a1655e46ee88824699afd1
+binary stock target/release/deps/syscall_big_mod_exp-0fced0765465eaa0 e37d731f0a37eec57f054d74f9147bdce33d92eaa75c5c1f8635b6bc9437adfe
+binary stock target/release/deps/syscall_bls12_381_pairing-9fd0f4c6b69f6de6 59dbe0ea335dbb1fe4adf95a74851b541bcc648c53db446575fd2764bbd6a914
+binary stock target/release/deps/syscall_bls12_381-374294ccf2e60acf 3cc266fa0179979a2e56cf48b8e8e4b6e4263acf81ebb527b29376c82ec89333
+binary stock target/release/deps/syscall_curve25519-1201f26b4a8aa5e5 02febe026d67fe38884be0d92e350db23ce4f87070d371e62b06e5b51ec9f1c6
+binary stock target/release/deps/syscall_hash-daab81a7060b5887 aa9c2d0d99f9d66ef37f5e43bd6b11631d33d7c7316f5a6756460f3603a85360
+binary stock target/release/deps/syscall_poseidon-740ae8ce0bf55a40 aaa56f3fb88fa7826c4ba7ccf42c7da0bce81d6a5d53b7cc7aacbe812afe2752
+binary stock target/release/deps/syscall_secp256k1_recover-b7bd0d6351e9913b 1bda99c9d35d2289ba8f315b8f28d1abc80a556ec4efd9a6dcc277dd91225997
+lane ark06 RUSTFLAGS unset
+binary ark06 target/release/deps/syscall_alt_bn128_compression-eef14aba1afb2eff 4508d97aaa4e8389ef26854508037133ebf4771566571633ad02e669d3a84f7e
+binary ark06 target/release/deps/syscall_alt_bn128_pairing-c451e1b1ae636117 4e25f9fed6f7cb47c91dffbdf69035d8374d222e88a78df8a902bffa40b36910
+binary ark06 target/release/deps/syscall_alt_bn128_sweep-f2318986b0aedd24 3b0c6360661b5860e595e19f856c91df2a65c792fb165679d19eff4831fdcb12
+binary ark06 target/release/deps/syscall_alt_bn128-faa3418147f7c5e9 26dbbc3adda236269a69d82102b0e078d1bc5fe45dc1cdc666303f8612f22315
+binary ark06 target/release/deps/syscall_big_mod_exp-4468da345a388ff4 0ef289a963c1d15b9c5ea9348210911ce3fe95c3888cfc0de7af1f63ae9809c5
+binary ark06 target/release/deps/syscall_bls12_381_pairing-5137b8831c311e3e 89064b151389fd3ec17a9eda5401c576e89dce030046221dd1e6dfb2f8ca0e67
+binary ark06 target/release/deps/syscall_bls12_381-a7068efdb7439fdb 213cffaafd5923cd21df2eb6d68b1322d60f2e20ea0f1e601a448da23e86065f
+binary ark06 target/release/deps/syscall_curve25519-e7d2823430be080d 834b01b92b13d7556a9e8a0e94ff9529b31df91fc406866b1608a07cf85bcc49
+binary ark06 target/release/deps/syscall_hash-ce5857d95ce2618b 080caaeb48a1c177ebb87adfeecd6949235f0731f79fc4ab7e0220222860b759
+binary ark06 target/release/deps/syscall_poseidon-d299e20e14420906 6f64276601269bbc8c7a1e26c5adee4db18054b403dab0b87e40c9760fe492cb
+binary ark06 target/release/deps/syscall_secp256k1_recover-e0dd32516f456dcd a37bedaa900d984b1d6b68ec375e7df901972e881c0060487d58c19d8f162121
+lane mcl RUSTFLAGS unset
+binary mcl target/release/deps/syscall_alt_bn128_compression-708fe2a59260d57b 6ea56d8b5700e9dea58ad39baee2550c4e1a16404d8a36064f1c072496482704
+binary mcl target/release/deps/syscall_alt_bn128_pairing-159d1ec4af251dea 3c1db2aa9873bd55d78d3e49ae34ede64b72bc20333022fafb78c9b55bbc7049
+binary mcl target/release/deps/syscall_alt_bn128_sweep-bbfe47a7784385e5 f0c5eaffc2807a4c48eafc5dcdf4a094b071c2c87d66fb7b94b9d01d97793eab
+binary mcl target/release/deps/syscall_alt_bn128-111cd17fbeee6df1 8648e9ed9f88843855dabe4e8d3b8276623988cf1c41233d8a2d20f8fb9e6f39
+binary mcl target/release/deps/syscall_big_mod_exp-6788723141d7df9d 3712dfd57e57d6e72f3fa7c4ecbeeb3a149d156612967549e8db1f6b4162e5bf
+binary mcl target/release/deps/syscall_bls12_381_pairing-4e00282984a938e5 766ecaf17d0226fa5cbb097b9fcd3adf7238c9f15c6dbbb2a09dc61b94c84993
+binary mcl target/release/deps/syscall_bls12_381-e7eed18dc1e1ba27 0fdd106a40ae0bf172ba61cacb9527e624e2dd3499182fb8b66b2967c5c3c5f7
+binary mcl target/release/deps/syscall_curve25519-aa812a3069be5f72 99d5cb1bfb8acb2607f84aee3b5e7c8746a5528eb8112c9deb51a5df0c5497ac
+binary mcl target/release/deps/syscall_hash-4443793d8ad8ab2d 8defb544732b65cd0c39c552b9cd04635ca68dcc187fd6c76f71c80853eba79f
+binary mcl target/release/deps/syscall_poseidon-c38a35d5f00cf941 e50bbf77b0295e4f16ad6a88249293973dc56a9285a391e7e34db9a394662b27
+binary mcl target/release/deps/syscall_secp256k1_recover-8664e10a1738c862 4b24900f0bb5cda62fbecad9ef73f1ccb7dfdb7f8315601e8b6740d6766e6790
+lane narsil-v2 RUSTFLAGS unset
+binary narsil-v2 target/release/deps/syscall_alt_bn128_compression-9e3ba0ea339017d7 fc0904e486cdbe4ea778c71da61dae2fd9ded4eee0d6fc085957bde04b645181
+binary narsil-v2 target/release/deps/syscall_alt_bn128_pairing-6838356b6349996a 1c2b428296b4ac0421f10a3728fc73345f86d18460669830541a1da50f79786f
+binary narsil-v2 target/release/deps/syscall_alt_bn128_sweep-2e1f7101d5febb91 5b9020d86193a4c3f12cd0b500bb043cbbf9cf9cb49f217d83044ca624b65fde
+binary narsil-v2 target/release/deps/syscall_alt_bn128-2f52ee209cb1db5d 5a5f141f8c190d2513526f70db031f5d4ec6056dcc700e88e5efba456bd6df06
+binary narsil-v2 target/release/deps/syscall_big_mod_exp-283ece63aa39c8c8 983b468b6843145a62161150067518304e7ee76eeb941f0de69bf2f5560c313c
+binary narsil-v2 target/release/deps/syscall_bls12_381_pairing-dfad62d39504f9ab 8f547762aa4220ac133650bf4e63b51da251e9bed6a3827c8772f64bed0f4399
+binary narsil-v2 target/release/deps/syscall_bls12_381-b309d5373926900d e44d2a9e7a66de522c39c307fb27011bc9f086e5dda9f94dd57492b712496c8b
+binary narsil-v2 target/release/deps/syscall_curve25519-2c642ec6abc79506 9f8afa90f0056ccbdeaa0156ba871b51b6325e84d77951ebd2c141913c538c51
+binary narsil-v2 target/release/deps/syscall_hash-4d781858bb4f8845 f80591275a3f8a77d180752717b2f1319e64f2e72bc88e4eb9fe1c113f95247e
+binary narsil-v2 target/release/deps/syscall_poseidon-a3f07c0c7b1e4517 36a98cb1e62b5075ad16b168971d1baa41d07c4199ba3015290ed96e920b4ffc
+binary narsil-v2 target/release/deps/syscall_secp256k1_recover-c67c63824fd9bb19 a02f256cfc3aaac29e3889ac69d2746654933932b66380ac08819d302d61baa3
+THROTTLE-WARNING lane narsil-v2 min freq 3649088 of max 3799959
+lane narsil RUSTFLAGS -C target-cpu=native
+binary narsil target/release/deps/syscall_alt_bn128_compression-a745652d8707ce8a 12bf329dd9a1b6c091b9852cbc0e80f9f3423771f4b94f0b3449872e24a37908
+binary narsil target/release/deps/syscall_alt_bn128_pairing-c990e051e4870997 64aae1e328255ef33b97224e63ab605022144fe1858819d0072ab5605e7cf528
+binary narsil target/release/deps/syscall_alt_bn128_sweep-04816f4c7a8c5a2e 3e878015cbf060775f256d04509ea85c48f094a4f0a039de39932f19d8076a17
+binary narsil target/release/deps/syscall_alt_bn128-a7111b2d7586fadf 7c9afb3de83d1f41a6e96e0bf46dd603977703b69b39d19048ce25c28dc45eeb
+binary narsil target/release/deps/syscall_big_mod_exp-a1249e660c5bc5e7 0f6d51b5b82c15964e7a4c46e2116e8376daae7e3860ca14e1f62fb0d7d02823
+binary narsil target/release/deps/syscall_bls12_381_pairing-4af6b79f6092b52d 21c156c0cdce042afad08b30412c4c3481952e90f797c43575f873d9531f1783
+binary narsil target/release/deps/syscall_bls12_381-b3e74647c955a140 03f1eb16e3dc7377b20823a4892a5ac5c145326a7f56faf4119688f55989e968
+binary narsil target/release/deps/syscall_curve25519-145564eda37051eb fb5de2827d62a02633e420eb49c433edf7d23191875e65c21c437b776007f141
+binary narsil target/release/deps/syscall_hash-964d0b8e9357b45b c2264a5e7f777da9a1d59a193d30eedd6374ec65bc28da6283e8b3fbf6ee3d31
+binary narsil target/release/deps/syscall_poseidon-cb53a82a55f90af9 35612a10e32ed1b13f2162b3b86303ec5b19e1c5965488992a5ef2f91e1ec28a
+binary narsil target/release/deps/syscall_secp256k1_recover-6f8a7c4ddf203dc6 32cea6c6234a9be06d956957a1fee4424a5c51a32bad1f6c3100689c0eb838ae
+THROTTLE-WARNING lane narsil min freq 3673439 of max 3799966
+lane stock-aa RUSTFLAGS unset
+binary stock-aa target/release/deps/syscall_alt_bn128_compression-eca5c51c7534a8f9 01d490fa5e6a0147b473ca074564d1d056ac855e1988e6e8d652a13d99d1f1c7
+binary stock-aa target/release/deps/syscall_alt_bn128_pairing-e5dfd6f943c63e3c 50bae0eba8c19008145ee6f8f60fa9779aba352393ee4979ca10675d4fd1da4a
+binary stock-aa target/release/deps/syscall_alt_bn128_sweep-918c59d9835f4b6b c051732995e308a9e3d6fdc8cf69c0c72a158719793803a2f2aeaa9be09285bb
+binary stock-aa target/release/deps/syscall_alt_bn128-f9c449ba9b2ed940 b8f2cb2a7ed73bf4d88c50de3fe711088a30c76237a1655e46ee88824699afd1
+binary stock-aa target/release/deps/syscall_big_mod_exp-0fced0765465eaa0 e37d731f0a37eec57f054d74f9147bdce33d92eaa75c5c1f8635b6bc9437adfe
+binary stock-aa target/release/deps/syscall_bls12_381_pairing-9fd0f4c6b69f6de6 59dbe0ea335dbb1fe4adf95a74851b541bcc648c53db446575fd2764bbd6a914
+binary stock-aa target/release/deps/syscall_bls12_381-374294ccf2e60acf 3cc266fa0179979a2e56cf48b8e8e4b6e4263acf81ebb527b29376c82ec89333
+binary stock-aa target/release/deps/syscall_curve25519-1201f26b4a8aa5e5 02febe026d67fe38884be0d92e350db23ce4f87070d371e62b06e5b51ec9f1c6
+binary stock-aa target/release/deps/syscall_hash-daab81a7060b5887 aa9c2d0d99f9d66ef37f5e43bd6b11631d33d7c7316f5a6756460f3603a85360
+binary stock-aa target/release/deps/syscall_poseidon-740ae8ce0bf55a40 aaa56f3fb88fa7826c4ba7ccf42c7da0bce81d6a5d53b7cc7aacbe812afe2752
+binary stock-aa target/release/deps/syscall_secp256k1_recover-b7bd0d6351e9913b 1bda99c9d35d2289ba8f315b8f28d1abc80a556ec4efd9a6dcc277dd91225997
+lane rows RUSTFLAGS -C target-cpu=native
+binary rows bench/target/release/deps/agave_rows-b0dbadd6a2d8929c 3e790a20847a1fbe9eb2a91c386b32207f835548705dec4d5a8460cc7c6c91eb
+THROTTLE-WARNING lane rows min freq 3670090 of max 3799974
